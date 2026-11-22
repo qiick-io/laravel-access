@@ -5,9 +5,10 @@ declare(strict_types=1);
 namespace Qiick\Access\Testing;
 
 use Illuminate\Contracts\Config\Repository as ConfigRepository;
-use Illuminate\Database\ConnectionInterface;
+use Illuminate\Database\Connection;
 use Illuminate\Support\Facades\Schema;
 use RuntimeException;
+use stdClass;
 
 /**
  * Conformance helper A3: when Spatie teams are on, team_foreign_key must be
@@ -19,7 +20,7 @@ final class AssertsSpatieTeamSchema
 {
     public function __construct(
         private readonly ConfigRepository $config,
-        private readonly ConnectionInterface $connection,
+        private readonly Connection $connection,
     ) {}
 
     /**
@@ -39,15 +40,8 @@ final class AssertsSpatieTeamSchema
             );
         }
 
-        $tableNames = $this->config->get('permission.table_names', []);
-        $rolesTable = is_array($tableNames) ? ($tableNames['roles'] ?? 'roles') : 'roles';
-        $modelHasRoles = is_array($tableNames) ? ($tableNames['model_has_roles'] ?? 'model_has_roles') : 'model_has_roles';
-        $modelHasPermissions = is_array($tableNames)
-            ? ($tableNames['model_has_permissions'] ?? 'model_has_permissions')
-            : 'model_has_permissions';
-
-        foreach ([$rolesTable, $modelHasRoles, $modelHasPermissions] as $table) {
-            if (! is_string($table) || $table === '' || ! Schema::hasTable($table)) {
+        foreach ($this->teamScopedTableNames() as $table) {
+            if (! Schema::hasTable($table)) {
                 throw new RuntimeException(
                     "Spatie table [{$table}] is missing; cannot assert organisation_id uuid (A3).",
                 );
@@ -63,10 +57,36 @@ final class AssertsSpatieTeamSchema
         }
     }
 
+    /**
+     * @return list<string>
+     */
+    private function teamScopedTableNames(): array
+    {
+        $tableNames = $this->config->get('permission.table_names', []);
+        $defaults = [
+            'roles' => 'roles',
+            'model_has_roles' => 'model_has_roles',
+            'model_has_permissions' => 'model_has_permissions',
+        ];
+
+        $resolved = [];
+        foreach ($defaults as $key => $fallback) {
+            $candidate = is_array($tableNames) ? ($tableNames[$key] ?? $fallback) : $fallback;
+            if (! is_string($candidate) || $candidate === '') {
+                throw new RuntimeException(
+                    "permission.table_names.{$key} must be a non-empty string when teams are enabled (A3).",
+                );
+            }
+
+            $resolved[] = $candidate;
+        }
+
+        return $resolved;
+    }
+
     private function assertOrganisationIdIsUuid(string $table): void
     {
-        $driver = $this->connection->getDriverName();
-        if ($driver !== 'pgsql') {
+        if ($this->connection->getDriverName() !== 'pgsql') {
             return;
         }
 
@@ -75,11 +95,24 @@ final class AssertsSpatieTeamSchema
             [$table, 'organisation_id'],
         );
 
-        $dataType = is_object($row) && isset($row->data_type) ? (string) $row->data_type : '';
+        $dataType = $this->readDataType($row);
         if ($dataType !== 'uuid') {
             throw new RuntimeException(
                 "Column [{$table}.organisation_id] must be uuid on PostgreSQL when teams are enabled (A3), got [{$dataType}].",
             );
         }
+    }
+
+    private function readDataType(mixed $row): string
+    {
+        if ($row instanceof stdClass && property_exists($row, 'data_type') && is_string($row->data_type)) {
+            return $row->data_type;
+        }
+
+        if (is_array($row) && isset($row['data_type']) && is_string($row['data_type'])) {
+            return $row['data_type'];
+        }
+
+        return '';
     }
 }

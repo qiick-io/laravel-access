@@ -6,6 +6,7 @@ namespace Qiick\Access\Laravel;
 
 use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Database\DatabaseManager;
+use Illuminate\Database\Query\Builder;
 use Qiick\Access\Contracts\GroupRoleSource;
 
 /**
@@ -50,7 +51,7 @@ final class EloquentGroupRoleSource implements GroupRoleSource
             )
             ->where('user_group_user.user_id', $user->getAuthIdentifier())
             ->whereNull('user_groups.deleted_at')
-            ->where(function ($query) use ($now): void {
+            ->where(function (Builder $query) use ($now): void {
                 $query->whereNull('user_group_user.expires_at')
                     ->orWhere('user_group_user.expires_at', '>', $now);
             })
