@@ -18,6 +18,7 @@ use Qiick\Access\Contracts\GroupRoleSource;
 use Qiick\Access\Contracts\PermissionVocabulary;
 use Qiick\Access\Contracts\TeamContext;
 use RuntimeException;
+use Spatie\Permission\PermissionRegistrar;
 
 /**
  * Registers the package in a Laravel app. Auto-discovered through
@@ -27,8 +28,8 @@ use RuntimeException;
  * PR. This provider merges config, binds the scoped AccessContext and
  * ContainerActorResolver, stamps API actors onto queued jobs, clears
  * context on Octane termination (scoped bindings cover per-request/test reset),
- * and binds package-default adapters: NoTeamContext, EloquentGroupRoleSource,
- * and SpatiePermissionVocabulary when access.permission_enum is set.
+ * resets the Spatie team id at job boundaries, loads the package group
+ * migrations, and binds package-default adapters.
  *
  * Note for the boot-check PR (design §3.3 / AC12): an ActorResolver presence
  * check can never fail as designed — this provider always binds
@@ -57,13 +58,7 @@ final class AccessServiceProvider extends ServiceProvider
         $this->app->singleton(TeamContext::class, NoTeamContext::class);
 
         $this->app->singleton(GroupRoleSource::class, function (Application $app): GroupRoleSource {
-            $config = $app->make(ConfigRepository::class);
-            $groups = $config->get('access.groups', []);
-
-            return new EloquentGroupRoleSource(
-                $app->make(DatabaseManager::class)->connection(),
-                is_array($groups) ? $groups : [],
-            );
+            return new EloquentGroupRoleSource($app->make(DatabaseManager::class));
         });
 
         $this->app->singleton(PermissionVocabulary::class, function (Application $app): PermissionVocabulary {
@@ -82,6 +77,8 @@ final class AccessServiceProvider extends ServiceProvider
 
     public function boot(): void
     {
+        $this->loadMigrationsFrom(__DIR__.'/../../database/migrations');
+
         if ($this->app->runningInConsole()) {
             $this->publishes([
                 __DIR__.'/../../config/access.php' => config_path('access.php'),
@@ -120,15 +117,30 @@ final class AccessServiceProvider extends ServiceProvider
         $stamper = fn (): ActorPayloadStamper => $this->app->make(ActorPayloadStamper::class);
 
         $events->listen(JobProcessing::class, function (JobProcessing $event) use ($stamper): void {
+            $this->resetSpatieTeamId();
             $stamper()->beginJob($event->job->payload(), $event->connectionName);
         });
 
         $endJob = function (JobProcessed|JobFailed $event) use ($stamper): void {
             $stamper()->endJob($event->connectionName);
+            $this->resetSpatieTeamId();
         };
 
         $events->listen(JobProcessed::class, $endJob);
         $events->listen(JobFailed::class, $endJob);
+    }
+
+    /**
+     * Clear Spatie's process-local team id so job 2 never inherits job 1's
+     * organisation (queued-worker leak).
+     */
+    private function resetSpatieTeamId(): void
+    {
+        if (! $this->app->bound(PermissionRegistrar::class)) {
+            return;
+        }
+
+        $this->app->make(PermissionRegistrar::class)->setPermissionsTeamId(null);
     }
 
     private function eventClassExists(string $event): bool

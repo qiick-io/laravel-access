@@ -89,10 +89,17 @@ for index in "${!CLASSES[@]}"; do
   plain="$(sed $'s/\x1b\\[[0-9;]*m//g' "${output}")"
   score="$(printf '%s\n' "${plain}" | grep -oE 'Score:[[:space:]]+[0-9.]+%' | tail -1 | grep -oE '[0-9.]+' | head -1 || true)"
 
-  # A class with no mutants (e.g. NoTeamContext) cannot score below the floor.
+  # Only NoTeamContext is allowlisted for "No mutations created" (empty body).
+  # Any other class with no mutants is a mis-path or empty target and must fail.
   if printf '%s\n' "${plain}" | grep -q 'No mutations created'; then
-    score='100.00'
-    status=0
+    if [[ "${class}" == 'Qiick\Access\Laravel\NoTeamContext' ]]; then
+      score='100.00'
+      status=0
+    else
+      echo "::error::No mutations created for ${class} (expected mutants; mis-pathed class?)"
+      score='0'
+      status=1
+    fi
   fi
 
   if [[ -z "${score}" ]]; then

@@ -31,8 +31,20 @@ ignored by default. Product tests that need the guard path should call
 `access.trust_api_guard_in_console`) and `disable()` in tearDown. The resolver
 honours that flag only when `app()->environment('testing')` is true.
 
+The package ships migrations for `user_groups`, `user_group_user` and
+`user_group_role` (with `public_id`, `metadata`, membership `expires_at`).
+Table names are fixed by the package — not env-configurable. Spatie's tables
+stay Spatie's. Pre-1.0 products delete their own `create_user_groups_tables`
+migration; externa 1.x follows the additive path in the standards review.
+
+When Spatie teams are on, set `permission.column_names.team_foreign_key` to
+`organisation_id` and use uuid team columns. Products assert that with
+`Qiick\Access\Testing\AssertsSpatieTeamSchema` (A3).
+
+`EffectivePermissionResolver` (later PR) must apply group role ids **in the
+current team** when loading permissions from those roles.
+
 `externa-core` keeps a compatibility flag and shadow comparison before the
-package `Gate::before` becomes the default (design §9). No schema change is
-required for package adoption itself.
+package `Gate::before` becomes the default (design §9).
 
 Feature PRs fill the package surface; this page tracks the product-side steps.

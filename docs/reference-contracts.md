@@ -12,8 +12,8 @@ that enable Spatie teams. This page is the name and duty list for adopters.
 | `ActorResolver` | Returns the bound context; never reads request input |
 | `PermissionVocabulary` | `isPermission` / `all` over the product PermissionEnum |
 | `RoleCatalog` | `superAdminRoleName()` (today `'super-admin'`) |
-| `GroupRoleSource` | Role ids from active (non-soft-deleted) groups |
-| `TeamContext` | `currentId` / `switchTo` (Spatie team id + cache clears) |
+| `GroupRoleSource` | Role ids from active groups (not soft-deleted, membership not expired). Ids are instance-level; `EffectivePermissionResolver` must load their permissions **in the current Spatie team** |
+| `TeamContext` | `currentId` / `switchTo` (Spatie team id + cache clears). Products that enable teams set `permission.column_names.team_foreign_key` to `organisation_id` (A3) |
 | `TwoFactorPolicy` | Required / usable factor / any method enabled |
 | `TwoFactorResponder` | `enrol` / `unavailable` HTTP responses |
 | `AuthorizationResponder` | `forbidden` HTTP response for permission middleware |

@@ -29,5 +29,31 @@ abstract class PackageTestCase extends TestCase
     protected function defineEnvironment($app): void
     {
         $app['config']->set('app.key', 'base64:'.base64_encode(random_bytes(32)));
+
+        $connection = getenv('DB_CONNECTION') ?: 'testing';
+        $app['config']->set('database.default', $connection);
+
+        if ($connection === 'sqlite') {
+            $app['config']->set('database.connections.sqlite', [
+                'driver' => 'sqlite',
+                'database' => getenv('DB_DATABASE') ?: ':memory:',
+                'prefix' => '',
+                'foreign_key_constraints' => true,
+            ]);
+        }
+
+        if (in_array($connection, ['mysql', 'mariadb', 'pgsql'], true)) {
+            $app['config']->set("database.connections.{$connection}", [
+                'driver' => $connection === 'mariadb' ? 'mariadb' : $connection,
+                'host' => getenv('DB_HOST') ?: '127.0.0.1',
+                'port' => getenv('DB_PORT') ?: ($connection === 'pgsql' ? '5432' : '3306'),
+                'database' => getenv('DB_DATABASE') ?: 'laravel_access',
+                'username' => getenv('DB_USERNAME') ?: ($connection === 'pgsql' ? 'postgres' : 'root'),
+                'password' => getenv('DB_PASSWORD') !== false ? (string) getenv('DB_PASSWORD') : '',
+                'charset' => $connection === 'pgsql' ? 'utf8' : 'utf8mb4',
+                'prefix' => '',
+                'strict' => true,
+            ]);
+        }
     }
 }

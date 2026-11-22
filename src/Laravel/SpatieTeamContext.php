@@ -13,8 +13,12 @@ use Spatie\Permission\PermissionRegistrar;
 /**
  * TeamContext backed by Spatie's permissions team id (design §4.3 / C29).
  * switchTo sets the team id, flushes Spatie's permission cache, unsets the
- * current user's roles/permissions relations, and optionally forgets the
- * package resolver entry (wired when EffectivePermissionResolver lands).
+ * actor user's roles/permissions relations (AccessContext owner when bound,
+ * otherwise the default guard user), and optionally forgets the package
+ * resolver entry (wired when EffectivePermissionResolver lands).
+ *
+ * Products that enable teams must set permission.team_foreign_key to
+ * organisation_id (standards MUST A3 / fleet core schema).
  *
  * @api
  */
@@ -39,7 +43,7 @@ final class SpatieTeamContext implements TeamContext
         $this->registrar->setPermissionsTeamId($id);
         $this->registrar->forgetCachedPermissions();
 
-        $user = $this->auth->guard()->user();
+        $user = $this->resolveActorUser();
         if ($user === null) {
             return;
         }
@@ -52,5 +56,19 @@ final class SpatieTeamContext implements TeamContext
         if ($this->forgetUserPermissions !== null) {
             ($this->forgetUserPermissions)($user);
         }
+    }
+
+    /**
+     * Prefer the verified AccessContext owner over the default guard, so an
+     * API actor (or Gate::forUser path that entered the actor) is cleared.
+     */
+    private function resolveActorUser(): ?Authenticatable
+    {
+        $bound = AccessContext::current();
+        if ($bound?->user !== null) {
+            return $bound->user;
+        }
+
+        return $this->auth->guard()->user();
     }
 }

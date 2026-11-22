@@ -60,25 +60,6 @@ return [
 
     /*
     |--------------------------------------------------------------------------
-    | Group role tables
-    |--------------------------------------------------------------------------
-    |
-    | Fleet table names for EloquentGroupRoleSource. Soft-deleted groups are
-    | excluded with whereNull(deleted_at) on the groups table (C7).
-    |
-    */
-
-    'groups' => [
-        'table' => env('ACCESS_GROUPS_TABLE', 'user_groups'),
-        'user_pivot' => env('ACCESS_GROUP_USER_PIVOT', 'user_group_user'),
-        'role_pivot' => env('ACCESS_GROUP_ROLE_PIVOT', 'user_group_role'),
-        'user_foreign_key' => env('ACCESS_GROUP_USER_FOREIGN_KEY', 'user_id'),
-        'group_foreign_key' => env('ACCESS_GROUP_FOREIGN_KEY', 'user_group_id'),
-        'role_foreign_key' => env('ACCESS_GROUP_ROLE_FOREIGN_KEY', 'role_id'),
-    ],
-
-    /*
-    |--------------------------------------------------------------------------
     | Two-factor exemption routes
     |--------------------------------------------------------------------------
     |

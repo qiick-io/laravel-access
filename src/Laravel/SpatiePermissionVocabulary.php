@@ -22,13 +22,6 @@ final class SpatiePermissionVocabulary implements PermissionVocabulary
 
     public function __construct(string $enumClass)
     {
-        // EmptyStringToNotEmpty is equivalent: enum_exists('') still fails below.
-        if ($enumClass === '') { // @pest-mutate-ignore: EmptyStringToNotEmpty
-            throw new InvalidArgumentException(
-                'access.permission_enum must be a backed enum class name.',
-            );
-        }
-
         if (! enum_exists($enumClass) || ! is_subclass_of($enumClass, BackedEnum::class)) {
             throw new InvalidArgumentException(
                 'access.permission_enum must be a backed enum class name.',

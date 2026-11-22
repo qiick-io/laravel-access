@@ -9,9 +9,7 @@ it('merges the package defaults into the access config', function (): void {
     expect(config('access.api_guards'))->toBe([]);
     expect(config('access.trust_api_guard_in_console'))->toBeFalse();
     expect(config('access.permission_enum'))->toBeNull();
-    expect(config('access.groups.table'))->toBe('user_groups');
-    expect(config('access.groups.user_pivot'))->toBe('user_group_user');
-    expect(config('access.groups.role_pivot'))->toBe('user_group_role');
+    expect(config('access.groups'))->toBeNull();
     expect(config('access.two_factor.exempt_route_names'))->toContain('logout')
         ->and(config('access.two_factor.exempt_route_names'))->toContain('security.*');
 });

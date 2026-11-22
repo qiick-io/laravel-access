@@ -19,8 +19,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `Qiick\Access\Testing\TrustApiGuardInConsole` is enabled for product tests,
   and `Queue::createPayloadUsing` hooks left intact for other packages.
 - Package-default adapters: `NoTeamContext`, `EloquentGroupRoleSource` (soft-deleted
-  groups excluded), `SpatiePermissionVocabulary` (from `access.permission_enum`),
-  and `SpatieTeamContext` for products that enable Spatie teams.
+  groups and expired memberships excluded; fixed table names; Octane-safe
+  connection resolve), `SpatiePermissionVocabulary` (from `access.permission_enum`),
+  and `SpatieTeamContext` (clears the AccessContext actor; resets Spatie team id
+  on queue job boundaries).
+- Package migrations for `user_groups` / `user_group_user` / `user_group_role`
+  (`public_id`, `metadata`, membership `expires_at`); `AssertsSpatieTeamSchema` (A3).
 - Contracts (`@api`): `ActorKind`, `ActorContext`, `ActorResolver`,
   `PermissionVocabulary`, `RoleCatalog`, `GroupRoleSource`, `TeamContext`,
   `TwoFactorPolicy`, `TwoFactorResponder`, `AuthorizationResponder`.

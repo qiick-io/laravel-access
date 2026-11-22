@@ -5,30 +5,26 @@ declare(strict_types=1);
 namespace Qiick\Access\Laravel;
 
 use Illuminate\Contracts\Auth\Authenticatable;
-use Illuminate\Database\ConnectionInterface;
+use Illuminate\Database\DatabaseManager;
 use Qiick\Access\Contracts\GroupRoleSource;
 
 /**
- * Group roles from the fleet tables (user_groups / pivots). Soft-deleted
- * groups contribute nothing via whereNull(deleted_at) (design C7).
+ * Group roles from the package tables (user_groups / pivots). Soft-deleted
+ * groups contribute nothing (C7). Memberships whose expires_at is in the past
+ * contribute nothing (standards MUST A2 / AC15). Table names are fixed by the
+ * package migration — never env-configurable.
+ *
+ * Role ids returned here are instance-level; EffectivePermissionResolver must
+ * load those roles' permissions in the current Spatie team (design §4.1).
+ *
+ * Resolves the connection per call so a singleton binding stays Octane-safe.
  *
  * @api
  */
 final class EloquentGroupRoleSource implements GroupRoleSource
 {
-    /**
-     * @param  array{
-     *     table?: mixed,
-     *     user_pivot?: mixed,
-     *     role_pivot?: mixed,
-     *     user_foreign_key?: mixed,
-     *     group_foreign_key?: mixed,
-     *     role_foreign_key?: mixed
-     * }  $groupsConfig
-     */
     public function __construct(
-        private readonly ConnectionInterface $connection,
-        private readonly array $groupsConfig,
+        private readonly DatabaseManager $database,
     ) {}
 
     /**
@@ -36,32 +32,31 @@ final class EloquentGroupRoleSource implements GroupRoleSource
      */
     public function roleIdsFor(Authenticatable $user): array
     {
-        $groupsTable = $this->stringConfig('table', 'user_groups');
-        $userPivot = $this->stringConfig('user_pivot', 'user_group_user');
-        $rolePivot = $this->stringConfig('role_pivot', 'user_group_role');
-        $userForeignKey = $this->stringConfig('user_foreign_key', 'user_id');
-        $groupForeignKey = $this->stringConfig('group_foreign_key', 'user_group_id');
-        $roleForeignKey = $this->stringConfig('role_foreign_key', 'role_id');
+        $now = now();
 
-        $roleIds = $this->connection
-            ->table($userPivot)
+        $roleIds = $this->database->connection()
+            ->table('user_group_user')
             ->join(
-                $groupsTable,
-                "{$groupsTable}.id",
+                'user_groups',
+                'user_groups.id',
                 '=',
-                "{$userPivot}.{$groupForeignKey}",
+                'user_group_user.user_group_id',
             )
             ->join(
-                $rolePivot,
-                "{$rolePivot}.{$groupForeignKey}",
+                'user_group_role',
+                'user_group_role.user_group_id',
                 '=',
-                "{$groupsTable}.id",
+                'user_groups.id',
             )
-            ->where("{$userPivot}.{$userForeignKey}", $user->getAuthIdentifier())
-            ->whereNull("{$groupsTable}.deleted_at")
+            ->where('user_group_user.user_id', $user->getAuthIdentifier())
+            ->whereNull('user_groups.deleted_at')
+            ->where(function ($query) use ($now): void {
+                $query->whereNull('user_group_user.expires_at')
+                    ->orWhere('user_group_user.expires_at', '>', $now);
+            })
             ->distinct()
-            ->orderBy("{$rolePivot}.{$roleForeignKey}")
-            ->pluck("{$rolePivot}.{$roleForeignKey}")
+            ->orderBy('user_group_role.role_id')
+            ->pluck('user_group_role.role_id')
             ->all();
 
         $normalized = [];
@@ -72,12 +67,5 @@ final class EloquentGroupRoleSource implements GroupRoleSource
         }
 
         return $normalized;
-    }
-
-    private function stringConfig(string $key, string $default): string
-    {
-        $value = $this->groupsConfig[$key] ?? $default;
-
-        return is_string($value) && $value !== '' ? $value : $default;
     }
 }
