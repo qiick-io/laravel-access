@@ -25,19 +25,40 @@ final class PermissionedFakeUser extends FakeAuthenticatable
 
     public function roles(): object
     {
-        return new class
+        $roleNames = $this->roleNames;
+
+        return new class($roleNames)
         {
+            /**
+             * @param  list<string>  $roleNames
+             */
+            public function __construct(private array $roleNames) {}
+
             public function select(string $columns): self
             {
                 return $this;
             }
 
             /**
-             * @return list<object>
+             * @return list<object{getAttribute(string): int|string}>
              */
             public function get(mixed ...$arguments): array
             {
-                return [];
+                $ids = [];
+
+                foreach (array_values(array_filter($this->roleNames, static fn (string $name): bool => $name !== '')) as $index => $roleName) {
+                    $ids[] = new class($index + 1)
+                    {
+                        public function __construct(private int $id) {}
+
+                        public function getAttribute(string $key): int
+                        {
+                            return $this->id;
+                        }
+                    };
+                }
+
+                return $ids;
             }
         };
     }
@@ -71,10 +92,24 @@ final class PermissionedFakeUser extends FakeAuthenticatable
         );
     }
 
+    /** @var list<list<string>> */
+    public array $loadMissingCalls = [];
+
     /**
      * @param  array<int, string>  $relations
      */
-    public function loadMissing(array $relations): void {}
+    public function loadMissing(array $relations): void
+    {
+        $this->loadMissingCalls[] = array_values($relations);
+    }
+
+    /** @var list<string> */
+    public array $unsetRelations = [];
+
+    public function unsetRelation(string $relation): void
+    {
+        $this->unsetRelations[] = $relation;
+    }
 
     /**
      * @param  list<string>  $permissionNames

@@ -48,8 +48,8 @@ abstract class PackageTestCase extends TestCase
         $connection = getenv('DB_CONNECTION') ?: 'testing';
         $app['config']->set('database.default', $connection);
 
-        if ($connection === 'sqlite') {
-            $app['config']->set('database.connections.sqlite', [
+        if (in_array($connection, ['sqlite', 'testing'], true)) {
+            $app['config']->set("database.connections.{$connection}", [
                 'driver' => 'sqlite',
                 'database' => getenv('DB_DATABASE') ?: ':memory:',
                 'prefix' => '',

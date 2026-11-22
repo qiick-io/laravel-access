@@ -117,3 +117,20 @@ it('never returns false', function (): void {
 
     expect($gateBefore($user, FakePermissionEnum::CanShowUsers->value))->toBeNull();
 });
+
+it('does not grant a permission when arguments are present even without a Policy', function (): void {
+    $user = new PermissionedFakeUser(1, ['member'], [FakePermissionEnum::CanShowUsers->value]);
+    AccessContext::enter(new ActorContext(ActorKind::WebSession, $user));
+
+    $gate = Mockery::mock(Gate::class);
+    $gate->shouldReceive('getPolicyFor')->once()->with('not-a-model')->andReturn(null);
+
+    $gateBefore = new GateBefore(
+        app(ActorResolver::class),
+        makeTestResolver(),
+        app(PermissionVocabulary::class),
+        $gate,
+    );
+
+    expect($gateBefore($user, FakePermissionEnum::CanShowUsers->value, ['not-a-model']))->toBeNull();
+});

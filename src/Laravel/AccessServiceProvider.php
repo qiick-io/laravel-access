@@ -55,7 +55,8 @@ final class AccessServiceProvider extends ServiceProvider
 
         $this->app->scoped(AccessContext::class, AccessContext::class);
         $this->app->singleton(ActorPayloadStamper::class, ActorPayloadStamper::class);
-        $this->app->singleton(SpatieTeamQueueBoundary::class, SpatieTeamQueueBoundary::class);
+        // Scoped so concurrent Octane requests do not share the sync save stack.
+        $this->app->scoped(SpatieTeamQueueBoundary::class, SpatieTeamQueueBoundary::class);
 
         $this->app->scoped(ActorResolver::class, function (Application $app): ActorResolver {
             return new ContainerActorResolver(

@@ -6,6 +6,7 @@ namespace Qiick\Access;
 
 use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Support\Collection;
 use Qiick\Access\Contracts\GroupRoleSource;
 use Qiick\Access\Contracts\PermissionVocabulary;
 use Qiick\Access\Contracts\RoleCatalog;
@@ -26,7 +27,7 @@ use Spatie\Permission\PermissionRegistrar;
 final class EffectivePermissionResolver
 {
     /**
-     * @var array<string, array{permissions: list<string>, role_names: list<string>, role_ids: list<int|string>}>
+     * @var array<string, array{permissions: list<string>, role_names: list<string>, role_ids: list<string>}>
      */
     private array $cache = [];
 
@@ -47,7 +48,7 @@ final class EffectivePermissionResolver
     }
 
     /**
-     * @return list<int|string>
+     * @return list<string>
      */
     public function effectiveRoleIds(Authenticatable $user): array
     {
@@ -117,7 +118,7 @@ final class EffectivePermissionResolver
     }
 
     /**
-     * @return array{permissions: list<string>, role_names: list<string>, role_ids: list<int|string>}
+     * @return array{permissions: list<string>, role_names: list<string>, role_ids: list<string>}
      */
     private function resolve(Authenticatable $user): array
     {
@@ -132,16 +133,16 @@ final class EffectivePermissionResolver
         $groupRoleIds = $this->groupRoles->roleIdsFor($user);
         $groupRoleNames = $this->roleNamesForIds($groupRoleIds);
 
-        $roleIds = $this->uniqueSortedIds(array_merge($directRoleIds, $groupRoleIds));
-        $roleNames = $this->uniqueSortedStrings(array_merge($directRoleNames, $groupRoleNames));
+        $roleIds = $this->uniqueSortedIds([...$directRoleIds, ...$groupRoleIds]);
+        $roleNames = $this->uniqueSortedStrings([...$directRoleNames, ...$groupRoleNames]);
 
         if (in_array($this->roleCatalog->superAdminRoleName(), $roleNames, true)) {
             $permissions = $this->vocabulary->all();
         } else {
-            $permissions = $this->uniqueSortedStrings(array_merge(
-                $this->pluckPermissionNames($user),
-                $this->permissionNamesForRoleIds($groupRoleIds),
-            ));
+            $permissions = $this->uniqueSortedStrings([
+                ...$this->pluckPermissionNames($user),
+                ...$this->permissionNamesForRoleIds($groupRoleIds),
+            ]);
         }
 
         return $this->cache[$cacheKey] = [
@@ -163,10 +164,10 @@ final class EffectivePermissionResolver
         }
 
         try {
-            return $this->uniqueSortedStrings(array_merge(
-                $this->pluckRoleNames($user),
-                $this->roleNamesForIds($this->groupRoles->roleIdsFor($user)),
-            ));
+            return $this->uniqueSortedStrings([
+                ...$this->pluckRoleNames($user),
+                ...$this->roleNamesForIds($this->groupRoles->roleIdsFor($user)),
+            ]);
         } finally {
             if ($teamsWereEnabled) {
                 $this->registrar->teams = true;
@@ -176,29 +177,15 @@ final class EffectivePermissionResolver
 
     private function teamKey(): string
     {
-        $teamId = $this->teamContext->currentId();
-
-        if ($teamId === null) {
-            return 'null';
-        }
-
-        if (is_int($teamId)) {
-            return (string) $teamId;
-        }
-
-        return $teamId;
+        return var_export($this->teamContext->currentId(), true);
     }
 
     private function userKey(Authenticatable $user): string
     {
         $identifier = $user->getAuthIdentifier();
 
-        if (is_int($identifier)) {
+        if (is_int($identifier) || is_string($identifier)) {
             return (string) $identifier;
-        }
-
-        if (is_string($identifier)) {
-            return $identifier;
         }
 
         return 'unknown';
@@ -209,27 +196,25 @@ final class EffectivePermissionResolver
      */
     private function pluckRoleIds(Authenticatable $user): array
     {
-        if (! is_callable([$user, 'roles'])) {
+        if (! method_exists($user, 'roles')) {
             return [];
         }
 
-        $relation = call_user_func([$user, 'roles']);
-        if (! is_object($relation) || ! is_callable([$relation, 'get'])) {
-            return [];
-        }
+        $relation = $user->roles();
 
-        $roles = call_user_func([$relation, 'get'], ['id']);
-        if (! is_iterable($roles)) {
+        if (! is_object($relation) || ! method_exists($relation, 'get')) {
             return [];
         }
 
         $ids = [];
-        foreach ($roles as $role) {
-            if (! is_object($role) || ! is_callable([$role, 'getAttribute'])) {
+
+        foreach (Collection::wrap($relation->get(['id'])) as $role) {
+            if (! is_object($role) || ! method_exists($role, 'getAttribute')) {
                 continue;
             }
 
-            $roleId = call_user_func([$role, 'getAttribute'], 'id');
+            $roleId = $role->getAttribute('id');
+
             if (is_int($roleId) || is_string($roleId)) {
                 $ids[] = $roleId;
             }
@@ -243,17 +228,13 @@ final class EffectivePermissionResolver
      */
     private function pluckRoleNames(Authenticatable $user): array
     {
-        if (! is_callable([$user, 'getRoleNames'])) {
-            return [];
-        }
-
-        $roleNames = call_user_func([$user, 'getRoleNames']);
-        if (! is_iterable($roleNames)) {
+        if (! method_exists($user, 'getRoleNames')) {
             return [];
         }
 
         $names = [];
-        foreach ($roleNames as $roleName) {
+
+        foreach (Collection::wrap($user->getRoleNames()) as $roleName) {
             if (is_string($roleName) && $roleName !== '') {
                 $names[] = $roleName;
             }
@@ -267,26 +248,23 @@ final class EffectivePermissionResolver
      */
     private function pluckPermissionNames(Authenticatable $user): array
     {
-        if (! is_callable([$user, 'getAllPermissions'])) {
+        if (! method_exists($user, 'getAllPermissions')) {
             return [];
         }
 
-        if (is_callable([$user, 'loadMissing'])) {
-            call_user_func([$user, 'loadMissing'], ['permissions', 'roles.permissions']);
-        }
-
-        $permissions = call_user_func([$user, 'getAllPermissions']);
-        if (! is_iterable($permissions)) {
-            return [];
+        if (method_exists($user, 'loadMissing')) {
+            $user->loadMissing(['permissions', 'roles.permissions']);
         }
 
         $names = [];
-        foreach ($permissions as $permission) {
-            if (! is_object($permission) || ! is_callable([$permission, 'getAttribute'])) {
+
+        foreach (Collection::wrap($user->getAllPermissions()) as $permission) {
+            if (! is_object($permission) || ! method_exists($permission, 'getAttribute')) {
                 continue;
             }
 
-            $permissionName = call_user_func([$permission, 'getAttribute'], 'name');
+            $permissionName = $permission->getAttribute('name');
+
             if (is_string($permissionName) && $permissionName !== '') {
                 $names[] = $permissionName;
             }
@@ -306,13 +284,15 @@ final class EffectivePermissionResolver
         }
 
         $roleClass = $this->registrar->getRoleClass();
+
         if (! is_a($roleClass, Model::class, true)) {
             return [];
         }
 
         $names = [];
+
         foreach ($roleClass::query()->whereIn('id', $roleIds)->pluck('name') as $roleName) {
-            if (is_string($roleName) && $roleName !== '') {
+            if (is_string($roleName)) {
                 $names[] = $roleName;
             }
         }
@@ -331,11 +311,13 @@ final class EffectivePermissionResolver
         }
 
         $permissionClass = $this->registrar->getPermissionClass();
+
         if (! is_a($permissionClass, Model::class, true)) {
             return [];
         }
 
         $names = [];
+
         foreach (
             $permissionClass::query()
                 ->whereHas('roles', static function ($query) use ($roleIds): void {
@@ -343,7 +325,7 @@ final class EffectivePermissionResolver
                 })
                 ->pluck('name') as $permissionName
         ) {
-            if (is_string($permissionName) && $permissionName !== '') {
+            if (is_string($permissionName)) {
                 $names[] = $permissionName;
             }
         }
@@ -357,7 +339,7 @@ final class EffectivePermissionResolver
      */
     private function uniqueSortedStrings(array $values): array
     {
-        $unique = array_values(array_unique($values));
+        $unique = array_unique($values);
         sort($unique);
 
         return $unique;
@@ -365,22 +347,16 @@ final class EffectivePermissionResolver
 
     /**
      * @param  list<int|string>  $values
-     * @return list<int|string>
+     * @return list<string>
      */
     private function uniqueSortedIds(array $values): array
     {
-        $unique = [];
-        foreach ($values as $value) {
-            $unique[is_int($value) ? (string) $value : $value] = $value;
-        }
+        $unique = array_unique(array_map(
+            static fn (int|string $value): string => (string) $value,
+            $values,
+        ));
+        sort($unique, SORT_STRING);
 
-        $list = array_values($unique);
-        usort(
-            $list,
-            static fn (int|string $left, int|string $right): int => (is_int($left) ? (string) $left : $left)
-                <=> (is_int($right) ? (string) $right : $right),
-        );
-
-        return $list;
+        return $unique;
     }
 }

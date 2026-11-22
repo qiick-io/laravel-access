@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use Illuminate\Database\Migrations\Migration;
+use Illuminate\Database\QueryException;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
@@ -91,4 +92,56 @@ it('creates the package group tables with expires_at public_id and metadata', fu
     ]);
 
     expect($connection->table('user_group_role')->count())->toBe(1);
+})->group('engines');
+
+it('points the membership user_id foreign key at access.users_table when set', function (): void {
+    Schema::dropIfExists('accounts');
+    Schema::create('accounts', function (Blueprint $table): void {
+        $table->id();
+        $table->timestamps();
+    });
+
+    config()->set('access.users_table', 'accounts');
+
+    /** @var Migration $migration */
+    $migration = require dirname(__DIR__, 2).'/database/migrations/2026_11_22_120000_create_user_groups_tables.php';
+    $migration->up();
+
+    $connection = app('db')->connection();
+    $connection->table('accounts')->insert(['id' => 1]);
+    $connection->table('user_groups')->insert([
+        'public_id' => (string) Str::uuid(),
+        'name' => 'finance',
+        'metadata' => null,
+        'created_at' => now(),
+        'updated_at' => now(),
+    ]);
+    $groupId = (int) $connection->table('user_groups')->value('id');
+
+    $connection->table('user_group_user')->insert([
+        'user_group_id' => $groupId,
+        'user_id' => 1,
+        'expires_at' => null,
+        'created_at' => now(),
+        'updated_at' => now(),
+    ]);
+
+    expect($connection->table('user_group_user')->count())->toBe(1);
+
+    // Inserting a user_id that exists only on users (not accounts) must fail the FK.
+    $connection->table('users')->insert(['id' => 99, 'email' => 'orphan@example.com']);
+
+    expect(fn () => $connection->table('user_group_user')->insert([
+        'user_group_id' => $groupId,
+        'user_id' => 99,
+        'expires_at' => null,
+        'created_at' => now(),
+        'updated_at' => now(),
+    ]))->toThrow(QueryException::class);
+
+    Schema::dropIfExists('user_group_role');
+    Schema::dropIfExists('user_group_user');
+    Schema::dropIfExists('user_groups');
+    Schema::dropIfExists('accounts');
+    config()->set('access.users_table', null);
 })->group('engines');
