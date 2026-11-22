@@ -39,35 +39,48 @@ honours that flag only when `app()->environment('testing')` is true.
 
 The package ships migrations for fixed table names `user_groups`,
 `user_group_user` and `user_group_role` (with `public_id`, `metadata`,
-membership `expires_at`). Names are not configurable (Q5). Spatie's tables
-stay Spatie's. `access.migrations.load` defaults to `true`; externa 1.x sets
-it to `false` and adopts the same shape through an additive migration so its
-released tables keep the standard names until v2. Pre-1.0 products delete
-their own `create_user_groups_tables` migration.
+membership `expires_at`, nullable `organisation_id`, and `is_instance`).
+Names are not configurable (Q5). Spatie's tables stay Spatie's.
+`access.migrations.load` defaults to `true`; externa 1.x sets it to `false`
+and adopts the same shape through an additive migration so its released
+tables keep the standard names until v2 (new columns stay nullable / unused
+there). Pre-1.0 products delete their own `create_user_groups_tables`
+migration.
 
 Products generate `user_groups.public_id` as **UUID v7** in their Eloquent
 model / factory (the package migration only declares the column). The
 membership FK targets `access.users_table` when set, otherwise the table from
-`auth.providers.users.model`, otherwise `users`.
+`auth.providers.users.model`, otherwise `users`. The instance super-admin
+group uses `is_instance = true` with `organisation_id` NULL; a CHECK forbids
+`is_instance = true` together with a non-null `organisation_id`.
 
 Assert the group schema with `Qiick\Access\Testing\AssertsGroupTablesSchema`
-(AC17). When Spatie teams are on, set `permission.column_names.team_foreign_key`
-to `organisation_id` and use uuid team columns; products assert that with
+(AC17 / C75). When Spatie teams are on, set
+`permission.column_names.team_foreign_key` to `organisation_id` and use uuid
+team columns; products assert that with
 `Qiick\Access\Testing\AssertsSpatieTeamSchema` (A3) — run the uuid check on
 PostgreSQL.
 
-`EffectivePermissionResolver` applies group role ids **in the current team**
-when loading permissions from those roles. Super-admin is resolved without the
-Spatie team filter (C30). `isDirectSuperAdmin()` is the same filter-off check
-for a **direct** role only — products use it with `TwoFactorPolicy::hasUsableFactor()`
-for break-glass (P6); the OIDC break-glass seam stays outside this package (R7).
+`EffectivePermissionResolver` applies group role ids from instance groups,
+legacy unscoped groups, and organisation groups matching the current
+`TeamContext`. Super-admin via groups counts **only** `is_instance` groups
+(C30). `isDirectSuperAdmin()` is the same filter-off check for a **direct**
+role only — products use it with `TwoFactorPolicy::hasUsableFactor()` for
+break-glass (P6); the OIDC break-glass seam stays outside this package (R7).
 Register `EnsureTwoFactorIsEnabled` on the web stack; exempt routes live in
 `access.two_factor.exempt_route_names`. Bind `ActiveUsers` and use
 `SuperAdminGuard` for super-admin grant/revoke and last-admin protection.
+Demotion (or soft-delete / expiry) paths that bypass
+`SuperAdminGuard::wouldLeaveNoActiveSuperAdmin` stay a product adoption
+checklist item — the package cannot see those call sites.
 Products must set `permission.register_permission_check_method` to `false` and
 `permission.events_enabled` to `true` before boot; the provider fails closed
 otherwise (R4, A1). Bind `RoleCatalog`, `TwoFactorPolicy`,
 `TwoFactorResponder` and `AuthorizationResponder` or boot fails (AC12).
+
+`SuperAdminGuard` last-admin protection relies on `SELECT … FOR UPDATE`.
+SQLite does not honour those locks; production deployments must use MySQL,
+MariaDB or PostgreSQL.
 
 `externa-core` keeps a compatibility flag and shadow comparison before the
 package `Gate::before` becomes the default (design §9).

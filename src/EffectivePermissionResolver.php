@@ -196,9 +196,11 @@ final class EffectivePermissionResolver
         }
 
         try {
+            // Instance groups only — organisation membership must not mint
+            // instance super-admin (is_instance / C30).
             return $this->uniqueSortedStrings([
                 ...$this->pluckRoleNames($user),
-                ...$this->roleNamesForIds($this->groupRoles->roleIdsFor($user)),
+                ...$this->roleNamesForIds($this->groupRoles->instanceRoleIdsFor($user)),
             ]);
         } finally {
             if ($teamsWereEnabled) {

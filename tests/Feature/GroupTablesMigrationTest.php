@@ -52,7 +52,14 @@ it('creates the package group tables with expires_at public_id and metadata', fu
     $migration->up();
 
     expect(Schema::hasTable('user_groups'))->toBeTrue()
-        ->and(Schema::hasColumns('user_groups', ['public_id', 'name', 'metadata', 'deleted_at']))->toBeTrue()
+        ->and(Schema::hasColumns('user_groups', [
+            'public_id',
+            'name',
+            'metadata',
+            'organisation_id',
+            'is_instance',
+            'deleted_at',
+        ]))->toBeTrue()
         ->and(Schema::hasColumns('user_group_user', ['user_id', 'user_group_id', 'expires_at']))->toBeTrue()
         ->and(Schema::hasColumns('user_group_role', ['user_group_id', 'role_id']))->toBeTrue();
 
@@ -73,6 +80,8 @@ it('creates the package group tables with expires_at public_id and metadata', fu
         'public_id' => (string) Str::uuid(),
         'name' => 'ops',
         'metadata' => null,
+        'organisation_id' => null,
+        'is_instance' => false,
         'created_at' => now(),
         'updated_at' => now(),
     ]);
@@ -92,6 +101,17 @@ it('creates the package group tables with expires_at public_id and metadata', fu
     ]);
 
     expect($connection->table('user_group_role')->count())->toBe(1);
+
+    // Instance group with organisation_id set must violate the XOR CHECK (AC17/C75).
+    expect(fn () => $connection->table('user_groups')->insert([
+        'public_id' => (string) Str::uuid(),
+        'name' => 'bad-instance',
+        'metadata' => null,
+        'organisation_id' => (string) Str::uuid(),
+        'is_instance' => true,
+        'created_at' => now(),
+        'updated_at' => now(),
+    ]))->toThrow(QueryException::class);
 })->group('engines');
 
 it('points the membership user_id foreign key at access.users_table when set', function (): void {
@@ -113,6 +133,8 @@ it('points the membership user_id foreign key at access.users_table when set', f
         'public_id' => (string) Str::uuid(),
         'name' => 'finance',
         'metadata' => null,
+        'organisation_id' => null,
+        'is_instance' => false,
         'created_at' => now(),
         'updated_at' => now(),
     ]);

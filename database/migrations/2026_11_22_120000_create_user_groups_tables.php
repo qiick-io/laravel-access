@@ -5,6 +5,7 @@ declare(strict_types=1);
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 
 /*
@@ -15,6 +16,10 @@ use Illuminate\Support\Facades\Schema;
  * (default "roles"). user_id references access.users_table or the auth
  * users provider model table (default "users"). Products generate
  * user_groups.public_id as UUID v7 in their model / factory.
+ *
+ * organisation_id (nullable uuid) scopes a group to one organisation;
+ * is_instance marks the instance-level super-admin group (organisation_id
+ * must be NULL). Externa 1.x leaves both unused (false / null).
  */
 return new class extends Migration
 {
@@ -30,9 +35,13 @@ return new class extends Migration
             $table->string('name')->unique();
             $table->text('description')->nullable();
             $table->json('metadata')->nullable();
+            $table->uuid('organisation_id')->nullable()->index();
+            $table->boolean('is_instance')->default(false);
             $table->timestamps();
             $table->softDeletes();
         });
+
+        $this->addInstanceOrganisationXorConstraint();
 
         Schema::create('user_group_user', function (Blueprint $table) use ($usersTable): void {
             $table->foreignId('user_group_id')->constrained('user_groups')->cascadeOnDelete();
@@ -64,6 +73,47 @@ return new class extends Migration
         Schema::dropIfExists('user_group_role');
         Schema::dropIfExists('user_group_user');
         Schema::dropIfExists('user_groups');
+    }
+
+    /**
+     * is_instance=true only with organisation_id NULL (AC17 / C75).
+     * SQLite has no ALTER ADD CONSTRAINT; enforce with INSERT/UPDATE triggers.
+     */
+    private function addInstanceOrganisationXorConstraint(): void
+    {
+        $driver = Schema::getConnection()->getDriverName();
+
+        if ($driver === 'sqlite') {
+            DB::statement(
+                'CREATE TRIGGER user_groups_instance_org_xor_insert
+                 BEFORE INSERT ON user_groups
+                 FOR EACH ROW
+                 WHEN NEW.is_instance = 1 AND NEW.organisation_id IS NOT NULL
+                 BEGIN
+                     SELECT RAISE(ABORT, \'is_instance requires null organisation_id\');
+                 END',
+            );
+            DB::statement(
+                'CREATE TRIGGER user_groups_instance_org_xor_update
+                 BEFORE UPDATE ON user_groups
+                 FOR EACH ROW
+                 WHEN NEW.is_instance = 1 AND NEW.organisation_id IS NOT NULL
+                 BEGIN
+                     SELECT RAISE(ABORT, \'is_instance requires null organisation_id\');
+                 END',
+            );
+
+            return;
+        }
+
+        // MySQL / MariaDB store booleans as 0/1; PostgreSQL accepts both forms.
+        $expression = in_array($driver, ['mysql', 'mariadb'], true)
+            ? '(is_instance = 0 OR organisation_id IS NULL)'
+            : '(is_instance = false OR organisation_id IS NULL)';
+
+        DB::statement(
+            "ALTER TABLE user_groups ADD CONSTRAINT user_groups_instance_org_xor CHECK {$expression}",
+        );
     }
 
     private function usersTable(): string

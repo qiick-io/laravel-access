@@ -6,14 +6,18 @@ namespace Qiick\Access\Testing;
 
 use Illuminate\Database\Connection;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\Schema;
+use Illuminate\Support\Str;
 use RuntimeException;
 
 /**
- * Conformance helper AC17: the three fixed group tables match standards
- * review §2.4–2.6 (columns, nullability, indexes, FK cascade). Products that
- * adopt the tables (including externa with access.migrations.load = false)
- * call assertShape() so their schema cannot drift from the package.
+ * Conformance helper AC17 / C75: the three fixed group tables match standards
+ * review §2.4–2.6 (columns, nullability, indexes, FK cascade) plus
+ * organisation_id / is_instance with the XOR check (is_instance true only
+ * when organisation_id is null). Products that adopt the tables (including
+ * externa with access.migrations.load = false) call assertShape() so their
+ * schema cannot drift from the package.
  */
 final class AssertsGroupTablesSchema
 {
@@ -41,6 +45,8 @@ final class AssertsGroupTablesSchema
             'name',
             'description',
             'metadata',
+            'organisation_id',
+            'is_instance',
             'created_at',
             'updated_at',
             'deleted_at',
@@ -50,9 +56,42 @@ final class AssertsGroupTablesSchema
         $this->requireNotNullable('user_groups', 'name');
         $this->requireNullable('user_groups', 'description');
         $this->requireNullable('user_groups', 'metadata');
+        $this->requireNullable('user_groups', 'organisation_id');
+        $this->requireNotNullable('user_groups', 'is_instance');
         $this->requireNullable('user_groups', 'deleted_at');
         $this->requireUniqueCovering('user_groups', 'public_id');
         $this->requireUniqueCovering('user_groups', 'name');
+        $this->requireIndexCovering('user_groups', 'organisation_id');
+        $this->requireInstanceOrganisationXorConstraint();
+    }
+
+    /**
+     * is_instance=true is allowed only with organisation_id NULL. Proved by a
+     * rolled-back insert so SQLite triggers and SQL CHECK constraints both count.
+     */
+    private function requireInstanceOrganisationXorConstraint(): void
+    {
+        $this->connection->beginTransaction();
+
+        try {
+            $this->connection->table('user_groups')->insert([
+                'public_id' => (string) Str::uuid(),
+                'name' => '__ac17_instance_org_xor__',
+                'description' => null,
+                'metadata' => null,
+                'organisation_id' => (string) Str::uuid(),
+                'is_instance' => true,
+                'created_at' => now(),
+                'updated_at' => now(),
+            ]);
+            $this->connection->rollBack();
+
+            throw new RuntimeException(
+                'AC17/C75: expected CHECK that is_instance=true only when organisation_id IS NULL on user_groups.',
+            );
+        } catch (QueryException) {
+            $this->connection->rollBack();
+        }
     }
 
     private function assertUserGroupUser(): void

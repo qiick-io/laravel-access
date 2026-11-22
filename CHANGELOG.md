@@ -10,6 +10,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Group schema: nullable `user_groups.organisation_id`, `is_instance`, and an
+  XOR constraint (`is_instance` true only with `organisation_id` NULL) on the
+  package `create_user_groups` migration (AC17 / C75; SQLite triggers, SQL
+  CHECK on MySQL / MariaDB / PostgreSQL). `GroupRoleSource::instanceRoleIdsFor`
+  drives super-admin via groups; `roleIdsFor` scopes organisation groups to
+  `TeamContext`. Adoption docs: SQLite does not honour `FOR UPDATE` (use MySQL,
+  MariaDB or PostgreSQL in production); demotion paths outside
+  `SuperAdminGuard` remain a product checklist item.
 - `EnsureTwoFactorIsEnabled` middleware (design §5 / AC10): enrolment gate via
   `TwoFactorPolicy` / `TwoFactorResponder`, exempt-route wildcards (R9), API
   actors pass through. `SuperAdminGuard` + `ActiveUsers` (completeness A7):
@@ -40,18 +48,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `Qiick\Access\Testing\TrustApiGuardInConsole` is enabled for product tests,
   and `Queue::createPayloadUsing` hooks left intact for other packages.
 - Package-default adapters: `NoTeamContext`, `EloquentGroupRoleSource` (soft-deleted
-  groups and expired memberships excluded; fixed table names; Octane-safe
+  groups and expired memberships excluded; instance / org / legacy scoping;
+  `instanceRoleIdsFor` for super-admin; fixed table names; Octane-safe
   connection resolve), `SpatiePermissionVocabulary` (from `access.permission_enum`),
   and `SpatieTeamContext` (clears the AccessContext actor).
   `SpatieTeamQueueBoundary` isolates Spatie team ids on async workers and
   restores the request team after sync-connection jobs.
 - Package migrations for fixed `user_groups` / `user_group_user` /
-  `user_group_role` (`public_id`, `metadata`, membership `expires_at`), gated by
+  `user_group_role` (`public_id`, `metadata`, membership `expires_at`,
+  nullable `organisation_id`, `is_instance` with XOR CHECK), gated by
   `access.migrations.load` (default true); optional `access.users_table`;
-  `AssertsGroupTablesSchema` (AC17) and `AssertsSpatieTeamSchema` (A3).
+  `AssertsGroupTablesSchema` (AC17 / C75) and `AssertsSpatieTeamSchema` (A3).
 - Contracts (`@api`): `ActorKind`, `ActorContext`, `ActorResolver`,
-  `PermissionVocabulary`, `RoleCatalog`, `GroupRoleSource`, `TeamContext`,
-  `TwoFactorPolicy`, `TwoFactorResponder`, `AuthorizationResponder`.
+  `PermissionVocabulary`, `RoleCatalog`, `GroupRoleSource` (`roleIdsFor` +
+  `instanceRoleIdsFor`), `TeamContext`, `TwoFactorPolicy`, `TwoFactorResponder`,
+  `AuthorizationResponder`.
 - Package scaffold: auto-discovered `AccessServiceProvider`, publishable
   `config/access.php` (tag `access-config`), Pest + Testbench, Pint, PHPStan
   level max, qiick standards pack pinned to app-ui `v0.12.0`

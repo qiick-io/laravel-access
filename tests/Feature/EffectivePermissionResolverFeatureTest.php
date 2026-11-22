@@ -72,6 +72,7 @@ it('merges direct and group role permissions for a Spatie user', function (): vo
     $roleCatalog->shouldReceive('superAdminRoleName')->andReturn('super-admin');
 
     $groupRoles = Mockery::mock(GroupRoleSource::class);
+    $groupRoles->shouldReceive('instanceRoleIdsFor')->andReturn([]);
     $groupRoles->shouldReceive('roleIdsFor')->with(Mockery::type(SpatieUser::class))->andReturn([$groupRole->id]);
 
     // Scoped resolver is already built at boot with EloquentGroupRoleSource.
@@ -100,6 +101,7 @@ it('treats a direct super-admin role as holding every vocabulary permission', fu
     $roleCatalog->shouldReceive('superAdminRoleName')->andReturn('super-admin');
 
     $groupRoles = Mockery::mock(GroupRoleSource::class);
+    $groupRoles->shouldReceive('instanceRoleIdsFor')->andReturn([]);
     $groupRoles->shouldReceive('roleIdsFor')->andReturn([]);
 
     $this->app->forgetInstance(EffectivePermissionResolver::class);
@@ -126,6 +128,7 @@ it('detects super-admin when the role arrives only through group membership', fu
 
     $groupRoles = Mockery::mock(GroupRoleSource::class);
     $groupRoles->shouldReceive('roleIdsFor')->with(Mockery::type(SpatieUser::class))->andReturn([$superAdmin->id]);
+    $groupRoles->shouldReceive('instanceRoleIdsFor')->with(Mockery::type(SpatieUser::class))->andReturn([$superAdmin->id]);
 
     $this->app->forgetInstance(EffectivePermissionResolver::class);
     $this->app->instance(RoleCatalog::class, $roleCatalog);
@@ -157,6 +160,7 @@ it('loads only permissions attached to the given group role ids', function (): v
     $roleCatalog->shouldReceive('superAdminRoleName')->andReturn('super-admin');
 
     $groupRoles = Mockery::mock(GroupRoleSource::class);
+    $groupRoles->shouldReceive('instanceRoleIdsFor')->andReturn([]);
     $groupRoles->shouldReceive('roleIdsFor')->andReturn([$groupRole->id]);
 
     $this->app->forgetInstance(EffectivePermissionResolver::class);
@@ -179,6 +183,7 @@ it('ignores the Spatie team filter when checking super-admin (C30)', function ()
     $roleCatalog->shouldReceive('superAdminRoleName')->andReturn('super-admin');
 
     $groupRoles = Mockery::mock(GroupRoleSource::class);
+    $groupRoles->shouldReceive('instanceRoleIdsFor')->andReturn([]);
     $groupRoles->shouldReceive('roleIdsFor')->andReturn([]);
 
     $this->app->forgetInstance(EffectivePermissionResolver::class);

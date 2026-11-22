@@ -19,6 +19,7 @@ beforeEach(function (): void {
     $roleCatalog->shouldReceive('superAdminRoleName')->andReturn('super-admin');
 
     $groupRoles = Mockery::mock(GroupRoleSource::class);
+    $groupRoles->shouldReceive('instanceRoleIdsFor')->andReturn([]);
     $groupRoles->shouldReceive('roleIdsFor')->andReturn([]);
 
     $teamContext = Mockery::mock(TeamContext::class);

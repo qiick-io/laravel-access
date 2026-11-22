@@ -41,6 +41,7 @@ function resolverForGuardUsers(): EffectivePermissionResolver
     $roleCatalog->shouldReceive('superAdminRoleName')->andReturn('super-admin');
 
     $groupRoles = Mockery::mock(GroupRoleSource::class);
+    $groupRoles->shouldReceive('instanceRoleIdsFor')->andReturn([]);
     $groupRoles->shouldReceive('roleIdsFor')->andReturn([]);
 
     $vocabulary = Mockery::mock(PermissionVocabulary::class);

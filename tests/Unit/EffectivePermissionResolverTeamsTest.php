@@ -57,6 +57,7 @@ it('agrees permissionsFor with isSuperAdmin for an instance super-admin under te
     $roleCatalog->shouldReceive('superAdminRoleName')->andReturn('super-admin');
 
     $groupRoles = Mockery::mock(GroupRoleSource::class);
+    $groupRoles->shouldReceive('instanceRoleIdsFor')->andReturn([]);
     $groupRoles->shouldReceive('roleIdsFor')->with(Mockery::type(Authenticatable::class))->andReturn([]);
 
     $vocabulary = Mockery::mock(PermissionVocabulary::class);
