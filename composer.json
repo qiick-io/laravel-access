@@ -1,0 +1,74 @@
+{
+    "$schema": "https://getcomposer.org/schema.json",
+    "name": "qiick/laravel-access",
+    "description": "Shared authorization core for qiick Laravel products: Gate::before, effective permissions, actor context, and enforced 2FA.",
+    "type": "library",
+    "keywords": [
+        "qiick",
+        "laravel",
+        "authorization",
+        "permissions",
+        "gate",
+        "two-factor"
+    ],
+    "license": "MIT",
+    "authors": [
+        {
+            "name": "Qiick",
+            "homepage": "https://qiick.io"
+        }
+    ],
+    "homepage": "https://github.com/qiick-io/laravel-access",
+    "support": {
+        "issues": "https://github.com/qiick-io/laravel-access/issues",
+        "source": "https://github.com/qiick-io/laravel-access"
+    },
+    "require": {
+        "php": "^8.3",
+        "illuminate/auth": "^12.0 || ^13.0",
+        "illuminate/contracts": "^12.0 || ^13.0",
+        "illuminate/database": "^12.0 || ^13.0",
+        "illuminate/http": "^12.0 || ^13.0",
+        "illuminate/support": "^12.0 || ^13.0",
+        "spatie/laravel-permission": "^8.0"
+    },
+    "require-dev": {
+        "larastan/larastan": "^3.3",
+        "laravel/pint": "^1.30",
+        "nunomaduro/collision": "^8.5",
+        "orchestra/testbench": "^10.0 || ^11.0",
+        "pestphp/pest": "^4.0",
+        "pestphp/pest-plugin-mutate": "^4.0",
+        "phpstan/phpstan": "^2.1"
+    },
+    "extra": {
+        "laravel": {
+            "providers": [
+                "Qiick\\Access\\Laravel\\AccessServiceProvider"
+            ]
+        }
+    },
+    "autoload": {
+        "psr-4": {
+            "Qiick\\Access\\": "src/"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "Qiick\\Access\\Tests\\": "tests/"
+        }
+    },
+    "scripts": {
+        "test": "pest",
+        "lint": "pint --test",
+        "analyse": "phpstan analyse --memory-limit=1G"
+    },
+    "config": {
+        "allow-plugins": {
+            "pestphp/pest-plugin": true
+        },
+        "sort-packages": true
+    },
+    "minimum-stability": "stable",
+    "prefer-stable": true
+}
