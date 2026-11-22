@@ -14,9 +14,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `TwoFactorPolicy` / `TwoFactorResponder`, exempt-route wildcards (R9), API
   actors pass through. `SuperAdminGuard` + `ActiveUsers` (completeness A7):
   who may manage super-admins, protected targets, and
-  `wouldLeaveNoActiveSuperAdmin()` counted through the resolver. Resolver
-  `isDirectSuperAdmin()` ignores the Spatie team filter for break-glass
-  building blocks in products / laravel-oidc (P6 / Q3 / R7).
+  `wouldLeaveNoActiveSuperAdmin()` with `FOR UPDATE` locks on active users
+  and a cache/relation-free recount so concurrent demotions cannot leave
+  zero super-admins. Resolver `isDirectSuperAdmin()` ignores the Spatie
+  team filter for break-glass building blocks in products / laravel-oidc
+  (P6 / Q3 / R7).
 - `GateBefore` (single `Gate::before`: API actors never get super-admin /
   permission grants; Policy arguments abstain) and scoped
   `EffectivePermissionResolver` (direct ∪ group roles/permissions, C30

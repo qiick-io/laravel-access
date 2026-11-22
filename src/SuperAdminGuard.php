@@ -6,6 +6,7 @@ namespace Qiick\Access;
 
 use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Database\DatabaseManager;
+use Illuminate\Support\Collection;
 use Qiick\Access\Contracts\ActiveUsers;
 use Qiick\Access\Contracts\TwoFactorPolicy;
 use Throwable;
@@ -18,6 +19,10 @@ use Throwable;
  * group), scoped to {@see ActiveUsers}. Break-glass local sign-in stays in
  * products / laravel-oidc (R7); they combine {@see EffectivePermissionResolver::isDirectSuperAdmin()}
  * with {@see TwoFactorPolicy::hasUsableFactor()}.
+ *
+ * `wouldLeaveNoActiveSuperAdmin` takes `SELECT … FOR UPDATE` locks on the
+ * active-user set so concurrent demotions cannot both commit to zero (B1), and
+ * recounts from the database with resolver/relation caches cleared (B2).
  *
  * @api
  */
@@ -52,9 +57,9 @@ final class SuperAdminGuard
         $connection->beginTransaction();
 
         try {
-            $hadActiveSuperAdmin = $this->hasActiveSuperAdmin();
+            $hadActiveSuperAdmin = $this->hasActiveSuperAdminUnderLock();
             $change();
-            $wouldLeave = $hadActiveSuperAdmin && ! $this->hasActiveSuperAdmin();
+            $wouldLeave = $hadActiveSuperAdmin && ! $this->hasActiveSuperAdminUnderLock();
 
             if ($wouldLeave) {
                 $connection->rollBack();
@@ -72,10 +77,25 @@ final class SuperAdminGuard
         }
     }
 
-    private function hasActiveSuperAdmin(): bool
+    /**
+     * Lock active users, then decide super-admin from a fresh DB read (no warm
+     * resolver cache, no stale Eloquent role relations).
+     */
+    private function hasActiveSuperAdminUnderLock(): bool
     {
-        foreach ($this->activeUsers->query()->cursor() as $user) {
-            if ($user instanceof Authenticatable && $this->resolver->isSuperAdmin($user)) {
+        /** @var Collection<int, mixed> $activeUsers */
+        $activeUsers = $this->activeUsers->query()->lockForUpdate()->get();
+
+        foreach ($activeUsers as $user) {
+            if (! $user instanceof Authenticatable) {
+                continue;
+            }
+
+            // Drop process-local cache and loaded roles/permissions so the next
+            // isSuperAdmin() hits the database as it stands in this transaction.
+            $this->resolver->forget($user);
+
+            if ($this->resolver->isSuperAdmin($user)) {
                 return true;
             }
         }

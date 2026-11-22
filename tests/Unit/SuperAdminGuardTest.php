@@ -15,11 +15,14 @@ use Qiick\Access\EffectivePermissionResolver;
 use Qiick\Access\SuperAdminGuard;
 use Qiick\Access\Tests\Support\FakeAuthenticatable;
 use Qiick\Access\Tests\Support\PermissionedFakeUser;
+use Qiick\Access\Tests\Support\StaleRoleSuperAdmin;
 use Spatie\Permission\PermissionRegistrar;
 
 function activeUsersReturning(array $users): ActiveUsers
 {
     $builder = Mockery::mock(Builder::class);
+    $builder->shouldReceive('lockForUpdate')->andReturnSelf();
+    $builder->shouldReceive('get')->andReturn(collect($users));
     $builder->shouldReceive('cursor')->andReturnUsing(static function () use ($users): Generator {
         foreach ($users as $user) {
             yield $user;
@@ -147,9 +150,51 @@ it('re-throws after rolling back when the change fails', function (): void {
 });
 
 it('skips non-authenticatable rows when counting active super-admins', function (): void {
-    $guard = new SuperAdminGuard(resolverForGuardUsers(), activeUsersReturning([new stdClass]), app('db'));
+    Schema::create('super_admin_guard_probe', function (Blueprint $table): void {
+        $table->string('name')->primary();
+    });
 
-    $wouldLeave = $guard->wouldLeaveNoActiveSuperAdmin(static function (): void {});
+    $admin = new PermissionedFakeUser(1, ['super-admin']);
+    // A non-Authenticatable row must not stop the scan (continue, not break).
+    $guard = new SuperAdminGuard(
+        resolverForGuardUsers(),
+        activeUsersReturning([new stdClass, $admin]),
+        app('db'),
+    );
 
-    expect($wouldLeave)->toBeFalse();
+    $wouldLeave = $guard->wouldLeaveNoActiveSuperAdmin(static function () use ($admin): void {
+        DB::table('super_admin_guard_probe')->insert(['name' => 'skip-non-auth']);
+        $admin->setRoleNames([]);
+    });
+
+    expect($wouldLeave)->toBeTrue()
+        ->and(DB::table('super_admin_guard_probe')->count())->toBe(0);
+
+    Schema::drop('super_admin_guard_probe');
+});
+
+/**
+ * B2: a demotion written only to the database must still be seen on the
+ * post-change recount even when getRoleNames() was warmed beforehand.
+ */
+it('detects a demotion when Spatie role names were warmed before the change (B2)', function (): void {
+    Schema::create('super_admin_guard_probe', function (Blueprint $table): void {
+        $table->string('name')->primary();
+    });
+
+    $admin = new StaleRoleSuperAdmin(1);
+    $resolver = resolverForGuardUsers();
+    expect($resolver->isSuperAdmin($admin))->toBeTrue();
+
+    $guard = new SuperAdminGuard($resolver, activeUsersReturning([$admin]), app('db'));
+
+    $wouldLeave = $guard->wouldLeaveNoActiveSuperAdmin(static function () use ($admin): void {
+        DB::table('super_admin_guard_probe')->insert(['name' => 'stale-demote']);
+        $admin->demoteInDatabaseOnly();
+    });
+
+    expect($wouldLeave)->toBeTrue()
+        ->and(DB::table('super_admin_guard_probe')->count())->toBe(0);
+
+    Schema::drop('super_admin_guard_probe');
 });
