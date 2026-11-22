@@ -15,7 +15,9 @@ use Qiick\Access\Contracts\ActorResolver;
  * Reads the bound AccessContext and the configured API-guard signal.
  * Never reads request input (design §3.3 / AC4). The guard signal is ignored
  * outside an active HTTP request so unattended jobs/commands cannot become
- * API actors via Auth::shouldUse().
+ * API actors via Auth::shouldUse(), unless access.trust_api_guard_in_console
+ * is enabled in the testing environment (see config/access.php and
+ * Qiick\Access\Testing\TrustApiGuardInConsole).
  *
  * @api
  */
@@ -45,8 +47,7 @@ final class ContainerActorResolver implements ActorResolver
 
     private function defaultGuardIsApiGuard(): bool
     {
-        // Jobs and artisan commands: ignore the guard signal entirely.
-        if ($this->app->runningInConsole()) {
+        if ($this->app->runningInConsole() && ! $this->shouldTrustGuardInConsole()) {
             return false;
         }
 
@@ -65,5 +66,19 @@ final class ContainerActorResolver implements ActorResolver
         $defaultGuard = $this->auth->getDefaultDriver();
 
         return in_array($defaultGuard, $apiGuards, true);
+    }
+
+    /**
+     * Product PHPUnit suites may set access.trust_api_guard_in_console so the
+     * guard signal can be exercised while runningInConsole() is true. The flag
+     * is ignored outside the testing environment (never a production lever).
+     */
+    private function shouldTrustGuardInConsole(): bool
+    {
+        if (! $this->app->environment('testing')) {
+            return false;
+        }
+
+        return $this->config->get('access.trust_api_guard_in_console', false) === true;
     }
 }

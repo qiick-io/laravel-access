@@ -18,9 +18,18 @@ Each product:
    (`access.direct_checks`) with reason, decision link and `review_by`.
 
 Jobs dispatched while an API actor is bound receive that actor automatically
-(queue payload stamp). Prefer `Illuminate\Contracts\Queue\ShouldBeEncrypted` on
-those jobs when the queue store is not encrypted end-to-end. `CarriesActorContext`
-via `through()` remains available for explicit opt-in.
+(queue payload stamp via `ActorPayloadStamper`). Prefer
+`Illuminate\Contracts\Queue\ShouldBeEncrypted` on those jobs when the queue
+store is not encrypted end-to-end. `CarriesActorContext` via `through()` remains
+available for explicit opt-in. The package never calls
+`Queue::createPayloadUsing(null)`, so other payload hooks (including Laravel's
+`illuminate:log:context`) keep working.
+
+Under PHPUnit, `runningInConsole()` is always true, so the API-guard signal is
+ignored by default. Product tests that need the guard path should call
+`Qiick\Access\Testing\TrustApiGuardInConsole::enable()` (sets
+`access.trust_api_guard_in_console`) and `disable()` in tearDown. The resolver
+honours that flag only when `app()->environment('testing')` is true.
 
 `externa-core` keeps a compatibility flag and shadow comparison before the
 package `Gate::before` becomes the default (design §9). No schema change is

@@ -7,6 +7,7 @@ use Qiick\Access\Laravel\AccessServiceProvider;
 
 it('merges the package defaults into the access config', function (): void {
     expect(config('access.api_guards'))->toBe([]);
+    expect(config('access.trust_api_guard_in_console'))->toBeFalse();
     expect(config('access.permission_enum'))->toBeNull();
     expect(config('access.groups.table'))->toBe('user_groups');
     expect(config('access.groups.user_pivot'))->toBe('user_group_user');

@@ -17,6 +17,7 @@ CLASSES=(
   'Qiick\Access\Laravel\AccessContext'
   'Qiick\Access\Laravel\ContainerActorResolver'
   'Qiick\Access\Laravel\CarriesActorContext'
+  'Qiick\Access\Laravel\ActorPayloadStamper'
 )
 
 CLASS_FILES=(
@@ -24,6 +25,7 @@ CLASS_FILES=(
   'src/Laravel/AccessContext.php'
   'src/Laravel/ContainerActorResolver.php'
   'src/Laravel/CarriesActorContext.php'
+  'src/Laravel/ActorPayloadStamper.php'
 )
 
 # Other mutation-target siblings ignored while mutating one class.
@@ -38,7 +40,6 @@ SIBLING_FILES=(
   'src/Contracts/TwoFactorPolicy.php'
   'src/Contracts/TwoFactorResponder.php'
   'src/Laravel/AccessServiceProvider.php'
-  'src/Http/ClearAccessContextMiddleware.php'
 )
 
 MIN="${MUTATE_MIN:-95}"

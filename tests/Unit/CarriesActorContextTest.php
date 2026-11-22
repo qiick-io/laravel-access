@@ -78,7 +78,7 @@ it('rejects a credential UUID that does not match the bound actor of the same ki
         ->toThrow(RuntimeException::class);
 });
 
-it('skips a second push when the payload stamp already matches', function (): void {
+it('always nests even when the payload stamp already matches', function (): void {
     $store = app(AccessContext::class);
     AccessContext::enter(new ActorContext(ActorKind::ApiKey, null, 'request-cred'));
     $store->beginJob(new ActorContext(ActorKind::ApiKey, null, 'same-cred'), async: false);

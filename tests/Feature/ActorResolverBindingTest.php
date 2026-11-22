@@ -2,6 +2,8 @@
 
 declare(strict_types=1);
 
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\Route;
 use Qiick\Access\Contracts\ActorContext;
 use Qiick\Access\Contracts\ActorKind;
@@ -50,7 +52,7 @@ it('keeps the API actor through terminating and defer callbacks', function (): v
         ->and($seenInDefer?->credentialUuid)->toBe('term-cred');
 });
 
-it('clears the actor at the start of the next HTTP request', function (): void {
+it('clears the actor when scoped instances are flushed between requests', function (): void {
     Route::get('/first', function () {
         AccessContext::enter(new ActorContext(ActorKind::ApiKey, null, 'first'));
 
@@ -61,5 +63,34 @@ it('clears the actor at the start of the next HTTP request', function (): void {
     });
 
     $this->get('/first')->assertOk();
+    // FPM starts a new process; Octane fires RequestReceived → clear().
+    // In one Testbench process, flush scoped instances between requests.
+    app()->forgetScopedInstances();
     $this->get('/second')->assertOk()->assertSee('cleared');
+});
+
+it('keeps the API actor after an internal sub-request so Gate still abstains', function (): void {
+    Gate::before(function () {
+        if (app(ActorResolver::class)->current()->isApiActor()) {
+            return null;
+        }
+
+        return true;
+    });
+    Gate::define('sub-request-probe', fn () => false);
+
+    Route::get('/inner', fn () => response('inner'));
+    Route::get('/outer', function () {
+        AccessContext::enter(new ActorContext(ActorKind::ApiKey, null, 'outer-cred'));
+
+        $subResponse = app()->handle(Request::create('/inner', 'GET'));
+        expect($subResponse->getContent())->toBe('inner');
+
+        $stillApi = app(ActorResolver::class)->current()->isApiActor();
+        $gateSeesApi = Gate::allows('sub-request-probe') === false;
+
+        return response($stillApi && $gateSeesApi ? 'api' : 'lost');
+    });
+
+    $this->get('/outer')->assertOk()->assertSee('api');
 });

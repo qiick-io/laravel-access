@@ -85,16 +85,9 @@ final class AccessContext
         if ($async) {
             $this->nestingStack = [];
             $this->current = null;
-
-            // Next branch returns because the stack was just cleared — equivalent.
-            return; // @pest-mutate-ignore: RemoveEarlyReturn
+        } elseif ($this->nestingStack !== []) {
+            $this->current = array_pop($this->nestingStack);
         }
-
-        if ($this->nestingStack === []) {
-            return;
-        }
-
-        $this->current = array_pop($this->nestingStack);
     }
 
     /** Products call this after a credential verifies (design §3.3). */

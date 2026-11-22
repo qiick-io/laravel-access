@@ -19,16 +19,23 @@ afterEach(function (): void {
     AccessContext::clear();
 });
 
-function makeResolver(mixed $apiGuards = [], string $defaultGuard = 'web', bool $runningInConsole = false): ContainerActorResolver
-{
+function makeResolver(
+    mixed $apiGuards = [],
+    string $defaultGuard = 'web',
+    bool $runningInConsole = false,
+    bool $trustApiGuardInConsole = false,
+    bool $isTestingEnvironment = true,
+): ContainerActorResolver {
     $config = Mockery::mock(ConfigRepository::class);
     $config->shouldReceive('get')->with('access.api_guards', [])->andReturn($apiGuards);
+    $config->shouldReceive('get')->with('access.trust_api_guard_in_console', false)->andReturn($trustApiGuardInConsole);
 
     $auth = Mockery::mock(AuthFactory::class);
     $auth->shouldReceive('getDefaultDriver')->andReturn($defaultGuard);
 
     $app = Mockery::mock(Application::class);
     $app->shouldReceive('runningInConsole')->andReturn($runningInConsole);
+    $app->shouldReceive('environment')->with('testing')->andReturn($isTestingEnvironment);
 
     return new ContainerActorResolver($config, $auth, $app);
 }
@@ -149,4 +156,66 @@ it('ignores forged request input when a web session is bound', function (): void
 
     expect(makeResolver()->current()->kind)->toBe(ActorKind::WebSession)
         ->and(makeResolver()->current()->isApiActor())->toBeFalse();
+});
+
+it('keeps the API guard signal when forged input claims web (AC4)', function (): void {
+    request()->headers->set('X-Actor', 'web');
+    request()->query->set('actor', 'web');
+    request()->request->set('actor', 'web');
+    request()->cookies->set('actor', 'web');
+
+    AccessContext::enter(new ActorContext(ActorKind::WebSession, new FakeAuthenticatable(3)));
+
+    $context = makeResolver(['api_key'], 'api_key', runningInConsole: false)->current();
+
+    expect($context->isApiActor())->toBeTrue()
+        ->and($context->kind)->toBe(ActorKind::ApiKey)
+        ->and($context->user?->getAuthIdentifier())->toBe(3);
+});
+
+it('honours the API guard in console when trust_api_guard_in_console is enabled in testing', function (): void {
+    AccessContext::enter(new ActorContext(ActorKind::WebSession, new FakeAuthenticatable));
+
+    $context = makeResolver(
+        ['api_key'],
+        'api_key',
+        runningInConsole: true,
+        trustApiGuardInConsole: true,
+        isTestingEnvironment: true,
+    )->current();
+
+    expect($context->isApiActor())->toBeTrue()
+        ->and($context->kind)->toBe(ActorKind::ApiKey);
+});
+
+it('ignores trust_api_guard_in_console outside the testing environment', function (): void {
+    AccessContext::enter(new ActorContext(ActorKind::WebSession, new FakeAuthenticatable));
+
+    $context = makeResolver(
+        ['api_key'],
+        'api_key',
+        runningInConsole: true,
+        trustApiGuardInConsole: true,
+        isTestingEnvironment: false,
+    )->current();
+
+    expect($context->kind)->toBe(ActorKind::WebSession)
+        ->and($context->isApiActor())->toBeFalse();
+});
+
+it('ignores a non-true trust_api_guard_in_console value in console', function (): void {
+    AccessContext::enter(new ActorContext(ActorKind::WebSession, new FakeAuthenticatable));
+
+    $config = Mockery::mock(ConfigRepository::class);
+    $config->shouldReceive('get')->with('access.api_guards', [])->andReturn(['api_key']);
+    $config->shouldReceive('get')->with('access.trust_api_guard_in_console', false)->andReturn(1);
+
+    $auth = Mockery::mock(AuthFactory::class);
+    $auth->shouldReceive('getDefaultDriver')->andReturn('api_key');
+
+    $app = Mockery::mock(Application::class);
+    $app->shouldReceive('runningInConsole')->andReturn(true);
+    $app->shouldReceive('environment')->with('testing')->andReturn(true);
+
+    expect((new ContainerActorResolver($config, $auth, $app))->current()->isApiActor())->toBeFalse();
 });

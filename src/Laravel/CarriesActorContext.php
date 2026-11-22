@@ -13,13 +13,16 @@ use RuntimeException;
 /**
  * Queue job middleware: re-binds the dispatcher's API actor kind and
  * credential UUID in the worker so Gate::before step 2 still abstains
- * (design §3.3 / AC5). Prefer the automatic payload stamp from the service
- * provider; use through() when a job must opt in explicitly.
+ * (design §3.3 / AC5). Prefer the automatic payload stamp from
+ * ActorPayloadStamper; use through() when a job must opt in explicitly.
  *
  * Jobs that carry an API actor should implement
  * Illuminate\Contracts\Queue\ShouldBeEncrypted when the queue connection is
  * not already encrypted end-to-end, so the credential UUID in the payload
  * is not stored in clear text.
+ *
+ * Always push/pop so a nested job restores the caller's actor even when the
+ * payload stamp already matches (no early-return shortcut).
  *
  * @api
  */
@@ -42,17 +45,6 @@ final readonly class CarriesActorContext
         $current = $store->get();
 
         $this->assertCredentialMatchesBound($current);
-
-        // Already bound by JobProcessing payload stamp — do not double-push.
-        // RemoveEarlyReturn / IdenticalToNotIdentical on the uuid match are
-        // equivalent: a balanced push/pop leaves the same actor visible.
-        if (
-            $current !== null
-            && $current->kind === $this->kind
-            && $current->credentialUuid === $this->credentialUuid // @pest-mutate-ignore: IdenticalToNotIdentical
-        ) {
-            return $next($job); // @pest-mutate-ignore: RemoveEarlyReturn
-        }
 
         $store->push(new ActorContext($this->kind, null, $this->credentialUuid));
 
