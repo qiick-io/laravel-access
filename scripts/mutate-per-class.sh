@@ -13,12 +13,24 @@ cd "$ROOT"
 # Parallel arrays: class FQCN and its source file.
 # Populated as feature PRs land (design §11 mutation targets).
 CLASSES=(
+  'Qiick\Access\Contracts\ActorContext'
 )
 
 CLASS_FILES=(
+  'src/Contracts/ActorContext.php'
 )
 
+# Other files under Contracts\ that must not dilute the ActorContext run.
 SIBLING_FILES=(
+  'src/Contracts/ActorKind.php'
+  'src/Contracts/ActorResolver.php'
+  'src/Contracts/AuthorizationResponder.php'
+  'src/Contracts/GroupRoleSource.php'
+  'src/Contracts/PermissionVocabulary.php'
+  'src/Contracts/RoleCatalog.php'
+  'src/Contracts/TeamContext.php'
+  'src/Contracts/TwoFactorPolicy.php'
+  'src/Contracts/TwoFactorResponder.php'
 )
 
 MIN="${MUTATE_MIN:-95}"

@@ -10,6 +10,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Contracts (`@api`): `ActorKind`, `ActorContext`, `ActorResolver`,
+  `PermissionVocabulary`, `RoleCatalog`, `GroupRoleSource`, `TeamContext`,
+  `TwoFactorPolicy`, `TwoFactorResponder`, `AuthorizationResponder`.
 - Package scaffold: auto-discovered `AccessServiceProvider`, publishable
   `config/access.php` (tag `access-config`), Pest + Testbench, Pint, PHPStan
   level max, qiick standards pack pinned to app-ui `v0.12.0`
