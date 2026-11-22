@@ -9,11 +9,22 @@ it('merges the package defaults into the access config', function (): void {
     expect(config('access.api_guards'))->toBe([]);
     expect(config('access.trust_api_guard_in_console'))->toBeFalse();
     expect(config('access.permission_enum'))->toBeNull();
-    expect(config('access.groups.table'))->toBe('user_groups');
-    expect(config('access.groups.user_pivot'))->toBe('user_group_user');
-    expect(config('access.groups.role_pivot'))->toBe('user_group_role');
+    expect(config('access.migrations.load'))->toBeTrue();
+    expect(config('access.users_table'))->toBeNull();
+    expect(config('access.table_names'))->toBeNull();
     expect(config('access.two_factor.exempt_route_names'))->toContain('logout')
         ->and(config('access.two_factor.exempt_route_names'))->toContain('security.*');
+});
+
+it('loads the package group migrations by default', function (): void {
+    $packageMigrations = realpath(dirname(__DIR__, 1).'/../database/migrations');
+    $loaded = collect(app('migrator')->paths())
+        ->map(static fn (string $path): string => (string) realpath($path))
+        ->filter(static fn (string $path): bool => $path !== '')
+        ->all();
+
+    expect($packageMigrations)->not->toBeFalse()
+        ->and($loaded)->toContain($packageMigrations);
 });
 
 it('publishes the config source into a temporary directory outside vendor', function (): void {
@@ -33,7 +44,9 @@ it('publishes the config source into a temporary directory outside vendor', func
 
     expect($target)->toBeFile()
         ->and(str_contains((string) realpath($target), DIRECTORY_SEPARATOR.'vendor'.DIRECTORY_SEPARATOR))->toBeFalse()
-        ->and(file_get_contents($target))->toContain("'api_guards'");
+        ->and(file_get_contents($target))->toContain("'api_guards'")
+        ->and(file_get_contents($target))->toContain("'migrations'")
+        ->and(file_get_contents($target))->not->toContain("'table_names'");
 
     unlink($target);
     rmdir($tempDir);

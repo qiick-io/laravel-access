@@ -103,22 +103,43 @@ jobs:
             awk '/^## Per-class mutation scores$/{flag=1} flag{print}' "${output}" >> "${GITHUB_STEP_SUMMARY}"
           fi
 
-  # Resolver / group SQL needs real engines (design §11 / §13.2: PostgreSQL 17,
-  # MySQL 8.4, MariaDB 10.11, SQLite). Scaffold keeps the matrix shape; the
-  # EloquentGroupRoleSource PR starts the service containers and runs the
-  # engine-specific Pest group against them.
+  # Group SQL (EloquentGroupRoleSource) and package migrations need real engines
+  # (design §11 / §13.2: PostgreSQL 17, MySQL 8.4, MariaDB 10.11).
   databases:
-    name: Databases smoke (${{ matrix.engine }})
+    name: Databases (${{ matrix.database.name }})
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
-        engine:
-          - sqlite
-          - mysql
-          - mariadb
-          - pgsql
+        database:
+          - name: MySQL 8.4
+            connection: mysql
+            image: mysql:8.4
+            port: 3306
+            options: >-
+              -e MYSQL_ALLOW_EMPTY_PASSWORD=yes -e MYSQL_DATABASE=laravel_access
+              --health-cmd="mysqladmin ping -h 127.0.0.1" --health-interval=5s --health-retries=20
+          - name: MariaDB 10.11
+            connection: mariadb
+            image: mariadb:10.11
+            port: 3306
+            options: >-
+              -e MARIADB_ALLOW_EMPTY_ROOT_PASSWORD=yes -e MARIADB_DATABASE=laravel_access
+              --health-cmd="healthcheck.sh --connect --innodb_initialized" --health-interval=5s --health-retries=20
+          - name: PostgreSQL 17
+            connection: pgsql
+            image: postgres:17
+            port: 5432
+            options: >-
+              -e POSTGRES_HOST_AUTH_METHOD=trust -e POSTGRES_DB=laravel_access
+              --health-cmd="pg_isready -U postgres" --health-interval=5s --health-retries=20
+    services:
+      database:
+        image: ${{ matrix.database.image }}
+        ports:
+          - ${{ matrix.database.port }}:${{ matrix.database.port }}
+        options: ${{ matrix.database.options }}
     steps:
       - name: Checkout
         # actions/checkout@v4.2.2
@@ -144,10 +165,15 @@ jobs:
             "illuminate/support:^12.0"
           composer update --no-interaction --prefer-dist --with-all-dependencies
 
-      - name: Pest (engine services land with the resolver)
-        run: |
-          echo "Engine=${{ matrix.engine }}: PostgreSQL 17 / MySQL 8.4 / MariaDB 10.11 services land with EloquentGroupRoleSource."
-          vendor/bin/pest
+      - name: Pest (group engines)
+        env:
+          DB_CONNECTION: ${{ matrix.database.connection }}
+          DB_HOST: 127.0.0.1
+          DB_PORT: ${{ matrix.database.port }}
+          DB_DATABASE: laravel_access
+          DB_USERNAME: ${{ matrix.database.connection == 'pgsql' && 'postgres' || 'root' }}
+          DB_PASSWORD: ''
+        run: vendor/bin/pest --group=engines
 
   standards:
     # qiick-io/app-ui@v0.12.0
