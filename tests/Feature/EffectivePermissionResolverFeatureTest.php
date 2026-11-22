@@ -34,8 +34,9 @@ beforeEach(function (): void {
         $table->string('email')->nullable();
     });
 
+    // Package-root vendor path: Testbench base_path() points at its sandbox app.
     /** @var Migration $migration */
-    $migration = require base_path('vendor/spatie/laravel-permission/database/migrations/create_permission_tables.php.stub');
+    $migration = require dirname(__DIR__, 2).'/vendor/spatie/laravel-permission/database/migrations/create_permission_tables.php.stub';
     $migration->up();
 
     app(PermissionRegistrar::class)->forgetCachedPermissions();
