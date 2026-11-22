@@ -22,6 +22,8 @@ use Qiick\Access\Contracts\GroupRoleSource;
 use Qiick\Access\Contracts\PermissionVocabulary;
 use Qiick\Access\Contracts\RoleCatalog;
 use Qiick\Access\Contracts\TeamContext;
+use Qiick\Access\Contracts\TwoFactorPolicy;
+use Qiick\Access\Contracts\TwoFactorResponder;
 use Qiick\Access\EffectivePermissionResolver;
 use Qiick\Access\GateBefore;
 use Qiick\Access\Http\EnsureTwoFactorIsEnabled;
