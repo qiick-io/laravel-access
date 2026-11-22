@@ -18,6 +18,10 @@ CLASSES=(
   'Qiick\Access\Laravel\ContainerActorResolver'
   'Qiick\Access\Laravel\CarriesActorContext'
   'Qiick\Access\Laravel\ActorPayloadStamper'
+  'Qiick\Access\Laravel\NoTeamContext'
+  'Qiick\Access\Laravel\SpatiePermissionVocabulary'
+  'Qiick\Access\Laravel\EloquentGroupRoleSource'
+  'Qiick\Access\Laravel\SpatieTeamContext'
 )
 
 CLASS_FILES=(
@@ -26,6 +30,10 @@ CLASS_FILES=(
   'src/Laravel/ContainerActorResolver.php'
   'src/Laravel/CarriesActorContext.php'
   'src/Laravel/ActorPayloadStamper.php'
+  'src/Laravel/NoTeamContext.php'
+  'src/Laravel/SpatiePermissionVocabulary.php'
+  'src/Laravel/EloquentGroupRoleSource.php'
+  'src/Laravel/SpatieTeamContext.php'
 )
 
 # Other mutation-target siblings ignored while mutating one class.
@@ -78,7 +86,15 @@ for index in "${!CLASSES[@]}"; do
   set -e
 
   # Strip ANSI before parsing — pest colours the Score line.
-  score="$(sed $'s/\x1b\\[[0-9;]*m//g' "${output}" | grep -oE 'Score:[[:space:]]+[0-9.]+%' | tail -1 | grep -oE '[0-9.]+' | head -1 || true)"
+  plain="$(sed $'s/\x1b\\[[0-9;]*m//g' "${output}")"
+  score="$(printf '%s\n' "${plain}" | grep -oE 'Score:[[:space:]]+[0-9.]+%' | tail -1 | grep -oE '[0-9.]+' | head -1 || true)"
+
+  # A class with no mutants (e.g. NoTeamContext) cannot score below the floor.
+  if printf '%s\n' "${plain}" | grep -q 'No mutations created'; then
+    score='100.00'
+    status=0
+  fi
+
   if [[ -z "${score}" ]]; then
     score='?'
   fi

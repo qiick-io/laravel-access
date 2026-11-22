@@ -7,12 +7,17 @@ namespace Qiick\Access\Laravel;
 use Illuminate\Contracts\Auth\Factory as AuthFactory;
 use Illuminate\Contracts\Config\Repository as ConfigRepository;
 use Illuminate\Contracts\Foundation\Application;
+use Illuminate\Database\DatabaseManager;
 use Illuminate\Queue\Events\JobFailed;
 use Illuminate\Queue\Events\JobProcessed;
 use Illuminate\Queue\Events\JobProcessing;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\ServiceProvider;
 use Qiick\Access\Contracts\ActorResolver;
+use Qiick\Access\Contracts\GroupRoleSource;
+use Qiick\Access\Contracts\PermissionVocabulary;
+use Qiick\Access\Contracts\TeamContext;
+use RuntimeException;
 
 /**
  * Registers the package in a Laravel app. Auto-discovered through
@@ -20,8 +25,10 @@ use Qiick\Access\Contracts\ActorResolver;
  *
  * Boot checks for required product bindings and Gate::before land in a later
  * PR. This provider merges config, binds the scoped AccessContext and
- * ContainerActorResolver, stamps API actors onto queued jobs, and clears
- * context on Octane termination (scoped bindings cover per-request/test reset).
+ * ContainerActorResolver, stamps API actors onto queued jobs, clears
+ * context on Octane termination (scoped bindings cover per-request/test reset),
+ * and binds package-default adapters: NoTeamContext, EloquentGroupRoleSource,
+ * and SpatiePermissionVocabulary when access.permission_enum is set.
  *
  * Note for the boot-check PR (design §3.3 / AC12): an ActorResolver presence
  * check can never fail as designed — this provider always binds
@@ -45,6 +52,31 @@ final class AccessServiceProvider extends ServiceProvider
                 $app->make(AuthFactory::class),
                 $app,
             );
+        });
+
+        $this->app->singleton(TeamContext::class, NoTeamContext::class);
+
+        $this->app->singleton(GroupRoleSource::class, function (Application $app): GroupRoleSource {
+            $config = $app->make(ConfigRepository::class);
+            $groups = $config->get('access.groups', []);
+
+            return new EloquentGroupRoleSource(
+                $app->make(DatabaseManager::class)->connection(),
+                is_array($groups) ? $groups : [],
+            );
+        });
+
+        $this->app->singleton(PermissionVocabulary::class, function (Application $app): PermissionVocabulary {
+            $config = $app->make(ConfigRepository::class);
+            $enumClass = $config->get('access.permission_enum');
+
+            if (! is_string($enumClass) || $enumClass === '') {
+                throw new RuntimeException(
+                    'Set access.permission_enum to your PermissionEnum class, or bind PermissionVocabulary yourself.',
+                );
+            }
+
+            return new SpatiePermissionVocabulary($enumClass);
         });
     }
 

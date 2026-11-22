@@ -1,8 +1,9 @@
 # Reference: contracts
 
-Normative public API (`@api`) from the binding design §2.2. The interfaces and
-`ActorContext` / `ActorKind` ship in this package; default implementations land
-in later feature PRs. This page is the name and duty list for adopters.
+Normative public API (`@api`) from the binding design §2.2. Package defaults:
+`NoTeamContext`, `EloquentGroupRoleSource`, `SpatiePermissionVocabulary` (when
+`access.permission_enum` is set). `SpatieTeamContext` is available for products
+that enable Spatie teams. This page is the name and duty list for adopters.
 
 | Type | Duty |
 | --- | --- |
