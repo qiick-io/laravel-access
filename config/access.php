@@ -60,6 +60,24 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Group table names
+    |--------------------------------------------------------------------------
+    |
+    | Package defaults match the fleet schema. Products may override in the
+    | published config file (for example while externa 1.x still decides
+    | whether existing tables keep these names). Never wire these through
+    | env() — config only (knowledge #124 / Q5).
+    |
+    */
+
+    'table_names' => [
+        'groups' => 'user_groups',
+        'group_user' => 'user_group_user',
+        'group_role' => 'user_group_role',
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | Two-factor exemption routes
     |--------------------------------------------------------------------------
     |

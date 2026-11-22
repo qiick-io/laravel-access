@@ -75,3 +75,29 @@ it('creates the package group tables with expires_at public_id and metadata', fu
 
     expect($connection->table('user_group_role')->count())->toBe(1);
 })->group('engines');
+
+it('honours access.table_names overrides when creating the package group tables', function (): void {
+    config()->set('access.table_names', [
+        'groups' => 'custom_groups',
+        'group_user' => 'custom_group_user',
+        'group_role' => 'custom_group_role',
+    ]);
+
+    Schema::dropIfExists('custom_group_role');
+    Schema::dropIfExists('custom_group_user');
+    Schema::dropIfExists('custom_groups');
+
+    /** @var Migration $migration */
+    $migration = require dirname(__DIR__, 2).'/database/migrations/2026_11_22_120000_create_user_groups_tables.php';
+    $migration->up();
+
+    expect(Schema::hasTable('custom_groups'))->toBeTrue()
+        ->and(Schema::hasTable('custom_group_user'))->toBeTrue()
+        ->and(Schema::hasTable('custom_group_role'))->toBeTrue()
+        ->and(Schema::hasTable('user_groups'))->toBeFalse();
+
+    $migration->down();
+    Schema::dropIfExists('custom_group_role');
+    Schema::dropIfExists('custom_group_user');
+    Schema::dropIfExists('custom_groups');
+})->group('engines');

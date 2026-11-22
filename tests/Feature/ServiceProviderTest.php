@@ -3,15 +3,30 @@
 declare(strict_types=1);
 
 use Illuminate\Support\ServiceProvider;
+use Illuminate\Support\Str;
 use Qiick\Access\Laravel\AccessServiceProvider;
 
 it('merges the package defaults into the access config', function (): void {
     expect(config('access.api_guards'))->toBe([]);
     expect(config('access.trust_api_guard_in_console'))->toBeFalse();
     expect(config('access.permission_enum'))->toBeNull();
-    expect(config('access.groups'))->toBeNull();
+    expect(config('access.table_names'))->toBe([
+        'groups' => 'user_groups',
+        'group_user' => 'user_group_user',
+        'group_role' => 'user_group_role',
+    ]);
     expect(config('access.two_factor.exempt_route_names'))->toContain('logout')
         ->and(config('access.two_factor.exempt_route_names'))->toContain('security.*');
+});
+
+it('keeps access.table_names as plain config literals with no env() wiring', function (): void {
+    $configSource = (string) file_get_contents(dirname(__DIR__, 1).'/../config/access.php');
+    $tableNamesBlock = Str::between($configSource, "'table_names' => [", '],');
+
+    expect($tableNamesBlock)->not->toContain('env(')
+        ->and($tableNamesBlock)->toContain("'user_groups'")
+        ->and($tableNamesBlock)->toContain("'user_group_user'")
+        ->and($tableNamesBlock)->toContain("'user_group_role'");
 });
 
 it('publishes the config source into a temporary directory outside vendor', function (): void {
