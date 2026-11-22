@@ -37,7 +37,8 @@ return [
     ],
 
     'suffixes' => [
-        'Laravel' => 'ServiceProvider',
+        // Design §13.1 places many adapters under Laravel/; only the provider
+        // keeps the ServiceProvider suffix (enforced in PackageArchitectureTest).
     ],
 
     'controllerPublicMethods' => [],

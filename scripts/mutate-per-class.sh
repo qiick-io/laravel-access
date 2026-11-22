@@ -14,13 +14,19 @@ cd "$ROOT"
 # Populated as feature PRs land (design §11 mutation targets).
 CLASSES=(
   'Qiick\Access\Contracts\ActorContext'
+  'Qiick\Access\Laravel\AccessContext'
+  'Qiick\Access\Laravel\ContainerActorResolver'
+  'Qiick\Access\Laravel\CarriesActorContext'
 )
 
 CLASS_FILES=(
   'src/Contracts/ActorContext.php'
+  'src/Laravel/AccessContext.php'
+  'src/Laravel/ContainerActorResolver.php'
+  'src/Laravel/CarriesActorContext.php'
 )
 
-# Other files under Contracts\ that must not dilute the ActorContext run.
+# Other mutation-target siblings ignored while mutating one class.
 SIBLING_FILES=(
   'src/Contracts/ActorKind.php'
   'src/Contracts/ActorResolver.php'
@@ -31,6 +37,7 @@ SIBLING_FILES=(
   'src/Contracts/TeamContext.php'
   'src/Contracts/TwoFactorPolicy.php'
   'src/Contracts/TwoFactorResponder.php'
+  'src/Laravel/AccessServiceProvider.php'
 )
 
 MIN="${MUTATE_MIN:-95}"
