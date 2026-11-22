@@ -10,6 +10,7 @@ it('merges the package defaults into the access config', function (): void {
     expect(config('access.trust_api_guard_in_console'))->toBeFalse();
     expect(config('access.permission_enum'))->toBeNull();
     expect(config('access.migrations.load'))->toBeTrue();
+    expect(config('access.users_table'))->toBeNull();
     expect(config('access.table_names'))->toBeNull();
     expect(config('access.two_factor.exempt_route_names'))->toContain('logout')
         ->and(config('access.two_factor.exempt_route_names'))->toContain('security.*');

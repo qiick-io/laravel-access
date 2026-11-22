@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Qiick\Access\Testing;
 
 use Illuminate\Database\Connection;
+use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\Schema;
 use RuntimeException;
 
@@ -72,7 +73,7 @@ final class AssertsGroupTablesSchema
         $this->requireIndexCovering('user_group_user', 'user_id');
         $this->requireIndexCovering('user_group_user', 'expires_at');
         $this->requireForeignKeyCascade('user_group_user', 'user_group_id', 'user_groups');
-        $this->requireForeignKeyCascade('user_group_user', 'user_id', 'users');
+        $this->requireForeignKeyCascade('user_group_user', 'user_id', $this->usersTable());
     }
 
     private function assertUserGroupRole(): void
@@ -94,6 +95,24 @@ final class AssertsGroupTablesSchema
         $this->requireIndexCovering('user_group_role', 'role_id');
         $this->requireForeignKeyCascade('user_group_role', 'user_group_id', 'user_groups');
         $this->requireForeignKeyCascade('user_group_role', 'role_id', $rolesTable);
+    }
+
+    private function usersTable(): string
+    {
+        $configured = config('access.users_table');
+        if (is_string($configured) && $configured !== '') {
+            return $configured;
+        }
+
+        $modelClass = config('auth.providers.users.model');
+        if (is_string($modelClass) && class_exists($modelClass)) {
+            $model = new $modelClass;
+            if ($model instanceof Model) {
+                return $model->getTable();
+            }
+        }
+
+        return 'users';
     }
 
     private function requireTable(string $table): void

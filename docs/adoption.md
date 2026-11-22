@@ -25,6 +25,11 @@ available for explicit opt-in. The package never calls
 `Queue::createPayloadUsing(null)`, so other payload hooks (including Laravel's
 `illuminate:log:context`) keep working.
 
+Organisation-scoped work must call `TeamContext::switchTo(...)` itself inside
+the job (or middleware). Async workers start with a cleared Spatie team id so
+job 2 never inherits job 1; a sync-connection job nested under a request
+restores the request team afterwards and does not wipe it mid-request.
+
 Under PHPUnit, `runningInConsole()` is always true, so the API-guard signal is
 ignored by default. Product tests that need the guard path should call
 `Qiick\Access\Testing\TrustApiGuardInConsole::enable()` (sets
@@ -39,10 +44,16 @@ it to `false` and adopts the same shape through an additive migration so its
 released tables keep the standard names until v2. Pre-1.0 products delete
 their own `create_user_groups_tables` migration.
 
+Products generate `user_groups.public_id` as **UUID v7** in their Eloquent
+model / factory (the package migration only declares the column). The
+membership FK targets `access.users_table` when set, otherwise the table from
+`auth.providers.users.model`, otherwise `users`.
+
 Assert the group schema with `Qiick\Access\Testing\AssertsGroupTablesSchema`
 (AC17). When Spatie teams are on, set `permission.column_names.team_foreign_key`
 to `organisation_id` and use uuid team columns; products assert that with
-`Qiick\Access\Testing\AssertsSpatieTeamSchema` (A3).
+`Qiick\Access\Testing\AssertsSpatieTeamSchema` (A3) — run the uuid check on
+PostgreSQL.
 
 `EffectivePermissionResolver` (later PR) must apply group role ids **in the
 current team** when loading permissions from those roles.

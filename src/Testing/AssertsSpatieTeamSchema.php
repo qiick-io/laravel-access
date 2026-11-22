@@ -6,7 +6,7 @@ namespace Qiick\Access\Testing;
 
 use Illuminate\Contracts\Config\Repository as ConfigRepository;
 use Illuminate\Database\Connection;
-use Illuminate\Support\Facades\Schema;
+use Illuminate\Database\Schema\Builder as SchemaBuilder;
 use RuntimeException;
 use stdClass;
 
@@ -40,14 +40,16 @@ final class AssertsSpatieTeamSchema
             );
         }
 
+        $schema = $this->schema();
+
         foreach ($this->teamScopedTableNames() as $table) {
-            if (! Schema::hasTable($table)) {
+            if (! $schema->hasTable($table)) {
                 throw new RuntimeException(
                     "Spatie table [{$table}] is missing; cannot assert organisation_id uuid (A3).",
                 );
             }
 
-            if (! Schema::hasColumn($table, 'organisation_id')) {
+            if (! $schema->hasColumn($table, 'organisation_id')) {
                 throw new RuntimeException(
                     "Table [{$table}] must have an organisation_id column when teams are enabled (A3).",
                 );
@@ -91,7 +93,9 @@ final class AssertsSpatieTeamSchema
         }
 
         $row = $this->connection->selectOne(
-            'select data_type from information_schema.columns where table_name = ? and column_name = ?',
+            'select data_type from information_schema.columns'
+            .' where table_schema = current_schema()'
+            .' and table_name = ? and column_name = ?',
             [$table, 'organisation_id'],
         );
 
@@ -101,6 +105,11 @@ final class AssertsSpatieTeamSchema
                 "Column [{$table}.organisation_id] must be uuid on PostgreSQL when teams are enabled (A3), got [{$dataType}].",
             );
         }
+    }
+
+    private function schema(): SchemaBuilder
+    {
+        return $this->connection->getSchemaBuilder();
     }
 
     private function readDataType(mixed $row): string

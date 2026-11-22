@@ -22,6 +22,8 @@ CLASSES=(
   'Qiick\Access\Laravel\SpatiePermissionVocabulary'
   'Qiick\Access\Laravel\EloquentGroupRoleSource'
   'Qiick\Access\Laravel\SpatieTeamContext'
+  'Qiick\Access\Laravel\SpatieTeamQueueBoundary'
+  'Qiick\Access\Testing\AssertsSpatieTeamSchema'
 )
 
 CLASS_FILES=(
@@ -34,6 +36,8 @@ CLASS_FILES=(
   'src/Laravel/SpatiePermissionVocabulary.php'
   'src/Laravel/EloquentGroupRoleSource.php'
   'src/Laravel/SpatieTeamContext.php'
+  'src/Laravel/SpatieTeamQueueBoundary.php'
+  'src/Testing/AssertsSpatieTeamSchema.php'
 )
 
 # Other mutation-target siblings ignored while mutating one class.

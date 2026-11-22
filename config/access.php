@@ -76,6 +76,19 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Users table for group membership FK
+    |--------------------------------------------------------------------------
+    |
+    | Optional override for user_group_user.user_id → users. When null, the
+    | package migration reads the table from auth.providers.users.model
+    | (Eloquent getTable()), falling back to "users".
+    |
+    */
+
+    'users_table' => null,
+
+    /*
+    |--------------------------------------------------------------------------
     | Two-factor exemption routes
     |--------------------------------------------------------------------------
     |

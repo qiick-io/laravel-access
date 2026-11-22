@@ -18,7 +18,6 @@ use Qiick\Access\Contracts\GroupRoleSource;
 use Qiick\Access\Contracts\PermissionVocabulary;
 use Qiick\Access\Contracts\TeamContext;
 use RuntimeException;
-use Spatie\Permission\PermissionRegistrar;
 
 /**
  * Registers the package in a Laravel app. Auto-discovered through
@@ -28,9 +27,9 @@ use Spatie\Permission\PermissionRegistrar;
  * PR. This provider merges config, binds the scoped AccessContext and
  * ContainerActorResolver, stamps API actors onto queued jobs, clears
  * context on Octane termination (scoped bindings cover per-request/test reset),
- * resets the Spatie team id at job boundaries, loads the package group
- * migrations when access.migrations.load is true, and binds package-default
- * adapters.
+ * isolates Spatie team ids at job boundaries via SpatieTeamQueueBoundary,
+ * loads the package group migrations when access.migrations.load is true, and
+ * binds package-default adapters.
  *
  * Note for the boot-check PR (design §3.3 / AC12): an ActorResolver presence
  * check can never fail as designed — this provider always binds
@@ -47,6 +46,7 @@ final class AccessServiceProvider extends ServiceProvider
 
         $this->app->scoped(AccessContext::class, AccessContext::class);
         $this->app->singleton(ActorPayloadStamper::class, ActorPayloadStamper::class);
+        $this->app->singleton(SpatieTeamQueueBoundary::class, SpatieTeamQueueBoundary::class);
 
         $this->app->scoped(ActorResolver::class, function (Application $app): ActorResolver {
             return new ContainerActorResolver(
@@ -120,32 +120,20 @@ final class AccessServiceProvider extends ServiceProvider
 
         $events = $this->app->make('events');
         $stamper = fn (): ActorPayloadStamper => $this->app->make(ActorPayloadStamper::class);
+        $teamBoundary = fn (): SpatieTeamQueueBoundary => $this->app->make(SpatieTeamQueueBoundary::class);
 
-        $events->listen(JobProcessing::class, function (JobProcessing $event) use ($stamper): void {
-            $this->resetSpatieTeamId();
+        $events->listen(JobProcessing::class, function (JobProcessing $event) use ($stamper, $teamBoundary): void {
+            $teamBoundary()->begin($event->connectionName);
             $stamper()->beginJob($event->job->payload(), $event->connectionName);
         });
 
-        $endJob = function (JobProcessed|JobFailed $event) use ($stamper): void {
+        $endJob = function (JobProcessed|JobFailed $event) use ($stamper, $teamBoundary): void {
             $stamper()->endJob($event->connectionName);
-            $this->resetSpatieTeamId();
+            $teamBoundary()->end($event->connectionName);
         };
 
         $events->listen(JobProcessed::class, $endJob);
         $events->listen(JobFailed::class, $endJob);
-    }
-
-    /**
-     * Clear Spatie's process-local team id so job 2 never inherits job 1's
-     * organisation (queued-worker leak).
-     */
-    private function resetSpatieTeamId(): void
-    {
-        if (! $this->app->bound(PermissionRegistrar::class)) {
-            return;
-        }
-
-        $this->app->make(PermissionRegistrar::class)->setPermissionsTeamId(null);
     }
 
     private function eventClassExists(string $event): bool

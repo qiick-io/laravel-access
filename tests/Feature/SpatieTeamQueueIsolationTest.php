@@ -76,3 +76,16 @@ it('resets the Spatie team id between database queue workers so job 2 does not i
         ->and(CaptureTeamIdJob::$teamIds[0])->toBeNull()
         ->and(app('db')->table('jobs')->count())->toBe(0);
 })->group('engines');
+
+it('restores the request Spatie team after a sync-connection nested job', function (): void {
+    config()->set('queue.default', 'sync');
+    config()->set('queue.connections.sync', ['driver' => 'sync']);
+
+    app(TeamContext::class)->switchTo('org-A');
+    expect(app(TeamContext::class)->currentId())->toBe('org-A');
+
+    SwitchTeamJob::dispatch('org-B');
+
+    expect(app(TeamContext::class)->currentId())->toBe('org-A')
+        ->and(app(PermissionRegistrar::class)->getPermissionsTeamId())->toBe('org-A');
+});

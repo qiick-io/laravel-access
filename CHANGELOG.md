@@ -21,12 +21,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Package-default adapters: `NoTeamContext`, `EloquentGroupRoleSource` (soft-deleted
   groups and expired memberships excluded; fixed table names; Octane-safe
   connection resolve), `SpatiePermissionVocabulary` (from `access.permission_enum`),
-  and `SpatieTeamContext` (clears the AccessContext actor; resets Spatie team id
-  on queue job boundaries).
+  and `SpatieTeamContext` (clears the AccessContext actor).
+  `SpatieTeamQueueBoundary` isolates Spatie team ids on async workers and
+  restores the request team after sync-connection jobs.
 - Package migrations for fixed `user_groups` / `user_group_user` /
   `user_group_role` (`public_id`, `metadata`, membership `expires_at`), gated by
-  `access.migrations.load` (default true); `AssertsGroupTablesSchema` (AC17) and
-  `AssertsSpatieTeamSchema` (A3).
+  `access.migrations.load` (default true); optional `access.users_table`;
+  `AssertsGroupTablesSchema` (AC17) and `AssertsSpatieTeamSchema` (A3).
 - Contracts (`@api`): `ActorKind`, `ActorContext`, `ActorResolver`,
   `PermissionVocabulary`, `RoleCatalog`, `GroupRoleSource`, `TeamContext`,
   `TwoFactorPolicy`, `TwoFactorResponder`, `AuthorizationResponder`.
