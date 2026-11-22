@@ -5,30 +5,82 @@ declare(strict_types=1);
 namespace Qiick\Access\Laravel;
 
 use Closure;
+use InvalidArgumentException;
 use Qiick\Access\Contracts\ActorContext;
 use Qiick\Access\Contracts\ActorKind;
+use RuntimeException;
 
 /**
- * Queue job middleware: re-binds the dispatcher's actor kind and credential
- * UUID in the worker so Gate::before step 2 still abstains (design §3.3 / AC5).
+ * Queue job middleware: re-binds the dispatcher's API actor kind and
+ * credential UUID in the worker so Gate::before step 2 still abstains
+ * (design §3.3 / AC5). Prefer the automatic payload stamp from the service
+ * provider; use through() when a job must opt in explicitly.
+ *
+ * Jobs that carry an API actor should implement
+ * Illuminate\Contracts\Queue\ShouldBeEncrypted when the queue connection is
+ * not already encrypted end-to-end, so the credential UUID in the payload
+ * is not stored in clear text.
  *
  * @api
  */
-final class CarriesActorContext
+final readonly class CarriesActorContext
 {
     public function __construct(
         public ActorKind $kind,
         public ?string $credentialUuid = null,
-    ) {}
+    ) {
+        if (! (new ActorContext($kind, null))->isApiActor()) {
+            throw new InvalidArgumentException(
+                'CarriesActorContext only accepts API actor kinds (ApiKey, OAuthGrant, PublicApi).',
+            );
+        }
+    }
 
     public function handle(object $job, Closure $next): mixed
     {
-        AccessContext::enter(new ActorContext($this->kind, null, $this->credentialUuid));
+        $store = app(AccessContext::class);
+        $current = $store->get();
+
+        $this->assertCredentialMatchesBound($current);
+
+        // Already bound by JobProcessing payload stamp — do not double-push.
+        // RemoveEarlyReturn / IdenticalToNotIdentical on the uuid match are
+        // equivalent: a balanced push/pop leaves the same actor visible.
+        if (
+            $current !== null
+            && $current->kind === $this->kind
+            && $current->credentialUuid === $this->credentialUuid // @pest-mutate-ignore: IdenticalToNotIdentical
+        ) {
+            return $next($job); // @pest-mutate-ignore: RemoveEarlyReturn
+        }
+
+        $store->push(new ActorContext($this->kind, null, $this->credentialUuid));
 
         try {
             return $next($job);
         } finally {
-            AccessContext::clear();
+            $store->pop();
+        }
+    }
+
+    /**
+     * When the worker already has the same API kind with a credential UUID
+     * (product binding or payload stamp), refuse a mismatched middleware stamp.
+     */
+    private function assertCredentialMatchesBound(?ActorContext $current): void
+    {
+        if ($current === null || $current->kind !== $this->kind) {
+            return;
+        }
+
+        if ($current->credentialUuid === null || $this->credentialUuid === null) {
+            return;
+        }
+
+        if ($current->credentialUuid !== $this->credentialUuid) {
+            throw new RuntimeException(
+                'CarriesActorContext credential UUID does not match the actor already bound on the worker.',
+            );
         }
     }
 

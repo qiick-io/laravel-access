@@ -10,9 +10,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- Actor runtime: `AccessContext`, `ContainerActorResolver` (bound as
-  `ActorResolver`), `CarriesActorContext` job middleware, and RequestHandled /
-  Octane clears so API actors cannot leak across requests or workers.
+- Actor runtime: scoped `AccessContext`, `ContainerActorResolver` (bound as
+  `ActorResolver`), `CarriesActorContext` job middleware, automatic queue
+  payload stamping for API actors, request-start / job-boundary / Octane
+  clears, and guard-signal ignored outside HTTP so unattended work stays
+  unattended.
 - Contracts (`@api`): `ActorKind`, `ActorContext`, `ActorResolver`,
   `PermissionVocabulary`, `RoleCatalog`, `GroupRoleSource`, `TeamContext`,
   `TwoFactorPolicy`, `TwoFactorResponder`, `AuthorizationResponder`.

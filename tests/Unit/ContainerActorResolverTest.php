@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use Illuminate\Contracts\Auth\Factory as AuthFactory;
 use Illuminate\Contracts\Config\Repository as ConfigRepository;
+use Illuminate\Contracts\Foundation\Application;
 use Qiick\Access\Contracts\ActorContext;
 use Qiick\Access\Contracts\ActorKind;
 use Qiick\Access\Laravel\AccessContext;
@@ -18,7 +19,7 @@ afterEach(function (): void {
     AccessContext::clear();
 });
 
-function makeResolver(mixed $apiGuards = [], string $defaultGuard = 'web'): ContainerActorResolver
+function makeResolver(mixed $apiGuards = [], string $defaultGuard = 'web', bool $runningInConsole = false): ContainerActorResolver
 {
     $config = Mockery::mock(ConfigRepository::class);
     $config->shouldReceive('get')->with('access.api_guards', [])->andReturn($apiGuards);
@@ -26,7 +27,10 @@ function makeResolver(mixed $apiGuards = [], string $defaultGuard = 'web'): Cont
     $auth = Mockery::mock(AuthFactory::class);
     $auth->shouldReceive('getDefaultDriver')->andReturn($defaultGuard);
 
-    return new ContainerActorResolver($config, $auth);
+    $app = Mockery::mock(Application::class);
+    $app->shouldReceive('runningInConsole')->andReturn($runningInConsole);
+
+    return new ContainerActorResolver($config, $auth, $app);
 }
 
 it('returns Unattended when nothing is bound and no API guard is active', function (): void {
@@ -49,14 +53,23 @@ it('returns the bound API actor unchanged even when an API guard is also active'
         ->and($context->isApiActor())->toBeTrue();
 });
 
-it('fails closed as an API actor when the default guard is an API guard', function (): void {
+it('fails closed as an API actor when the default guard is an API guard on HTTP', function (): void {
     AccessContext::enter(new ActorContext(ActorKind::WebSession, new FakeAuthenticatable(9)));
 
-    $context = makeResolver(['api_key'], 'api_key')->current();
+    $context = makeResolver(['api_key'], 'api_key', runningInConsole: false)->current();
 
     expect($context->isApiActor())->toBeTrue()
         ->and($context->kind)->toBe(ActorKind::ApiKey)
         ->and($context->user?->getAuthIdentifier())->toBe(9);
+});
+
+it('ignores the API guard signal in console jobs and commands', function (): void {
+    AccessContext::enter(new ActorContext(ActorKind::WebSession, new FakeAuthenticatable));
+
+    $context = makeResolver(['api_key'], 'api_key', runningInConsole: true)->current();
+
+    expect($context->kind)->toBe(ActorKind::WebSession)
+        ->and($context->isApiActor())->toBeFalse();
 });
 
 it('does not treat a non-API guard as an API actor', function (): void {
@@ -86,25 +99,25 @@ it('ignores empty and non-string entries in api_guards', function (): void {
 it('does not treat an empty-string guard name as an API guard', function (): void {
     AccessContext::enter(new ActorContext(ActorKind::WebSession, new FakeAuthenticatable));
 
-    // Kills EmptyStringToNotEmpty on the guard filter: '' must stay excluded.
     expect(makeResolver([''], '')->current()->isApiActor())->toBeFalse();
 });
 
 it('does not treat a null default driver as matching a null config entry', function (): void {
     AccessContext::enter(new ActorContext(ActorKind::WebSession, new FakeAuthenticatable));
 
-    // Kills BooleanAndToBooleanOr on the guard filter: null must stay excluded.
     expect(makeResolver([null], '')->current()->isApiActor())->toBeFalse();
 
     $config = Mockery::mock(ConfigRepository::class);
     $config->shouldReceive('get')->with('access.api_guards', [])->andReturn([null]);
     $auth = Mockery::mock(AuthFactory::class);
     $auth->shouldReceive('getDefaultDriver')->andReturn(null);
+    $app = Mockery::mock(Application::class);
+    $app->shouldReceive('runningInConsole')->andReturn(false);
 
-    expect((new ContainerActorResolver($config, $auth))->current()->isApiActor())->toBeFalse();
+    expect((new ContainerActorResolver($config, $auth, $app))->current()->isApiActor())->toBeFalse();
 });
 
-it('never reads request input when resolving the actor', function (): void {
+it('never reads request input when resolving a bound API actor', function (): void {
     request()->headers->set('X-Actor', 'web');
     request()->query->set('actor', 'web');
     request()->request->set('actor', 'web');
@@ -112,8 +125,28 @@ it('never reads request input when resolving the actor', function (): void {
 
     AccessContext::enter(new ActorContext(ActorKind::ApiKey, new FakeAuthenticatable, 'k'));
 
-    $context = makeResolver()->current();
+    expect(makeResolver()->current()->kind)->toBe(ActorKind::ApiKey)
+        ->and(makeResolver()->current()->isApiActor())->toBeTrue();
+});
 
-    expect($context->kind)->toBe(ActorKind::ApiKey)
-        ->and($context->isApiActor())->toBeTrue();
+it('ignores forged request input when nothing is bound', function (): void {
+    request()->headers->set('X-Actor', 'api_key');
+    request()->query->set('actor', 'api_key');
+    request()->request->set('actor', 'api_key');
+    request()->cookies->set('actor', 'api_key');
+
+    expect(makeResolver()->current()->kind)->toBe(ActorKind::Unattended)
+        ->and(makeResolver()->current()->isApiActor())->toBeFalse();
+});
+
+it('ignores forged request input when a web session is bound', function (): void {
+    request()->headers->set('X-Actor', 'api_key');
+    request()->query->set('actor', 'api_key');
+    request()->request->set('actor', 'api_key');
+    request()->cookies->set('actor', 'api_key');
+
+    AccessContext::enter(new ActorContext(ActorKind::WebSession, new FakeAuthenticatable));
+
+    expect(makeResolver()->current()->kind)->toBe(ActorKind::WebSession)
+        ->and(makeResolver()->current()->isApiActor())->toBeFalse();
 });

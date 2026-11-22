@@ -38,6 +38,7 @@ SIBLING_FILES=(
   'src/Contracts/TwoFactorPolicy.php'
   'src/Contracts/TwoFactorResponder.php'
   'src/Laravel/AccessServiceProvider.php'
+  'src/Http/ClearAccessContextMiddleware.php'
 )
 
 MIN="${MUTATE_MIN:-95}"
@@ -76,7 +77,7 @@ for index in "${!CLASSES[@]}"; do
   set -e
 
   # Strip ANSI before parsing — pest colours the Score line.
-  score="$(sed $'s/\x1b\\[[0-9;]*m//g' "${output}" | rg -o 'Score:[[:space:]]+[0-9.]+%' | tail -1 | rg -o '[0-9.]+' | head -1 || true)"
+  score="$(sed $'s/\x1b\\[[0-9;]*m//g' "${output}" | grep -oE 'Score:[[:space:]]+[0-9.]+%' | tail -1 | grep -oE '[0-9.]+' | head -1 || true)"
   if [[ -z "${score}" ]]; then
     score='?'
   fi

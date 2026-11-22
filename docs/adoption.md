@@ -17,6 +17,11 @@ Each product:
 6. Lists remaining direct `hasPermission()` call sites in `qiick-standards.json`
    (`access.direct_checks`) with reason, decision link and `review_by`.
 
+Jobs dispatched while an API actor is bound receive that actor automatically
+(queue payload stamp). Prefer `Illuminate\Contracts\Queue\ShouldBeEncrypted` on
+those jobs when the queue store is not encrypted end-to-end. `CarriesActorContext`
+via `through()` remains available for explicit opt-in.
+
 `externa-core` keeps a compatibility flag and shadow comparison before the
 package `Gate::before` becomes the default (design §9). No schema change is
 required for package adoption itself.

@@ -6,13 +6,16 @@ namespace Qiick\Access\Laravel;
 
 use Illuminate\Contracts\Auth\Factory as AuthFactory;
 use Illuminate\Contracts\Config\Repository as ConfigRepository;
+use Illuminate\Contracts\Foundation\Application;
 use Qiick\Access\Contracts\ActorContext;
 use Qiick\Access\Contracts\ActorKind;
 use Qiick\Access\Contracts\ActorResolver;
 
 /**
  * Reads the bound AccessContext and the configured API-guard signal.
- * Never reads request input (design §3.3 / AC4).
+ * Never reads request input (design §3.3 / AC4). The guard signal is ignored
+ * outside an active HTTP request so unattended jobs/commands cannot become
+ * API actors via Auth::shouldUse().
  *
  * @api
  */
@@ -21,6 +24,7 @@ final class ContainerActorResolver implements ActorResolver
     public function __construct(
         private readonly ConfigRepository $config,
         private readonly AuthFactory $auth,
+        private readonly Application $app,
     ) {}
 
     public function current(): ActorContext
@@ -41,6 +45,11 @@ final class ContainerActorResolver implements ActorResolver
 
     private function defaultGuardIsApiGuard(): bool
     {
+        // Jobs and artisan commands: ignore the guard signal entirely.
+        if ($this->app->runningInConsole()) {
+            return false;
+        }
+
         $guards = $this->config->get('access.api_guards', []);
         if (! is_array($guards)) {
             return false;
@@ -51,11 +60,6 @@ final class ContainerActorResolver implements ActorResolver
             if (is_string($guard) && $guard !== '') {
                 $apiGuards[] = $guard;
             }
-        }
-
-        if ($apiGuards === []) {
-            // in_array on [] is always false, so RemoveEarlyReturn is equivalent.
-            return false; // @pest-mutate-ignore: RemoveEarlyReturn
         }
 
         $defaultGuard = $this->auth->getDefaultDriver();
