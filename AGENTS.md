@@ -193,10 +193,10 @@ more specific, they win.
 - No committed `composer.lock`. No Packagist publish and no tags from agents.
 - Every change is a PR into `develop`. Git identity for commits:
   Luca Giardi <62483245+LucaGiardi20@users.noreply.github.com>.
-- Mutation targets (design §11): `GateBefore`, `EffectivePermissionResolver`,
+- Mutation targets (design §11 + A7): `GateBefore`, `EffectivePermissionResolver`,
   `ContainerActorResolver`, `ActorContext`, `AccessContext`,
   `CarriesActorContext`, `EloquentGroupRoleSource`, `SpatiePermissionVocabulary`,
   `SpatieTeamContext`, `NoTeamContext`, `EnsureTwoFactorIsEnabled`,
-  `EnsureUserHasPermission`, `AuthorizesWithPermission`, `AccessServiceProvider`
-  (boot checks). Per-class MSI ≥ 95; no `--covered-only`, no method-level
-  `@pest-mutate-ignore`.
+  `SuperAdminGuard`, `EnsureUserHasPermission`, `AuthorizesWithPermission`,
+  `AccessServiceProvider` (boot checks). Per-class MSI ≥ 95; no `--covered-only`,
+  no method-level `@pest-mutate-ignore`.

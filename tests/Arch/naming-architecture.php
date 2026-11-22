@@ -29,6 +29,8 @@ return [
             'Qiick\Access\Contracts\TwoFactorPolicy',
             'Qiick\Access\Contracts\TwoFactorResponder',
             'Qiick\Access\Contracts\AuthorizationResponder',
+            // Completeness review §3.5 / A7: ActiveUsers has no Contract suffix.
+            'Qiick\Access\Contracts\ActiveUsers',
         ],
         'Enums' => [
             // Design §2.2: ActorKind (not *Enum); kept for Enums-namespace rule.

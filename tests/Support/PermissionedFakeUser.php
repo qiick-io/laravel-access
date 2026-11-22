@@ -118,4 +118,12 @@ final class PermissionedFakeUser extends FakeAuthenticatable
     {
         $this->permissionNames = $permissionNames;
     }
+
+    /**
+     * @param  list<string>  $roleNames
+     */
+    public function setRoleNames(array $roleNames): void
+    {
+        $this->roleNames = $roleNames;
+    }
 }
