@@ -17,8 +17,10 @@ that enable Spatie teams. This page is the name and duty list for adopters.
 | `TwoFactorPolicy` | Required / usable factor / any method enabled |
 | `TwoFactorResponder` | `enrol` / `unavailable` HTTP responses |
 | `AuthorizationResponder` | `forbidden` HTTP response for permission middleware |
+| `ActiveUsers` | `query(): Builder` of users that count as active for `SuperAdminGuard` |
 
 Required product bindings (boot fails otherwise): `ActorResolver`,
 `RoleCatalog`, `TwoFactorPolicy`, `TwoFactorResponder`,
-`AuthorizationResponder`. Package defaults exist for `ContainerActorResolver`,
+`AuthorizationResponder`. Bind `ActiveUsers` before resolving `SuperAdminGuard`.
+Package defaults exist for `ContainerActorResolver`,
 `SpatiePermissionVocabulary`, `EloquentGroupRoleSource` and `NoTeamContext`.

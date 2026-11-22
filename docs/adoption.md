@@ -58,8 +58,13 @@ PostgreSQL.
 
 `EffectivePermissionResolver` applies group role ids **in the current team**
 when loading permissions from those roles. Super-admin is resolved without the
-Spatie team filter (C30). Products must set
-`permission.register_permission_check_method` to `false` and
+Spatie team filter (C30). `isDirectSuperAdmin()` is the same filter-off check
+for a **direct** role only — products use it with `TwoFactorPolicy::hasUsableFactor()`
+for break-glass (P6); the OIDC break-glass seam stays outside this package (R7).
+Register `EnsureTwoFactorIsEnabled` on the web stack; exempt routes live in
+`access.two_factor.exempt_route_names`. Bind `ActiveUsers` and use
+`SuperAdminGuard` for super-admin grant/revoke and last-admin protection.
+Products must set `permission.register_permission_check_method` to `false` and
 `permission.events_enabled` to `true` before boot; the provider fails closed
 otherwise (R4, A1). Bind `RoleCatalog`, `TwoFactorPolicy`,
 `TwoFactorResponder` and `AuthorizationResponder` or boot fails (AC12).

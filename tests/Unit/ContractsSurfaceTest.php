@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use Qiick\Access\Contracts\ActiveUsers;
 use Qiick\Access\Contracts\ActorResolver;
 use Qiick\Access\Contracts\AuthorizationResponder;
 use Qiick\Access\Contracts\GroupRoleSource;
@@ -22,4 +23,5 @@ it('exposes every design §2.2 contract interface', function (string $interface)
     TwoFactorPolicy::class,
     TwoFactorResponder::class,
     AuthorizationResponder::class,
+    ActiveUsers::class,
 ]);

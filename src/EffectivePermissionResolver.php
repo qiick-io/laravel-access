@@ -57,7 +57,7 @@ final class EffectivePermissionResolver
 
     /**
      * Super-admin is instance-level: role lookup ignores the current Spatie team
-     * filter so a zero-organisation admin still matches (C30).
+     * filter so a zero-organisation admin still matches (C30). Direct and group.
      */
     public function isSuperAdmin(Authenticatable $user): bool
     {
@@ -66,6 +66,33 @@ final class EffectivePermissionResolver
             $this->roleNamesIgnoringTeamFilter($user),
             true,
         );
+    }
+
+    /**
+     * Direct Spatie assignment of the super-admin role only (no group path),
+     * with the team filter off (C30 / P6). Break-glass policies in products use
+     * this with TwoFactorPolicy::hasUsableFactor(); group-only super-admins are
+     * not break-glass eligible (Q3).
+     */
+    public function isDirectSuperAdmin(Authenticatable $user): bool
+    {
+        $teamsWereEnabled = $this->registrar->teams;
+
+        if ($teamsWereEnabled) {
+            $this->registrar->teams = false;
+        }
+
+        try {
+            return in_array(
+                $this->roleCatalog->superAdminRoleName(),
+                $this->pluckRoleNames($user),
+                true,
+            );
+        } finally {
+            if ($teamsWereEnabled) {
+                $this->registrar->teams = true;
+            }
+        }
     }
 
     /**

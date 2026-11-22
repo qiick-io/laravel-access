@@ -16,13 +16,18 @@ use Illuminate\Queue\Events\JobProcessing;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\ServiceProvider;
+use Qiick\Access\Contracts\ActiveUsers;
 use Qiick\Access\Contracts\ActorResolver;
 use Qiick\Access\Contracts\GroupRoleSource;
 use Qiick\Access\Contracts\PermissionVocabulary;
 use Qiick\Access\Contracts\RoleCatalog;
 use Qiick\Access\Contracts\TeamContext;
+use Qiick\Access\Contracts\TwoFactorPolicy;
+use Qiick\Access\Contracts\TwoFactorResponder;
 use Qiick\Access\EffectivePermissionResolver;
 use Qiick\Access\GateBefore;
+use Qiick\Access\Http\EnsureTwoFactorIsEnabled;
+use Qiick\Access\SuperAdminGuard;
 use RuntimeException;
 use Spatie\Permission\Events\PermissionAttachedEvent;
 use Spatie\Permission\Events\PermissionDetachedEvent;
@@ -102,6 +107,24 @@ final class AccessServiceProvider extends ServiceProvider
 
         $this->app->singleton(AccessBootChecks::class, function (Application $app): AccessBootChecks {
             return new AccessBootChecks($app);
+        });
+
+        $this->app->singleton(EnsureTwoFactorIsEnabled::class, function (Application $app): EnsureTwoFactorIsEnabled {
+            return new EnsureTwoFactorIsEnabled(
+                $app->make(ActorResolver::class),
+                $app->make(TwoFactorPolicy::class),
+                $app->make(TwoFactorResponder::class),
+                $app->make(ConfigRepository::class),
+            );
+        });
+
+        // ActiveUsers is product-bound; resolving SuperAdminGuard fails closed until then.
+        $this->app->singleton(SuperAdminGuard::class, function (Application $app): SuperAdminGuard {
+            return new SuperAdminGuard(
+                $app->make(EffectivePermissionResolver::class),
+                $app->make(ActiveUsers::class),
+                $app->make(DatabaseManager::class),
+            );
         });
     }
 

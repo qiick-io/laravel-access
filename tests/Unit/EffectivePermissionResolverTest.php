@@ -11,6 +11,7 @@ use Qiick\Access\EffectivePermissionResolver;
 use Qiick\Access\Tests\Support\FakeAuthenticatable;
 use Qiick\Access\Tests\Support\FakePermissionEnum;
 use Qiick\Access\Tests\Support\PermissionedFakeUser;
+use Spatie\Permission\Models\Role;
 use Spatie\Permission\PermissionRegistrar;
 
 it('reports super-admin from role names without requiring a current team', function (): void {
@@ -314,6 +315,38 @@ it('filters empty role and permission names and exposes direct role ids', functi
     expect($resolver->roleNamesFor($user))->toBe(['member'])
         ->and($resolver->permissionsFor($user))->toBe(['can-show-users'])
         ->and($resolver->effectiveRoleIds($user))->toBe(['1']);
+});
+
+it('detects a direct super-admin while ignoring the team filter (P6)', function (): void {
+    $direct = new PermissionedFakeUser(20, ['super-admin']);
+    $groupOnly = new PermissionedFakeUser(21, []);
+
+    $roleCatalog = Mockery::mock(RoleCatalog::class);
+    $roleCatalog->shouldReceive('superAdminRoleName')->andReturn('super-admin');
+
+    $groupRoles = Mockery::mock(GroupRoleSource::class);
+    $groupRoles->shouldReceive('roleIdsFor')->with($direct)->andReturn([]);
+    $groupRoles->shouldReceive('roleIdsFor')->with($groupOnly)->andReturn([99]);
+
+    $vocabulary = Mockery::mock(PermissionVocabulary::class);
+    $teamContext = Mockery::mock(TeamContext::class);
+    $teamContext->shouldReceive('currentId')->andReturn('org-A');
+
+    $registrar = Mockery::mock(PermissionRegistrar::class);
+    $registrar->teams = true;
+    $registrar->shouldReceive('getRoleClass')->andReturn(Role::class);
+
+    $resolver = new EffectivePermissionResolver(
+        $roleCatalog,
+        $groupRoles,
+        $vocabulary,
+        $teamContext,
+        $registrar,
+    );
+
+    expect($resolver->isDirectSuperAdmin($direct))->toBeTrue()
+        ->and($resolver->isDirectSuperAdmin($groupOnly))->toBeFalse()
+        ->and($registrar->teams)->toBeTrue();
 });
 
 it('leaves registrar teams false when super-admin is checked without teams', function (): void {

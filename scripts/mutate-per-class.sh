@@ -27,6 +27,8 @@ CLASSES=(
   'Qiick\Access\GateBefore'
   'Qiick\Access\EffectivePermissionResolver'
   'Qiick\Access\Laravel\AccessBootChecks'
+  'Qiick\Access\Http\EnsureTwoFactorIsEnabled'
+  'Qiick\Access\SuperAdminGuard'
 )
 
 CLASS_FILES=(
@@ -44,6 +46,8 @@ CLASS_FILES=(
   'src/GateBefore.php'
   'src/EffectivePermissionResolver.php'
   'src/Laravel/AccessBootChecks.php'
+  'src/Http/EnsureTwoFactorIsEnabled.php'
+  'src/SuperAdminGuard.php'
 )
 
 # Other mutation-target siblings ignored while mutating one class.
@@ -57,6 +61,7 @@ SIBLING_FILES=(
   'src/Contracts/TeamContext.php'
   'src/Contracts/TwoFactorPolicy.php'
   'src/Contracts/TwoFactorResponder.php'
+  'src/Contracts/ActiveUsers.php'
   'src/Laravel/AccessServiceProvider.php'
 )
 
