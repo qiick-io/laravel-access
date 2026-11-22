@@ -11,6 +11,7 @@ use Qiick\Access\Tests\Support\PermissionedFakeUser;
 
 beforeEach(function (): void {
     $groupRoles = Mockery::mock(GroupRoleSource::class);
+    $groupRoles->shouldReceive('instanceRoleIdsFor')->andReturn([]);
     $groupRoles->shouldReceive('roleIdsFor')->andReturn([]);
     $this->app->instance(GroupRoleSource::class, $groupRoles);
     $this->app->forgetScopedInstances();

@@ -72,7 +72,10 @@ final class AccessServiceProvider extends ServiceProvider
         $this->app->singleton(TeamContext::class, NoTeamContext::class);
 
         $this->app->singleton(GroupRoleSource::class, function (Application $app): GroupRoleSource {
-            return new EloquentGroupRoleSource($app->make(DatabaseManager::class));
+            return new EloquentGroupRoleSource(
+                $app->make(DatabaseManager::class),
+                $app->make(TeamContext::class),
+            );
         });
 
         $this->app->singleton(PermissionVocabulary::class, function (Application $app): PermissionVocabulary {
