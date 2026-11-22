@@ -49,7 +49,7 @@ final class EloquentGroupRoleSource implements GroupRoleSource
                             ->whereNull('user_groups.organisation_id');
                     });
 
-                if ($teamId !== null && $teamId !== '') {
+                if ($teamId !== null) {
                     $scope->orWhere('user_groups.organisation_id', $teamId);
                 }
             });

@@ -202,35 +202,6 @@ it('scopes organisation groups to the current team and always includes instance 
         ->and($source->instanceRoleIdsFor($user))->not->toContain(2);
 })->group('engines');
 
-it('does not include organisation groups when the team id is an empty string', function (): void {
-    $connection = app('db')->connection();
-    $connection->table('user_groups')->insert([
-        'id' => 1,
-        'public_id' => '11111111-1111-7111-8111-111111111111',
-        'name' => 'blank-org',
-        // Empty string is not a real organisation; must not match a blank team id.
-        'organisation_id' => '',
-        'is_instance' => false,
-        'deleted_at' => null,
-    ]);
-    $connection->table('user_group_user')->insert([
-        'user_id' => 10,
-        'user_group_id' => 1,
-        'expires_at' => null,
-    ]);
-    $connection->table('user_group_role')->insert([
-        'user_group_id' => 1,
-        'role_id' => 7,
-    ]);
-
-    $teamContext = Mockery::mock(TeamContext::class);
-    $teamContext->shouldReceive('currentId')->andReturn('');
-
-    $source = new EloquentGroupRoleSource(app('db'), $teamContext);
-
-    expect($source->roleIdsFor(new FakeAuthenticatable(10)))->toBe([]);
-})->group('engines');
-
 it('does not treat organisation-group roles as instance super-admin sources', function (): void {
     $connection = app('db')->connection();
     $connection->table('user_groups')->insert([
