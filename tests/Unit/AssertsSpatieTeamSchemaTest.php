@@ -297,7 +297,57 @@ it('fails on PostgreSQL when information_schema returns no usable data_type', fu
         app(ConfigRepository::class),
         $connection,
     ))->assertWhenTeamsEnabled())
-        ->toThrow(RuntimeException::class, 'must be uuid');
+        ->toThrow(RuntimeException::class, 'got []');
+});
+
+it('does not treat ArrayAccess rows as arrays when reading data_type', function (): void {
+    config()->set('permission.teams', true);
+    config()->set('permission.column_names.team_foreign_key', 'organisation_id');
+    config()->set('permission.table_names', [
+        'roles' => 'roles',
+        'model_has_roles' => 'model_has_roles',
+        'model_has_permissions' => 'model_has_permissions',
+    ]);
+
+    $schema = Mockery::mock(SchemaBuilder::class);
+    $schema->shouldReceive('hasTable')->with('roles')->andReturn(true);
+    $schema->shouldReceive('hasColumn')->with('roles', 'organisation_id')->andReturn(true);
+
+    $connection = Mockery::mock(Connection::class);
+    $connection->shouldReceive('getSchemaBuilder')->andReturn($schema);
+    $connection->shouldReceive('getDriverName')->andReturn('pgsql');
+    $connection->shouldReceive('selectOne')->andReturn(new ArrayObject(['data_type' => 'uuid']));
+
+    expect(fn () => (new AssertsSpatieTeamSchema(
+        app(ConfigRepository::class),
+        $connection,
+    ))->assertWhenTeamsEnabled())
+        ->toThrow(RuntimeException::class, 'got []');
+});
+
+it('ignores array rows whose data_type is not a string', function (): void {
+    config()->set('permission.teams', true);
+    config()->set('permission.column_names.team_foreign_key', 'organisation_id');
+    config()->set('permission.table_names', [
+        'roles' => 'roles',
+        'model_has_roles' => 'model_has_roles',
+        'model_has_permissions' => 'model_has_permissions',
+    ]);
+
+    $schema = Mockery::mock(SchemaBuilder::class);
+    $schema->shouldReceive('hasTable')->with('roles')->andReturn(true);
+    $schema->shouldReceive('hasColumn')->with('roles', 'organisation_id')->andReturn(true);
+
+    $connection = Mockery::mock(Connection::class);
+    $connection->shouldReceive('getSchemaBuilder')->andReturn($schema);
+    $connection->shouldReceive('getDriverName')->andReturn('pgsql');
+    $connection->shouldReceive('selectOne')->andReturn(['data_type' => 42]);
+
+    expect(fn () => (new AssertsSpatieTeamSchema(
+        app(ConfigRepository::class),
+        $connection,
+    ))->assertWhenTeamsEnabled())
+        ->toThrow(RuntimeException::class, 'got []');
 });
 
 it('passes when teams are on with organisation_id and uuid columns on pgsql-compatible stubs', function (): void {

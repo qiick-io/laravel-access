@@ -10,7 +10,8 @@ Each product:
 2. Binds `PermissionVocabulary`, `RoleCatalog`, `GroupRoleSource` (default
    Eloquent), `TeamContext` (`NoTeamContext` today), the 2FA policy and
    responder, and the authorization responder.
-3. Sets `permission.register_permission_check_method` to `false`.
+3. Sets `permission.register_permission_check_method` to `false` and
+   `permission.events_enabled` to `true`.
 4. Replaces its resolver copy, 2FA middleware, permission middleware/trait and
    `Gate::before` closure with this package.
 5. Rewrites Policy `$actor->can(PermissionEnum…)` calls to the resolver (R5).
@@ -55,8 +56,13 @@ to `organisation_id` and use uuid team columns; products assert that with
 `Qiick\Access\Testing\AssertsSpatieTeamSchema` (A3) — run the uuid check on
 PostgreSQL.
 
-`EffectivePermissionResolver` (later PR) must apply group role ids **in the
-current team** when loading permissions from those roles.
+`EffectivePermissionResolver` applies group role ids **in the current team**
+when loading permissions from those roles. Super-admin is resolved without the
+Spatie team filter (C30). Products must set
+`permission.register_permission_check_method` to `false` and
+`permission.events_enabled` to `true` before boot; the provider fails closed
+otherwise (R4, A1). Bind `RoleCatalog`, `TwoFactorPolicy`,
+`TwoFactorResponder` and `AuthorizationResponder` or boot fails (AC12).
 
 `externa-core` keeps a compatibility flag and shadow comparison before the
 package `Gate::before` becomes the default (design §9).

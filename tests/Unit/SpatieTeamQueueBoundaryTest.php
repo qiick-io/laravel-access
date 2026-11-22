@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use Illuminate\Contracts\Foundation\Application;
 use Qiick\Access\Laravel\SpatieTeamQueueBoundary;
 use Spatie\Permission\PermissionRegistrar;
 use Spatie\Permission\PermissionServiceProvider;
@@ -82,4 +83,27 @@ it('clears the team when ending sync with an empty save stack', function (): voi
 
     $boundary->end('sync');
     expect($registrar->getPermissionsTeamId())->toBeNull();
+});
+
+it('flushes Spatie permission cache when resetting the team for an async job', function (): void {
+    $registrar = Mockery::mock(PermissionRegistrar::class);
+    $registrar->shouldReceive('getPermissionsTeamId')->never();
+    $registrar->shouldReceive('setPermissionsTeamId')->once()->with(null);
+    $registrar->shouldReceive('forgetCachedPermissions')->once()->andReturn(true);
+
+    $this->app->instance(PermissionRegistrar::class, $registrar);
+
+    app(SpatieTeamQueueBoundary::class)->begin('database');
+});
+
+it('nests sync frames safely when PermissionRegistrar is not bound', function (): void {
+    $application = Mockery::mock(Application::class);
+    $application->shouldReceive('bound')->with(PermissionRegistrar::class)->andReturn(false);
+    $application->shouldReceive('make')->never();
+
+    $boundary = new SpatieTeamQueueBoundary($application);
+    $boundary->begin('sync');
+    $boundary->end('sync');
+    $boundary->begin('database');
+    $boundary->end('database');
 });

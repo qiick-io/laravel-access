@@ -16,6 +16,8 @@ use Spatie\Permission\PermissionRegistrar;
  * Sync connection: save the request team, leave it visible during the job, then
  * restore after so a nested switchTo cannot leak into the rest of the request.
  * Organisation-scoped jobs must still call TeamContext::switchTo themselves.
+ * Bound as a scoped container instance so concurrent Octane requests never
+ * share the sync save stack.
  *
  * @api
  */
@@ -76,7 +78,9 @@ final class SpatieTeamQueueBoundary
             return;
         }
 
-        $this->app->make(PermissionRegistrar::class)->setPermissionsTeamId($teamId);
+        $registrar = $this->app->make(PermissionRegistrar::class);
+        $registrar->setPermissionsTeamId($teamId);
+        $registrar->forgetCachedPermissions();
     }
 
     private function resetTeamId(): void
