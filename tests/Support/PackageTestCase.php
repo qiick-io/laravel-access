@@ -6,7 +6,12 @@ namespace Qiick\Access\Tests\Support;
 
 use Illuminate\Foundation\Application;
 use Orchestra\Testbench\TestCase;
+use Qiick\Access\Contracts\AuthorizationResponder;
+use Qiick\Access\Contracts\RoleCatalog;
+use Qiick\Access\Contracts\TwoFactorPolicy;
+use Qiick\Access\Contracts\TwoFactorResponder;
 use Qiick\Access\Laravel\AccessServiceProvider;
+use Spatie\Permission\PermissionServiceProvider;
 
 /**
  * Boots a Testbench Laravel app with the package provider. CI runs the suite
@@ -20,7 +25,10 @@ abstract class PackageTestCase extends TestCase
      */
     protected function getPackageProviders($app): array
     {
-        return [AccessServiceProvider::class];
+        return [
+            PermissionServiceProvider::class,
+            AccessServiceProvider::class,
+        ];
     }
 
     /**
@@ -29,6 +37,13 @@ abstract class PackageTestCase extends TestCase
     protected function defineEnvironment($app): void
     {
         $app['config']->set('app.key', 'base64:'.base64_encode(random_bytes(32)));
+        $app['config']->set('access.permission_enum', FakePermissionEnum::class);
+        $app['config']->set('permission.register_permission_check_method', false);
+
+        $app->instance(RoleCatalog::class, new FakeRoleCatalog);
+        $app->instance(TwoFactorPolicy::class, new FakeTwoFactorPolicy);
+        $app->instance(TwoFactorResponder::class, new FakeTwoFactorResponder);
+        $app->instance(AuthorizationResponder::class, new FakeAuthorizationResponder);
 
         $connection = getenv('DB_CONNECTION') ?: 'testing';
         $app['config']->set('database.default', $connection);

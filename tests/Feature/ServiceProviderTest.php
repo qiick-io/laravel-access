@@ -4,11 +4,12 @@ declare(strict_types=1);
 
 use Illuminate\Support\ServiceProvider;
 use Qiick\Access\Laravel\AccessServiceProvider;
+use Qiick\Access\Tests\Support\FakePermissionEnum;
 
 it('merges the package defaults into the access config', function (): void {
     expect(config('access.api_guards'))->toBe([]);
     expect(config('access.trust_api_guard_in_console'))->toBeFalse();
-    expect(config('access.permission_enum'))->toBeNull();
+    expect(config('access.permission_enum'))->toBe(FakePermissionEnum::class);
     expect(config('access.migrations.load'))->toBeTrue();
     expect(config('access.users_table'))->toBeNull();
     expect(config('access.table_names'))->toBeNull();

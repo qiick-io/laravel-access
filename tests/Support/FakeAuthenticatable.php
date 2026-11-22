@@ -9,7 +9,7 @@ use Illuminate\Contracts\Auth\Authenticatable;
 /**
  * Minimal Authenticatable for unit tests — no Eloquent, no database.
  */
-final class FakeAuthenticatable implements Authenticatable
+class FakeAuthenticatable implements Authenticatable
 {
     public function __construct(
         private readonly string|int $id = 1,

@@ -10,6 +10,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `GateBefore` (single `Gate::before`: API actors never get super-admin /
+  permission grants; Policy arguments abstain) and scoped
+  `EffectivePermissionResolver` (direct ∪ group roles/permissions, C30
+  team-filter bypass for super-admin, process-local cache with request/job /
+  Spatie event clears). Boot refuses
+  `permission.register_permission_check_method === true` and missing
+  `RoleCatalog` / 2FA / `AuthorizationResponder` bindings (R4, AC12).
 - Actor runtime: scoped `AccessContext`, `ContainerActorResolver` (bound as
   `ActorResolver`), `CarriesActorContext` job middleware, `ActorPayloadStamper`
   for queue payload carry (sync connection nests; async replaces), Octane /
