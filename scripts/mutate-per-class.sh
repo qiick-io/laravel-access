@@ -26,6 +26,7 @@ CLASSES=(
   'Qiick\Access\Testing\AssertsSpatieTeamSchema'
   'Qiick\Access\GateBefore'
   'Qiick\Access\EffectivePermissionResolver'
+  'Qiick\Access\Laravel\AccessBootChecks'
 )
 
 CLASS_FILES=(
@@ -42,6 +43,7 @@ CLASS_FILES=(
   'src/Testing/AssertsSpatieTeamSchema.php'
   'src/GateBefore.php'
   'src/EffectivePermissionResolver.php'
+  'src/Laravel/AccessBootChecks.php'
 )
 
 # Other mutation-target siblings ignored while mutating one class.

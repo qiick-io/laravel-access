@@ -39,6 +39,7 @@ abstract class PackageTestCase extends TestCase
         $app['config']->set('app.key', 'base64:'.base64_encode(random_bytes(32)));
         $app['config']->set('access.permission_enum', FakePermissionEnum::class);
         $app['config']->set('permission.register_permission_check_method', false);
+        $app['config']->set('permission.events_enabled', true);
 
         $app->instance(RoleCatalog::class, new FakeRoleCatalog);
         $app->instance(TwoFactorPolicy::class, new FakeTwoFactorPolicy);

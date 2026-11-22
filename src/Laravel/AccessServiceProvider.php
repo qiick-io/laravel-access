@@ -17,13 +17,10 @@ use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\ServiceProvider;
 use Qiick\Access\Contracts\ActorResolver;
-use Qiick\Access\Contracts\AuthorizationResponder;
 use Qiick\Access\Contracts\GroupRoleSource;
 use Qiick\Access\Contracts\PermissionVocabulary;
 use Qiick\Access\Contracts\RoleCatalog;
 use Qiick\Access\Contracts\TeamContext;
-use Qiick\Access\Contracts\TwoFactorPolicy;
-use Qiick\Access\Contracts\TwoFactorResponder;
 use Qiick\Access\EffectivePermissionResolver;
 use Qiick\Access\GateBefore;
 use RuntimeException;
@@ -39,7 +36,8 @@ use Spatie\Permission\PermissionRegistrar;
  *
  * Boots Gate::before via GateBefore, scoped EffectivePermissionResolver,
  * required-binding checks (AC12), and refuses
- * permission.register_permission_check_method === true (R4). Also merges
+ * permission.register_permission_check_method === true (R4) and
+ * permission.events_enabled !== true (A1). Also merges
  * config, binds AccessContext / ContainerActorResolver, stamps API actors onto
  * queued jobs, clears context and resolver caches on Octane / request / job
  * boundaries, isolates Spatie team ids via SpatieTeamQueueBoundary, and loads
@@ -95,13 +93,15 @@ final class AccessServiceProvider extends ServiceProvider
             );
         });
 
+        // Singleton is safe: GateBefore resolves scoped deps from the container
+        // on each invoke (B1). Closing over concrete scoped instances at boot
+        // would pin a warm resolver across requests.
         $this->app->singleton(GateBefore::class, function (Application $app): GateBefore {
-            return new GateBefore(
-                $app->make(ActorResolver::class),
-                $app->make(EffectivePermissionResolver::class),
-                $app->make(PermissionVocabulary::class),
-                $app->make(Gate::class),
-            );
+            return new GateBefore($app);
+        });
+
+        $this->app->singleton(AccessBootChecks::class, function (Application $app): AccessBootChecks {
+            return new AccessBootChecks($app);
         });
     }
 
@@ -109,8 +109,7 @@ final class AccessServiceProvider extends ServiceProvider
     {
         $config = $this->app->make(ConfigRepository::class);
 
-        $this->assertRequiredBindings();
-        $this->assertSpatiePermissionCheckMethodDisabled($config);
+        $this->app->make(AccessBootChecks::class)->assert();
 
         if ($config->get('access.migrations.load', true) === true) {
             $this->loadMigrationsFrom(__DIR__.'/../../database/migrations');
@@ -127,34 +126,6 @@ final class AccessServiceProvider extends ServiceProvider
         $this->registerRequestClears();
         $this->registerQueueActorPropagation();
         $this->registerPermissionEventClears();
-    }
-
-    private function assertRequiredBindings(): void
-    {
-        $required = [
-            ActorResolver::class,
-            RoleCatalog::class,
-            TwoFactorPolicy::class,
-            TwoFactorResponder::class,
-            AuthorizationResponder::class,
-        ];
-
-        foreach ($required as $abstract) {
-            if (! $this->app->bound($abstract)) {
-                throw new RuntimeException(
-                    "qiick/laravel-access requires [{$abstract}] to be bound before boot (AC12).",
-                );
-            }
-        }
-    }
-
-    private function assertSpatiePermissionCheckMethodDisabled(ConfigRepository $config): void
-    {
-        if ($config->get('permission.register_permission_check_method') === true) {
-            throw new RuntimeException(
-                'permission.register_permission_check_method must be false; GateBefore replaces Spatie\'s Gate::before (R4).',
-            );
-        }
     }
 
     private function registerGateBefore(): void
@@ -186,9 +157,15 @@ final class AccessServiceProvider extends ServiceProvider
     private function registerRequestClears(): void
     {
         // String name — avoid importing Illuminate\Foundation\Http\Events\RequestHandled.
+        // Flush the resolver immediately; clear AccessContext on terminate so
+        // terminating/defer callbacks and nested app()->handle() sub-requests
+        // still see the actor (design §3.3 + actor-runtime invariant).
         $events = $this->app->make('events');
         $events->listen('Illuminate\\Foundation\\Http\\Events\\RequestHandled', function (): void {
             $this->flushResolver();
+            $this->app->terminating(static function (): void {
+                AccessContext::clear();
+            });
         });
     }
 

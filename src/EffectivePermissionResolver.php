@@ -134,20 +134,25 @@ final class EffectivePermissionResolver
         $groupRoleNames = $this->roleNamesForIds($groupRoleIds);
 
         $roleIds = $this->uniqueSortedIds([...$directRoleIds, ...$groupRoleIds]);
-        $roleNames = $this->uniqueSortedStrings([...$directRoleNames, ...$groupRoleNames]);
 
-        if (in_array($this->roleCatalog->superAdminRoleName(), $roleNames, true)) {
-            $permissions = $this->vocabulary->all();
-        } else {
-            $permissions = $this->uniqueSortedStrings([
-                ...$this->pluckPermissionNames($user),
-                ...$this->permissionNamesForRoleIds($groupRoleIds),
-            ]);
+        // C30 / B2: decide super-admin with the same team-agnostic names as
+        // isSuperAdmin(), so permissionsFor / roleNamesFor agree under teams.
+        $roleNamesIgnoringTeam = $this->roleNamesIgnoringTeamFilter($user);
+
+        if (in_array($this->roleCatalog->superAdminRoleName(), $roleNamesIgnoringTeam, true)) {
+            return $this->cache[$cacheKey] = [
+                'permissions' => $this->vocabulary->all(),
+                'role_names' => $roleNamesIgnoringTeam,
+                'role_ids' => $roleIds,
+            ];
         }
 
         return $this->cache[$cacheKey] = [
-            'permissions' => $permissions,
-            'role_names' => $roleNames,
+            'permissions' => $this->uniqueSortedStrings([
+                ...$this->pluckPermissionNames($user),
+                ...$this->permissionNamesForRoleIds($groupRoleIds),
+            ]),
+            'role_names' => $this->uniqueSortedStrings([...$directRoleNames, ...$groupRoleNames]),
             'role_ids' => $roleIds,
         ];
     }
