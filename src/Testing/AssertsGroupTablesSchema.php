@@ -161,12 +161,12 @@ final class AssertsGroupTablesSchema
     {
         $wanted = array_values($columns);
 
-        foreach ($this->connection->getSchemaBuilder()->getIndexes($table) as $index) {
-            if (! ($index['unique'] ?? false)) {
+        foreach ($this->indexColumnLists($table) as $index) {
+            if (! $index['unique']) {
                 continue;
             }
 
-            if (array_values($index['columns'] ?? []) === $wanted) {
+            if ($index['columns'] === $wanted) {
                 return;
             }
         }
@@ -180,8 +180,8 @@ final class AssertsGroupTablesSchema
     {
         $wanted = array_values($columns);
 
-        foreach ($this->connection->getSchemaBuilder()->getIndexes($table) as $index) {
-            if (array_values($index['columns'] ?? []) === $wanted) {
+        foreach ($this->indexColumnLists($table) as $index) {
+            if ($index['columns'] === $wanted) {
                 return;
             }
         }
@@ -191,27 +191,55 @@ final class AssertsGroupTablesSchema
         );
     }
 
-    private function requireForeignKeyCascade(string $table, string $column, string $foreignTable): void
+    /**
+     * @return list<array{unique: bool, columns: list<string>}>
+     */
+    private function indexColumnLists(string $table): array
     {
-        foreach ($this->connection->getSchemaBuilder()->getForeignKeys($table) as $foreignKey) {
-            $keyColumns = array_values($foreignKey['columns'] ?? []);
+        $normalized = [];
 
-            if ($keyColumns !== [$column]) {
+        foreach ($this->connection->getSchemaBuilder()->getIndexes($table) as $index) {
+            if (! is_array($index)) {
                 continue;
             }
 
-            $referenced = (string) ($foreignKey['foreign_table'] ?? '');
-            $onDelete = strtolower((string) ($foreignKey['on_delete'] ?? ''));
+            $columns = $index['columns'] ?? null;
+            if (! is_array($columns)) {
+                continue;
+            }
 
-            if ($referenced !== $foreignTable) {
+            $columnNames = [];
+            foreach ($columns as $columnName) {
+                if (is_string($columnName)) {
+                    $columnNames[] = $columnName;
+                }
+            }
+
+            $normalized[] = [
+                'unique' => (bool) ($index['unique'] ?? false),
+                'columns' => $columnNames,
+            ];
+        }
+
+        return $normalized;
+    }
+
+    private function requireForeignKeyCascade(string $table, string $column, string $foreignTable): void
+    {
+        foreach ($this->foreignKeyDescriptors($table) as $foreignKey) {
+            if ($foreignKey['columns'] !== [$column]) {
+                continue;
+            }
+
+            if ($foreignKey['foreign_table'] !== $foreignTable) {
                 throw new RuntimeException(
-                    "AC17: [{$table}.{$column}] must reference [{$foreignTable}], got [{$referenced}].",
+                    "AC17: [{$table}.{$column}] must reference [{$foreignTable}], got [{$foreignKey['foreign_table']}].",
                 );
             }
 
-            if ($onDelete !== 'cascade') {
+            if ($foreignKey['on_delete'] !== 'cascade') {
                 throw new RuntimeException(
-                    "AC17: [{$table}.{$column}] FK onDelete must be cascade, got [{$onDelete}].",
+                    "AC17: [{$table}.{$column}] FK onDelete must be cascade, got [{$foreignKey['on_delete']}].",
                 );
             }
 
@@ -221,5 +249,46 @@ final class AssertsGroupTablesSchema
         throw new RuntimeException(
             "AC17: expected cascade FK [{$table}.{$column}] → [{$foreignTable}] (§2.5–2.6).",
         );
+    }
+
+    /**
+     * @return list<array{columns: list<string>, foreign_table: string, on_delete: string}>
+     */
+    private function foreignKeyDescriptors(string $table): array
+    {
+        $normalized = [];
+
+        foreach ($this->connection->getSchemaBuilder()->getForeignKeys($table) as $foreignKey) {
+            if (! is_array($foreignKey)) {
+                continue;
+            }
+
+            $columns = $foreignKey['columns'] ?? null;
+            if (! is_array($columns)) {
+                continue;
+            }
+
+            $columnNames = [];
+            foreach ($columns as $columnName) {
+                if (is_string($columnName)) {
+                    $columnNames[] = $columnName;
+                }
+            }
+
+            $referenced = $foreignKey['foreign_table'] ?? null;
+            $onDelete = $foreignKey['on_delete'] ?? null;
+
+            if (! is_string($referenced) || ! is_string($onDelete)) {
+                continue;
+            }
+
+            $normalized[] = [
+                'columns' => $columnNames,
+                'foreign_table' => $referenced,
+                'on_delete' => strtolower($onDelete),
+            ];
+        }
+
+        return $normalized;
     }
 }
