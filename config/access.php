@@ -60,20 +60,18 @@ return [
 
     /*
     |--------------------------------------------------------------------------
-    | Group table names
+    | Package migrations
     |--------------------------------------------------------------------------
     |
-    | Package defaults match the fleet schema. Products may override in the
-    | published config file (for example while externa 1.x still decides
-    | whether existing tables keep these names). Never wire these through
-    | env() — config only (knowledge #124 / Q5).
+    | When true (default), AccessServiceProvider loads the fixed group tables
+    | (user_groups / user_group_user / user_group_role). externa 1.x sets this
+    | to false and adopts the same table shape through its own additive
+    | migration so the released tables keep the standard names until v2 (Q5).
     |
     */
 
-    'table_names' => [
-        'groups' => 'user_groups',
-        'group_user' => 'user_group_user',
-        'group_role' => 'user_group_role',
+    'migrations' => [
+        'load' => true,
     ],
 
     /*

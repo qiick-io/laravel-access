@@ -3,30 +3,27 @@
 declare(strict_types=1);
 
 use Illuminate\Support\ServiceProvider;
-use Illuminate\Support\Str;
 use Qiick\Access\Laravel\AccessServiceProvider;
 
 it('merges the package defaults into the access config', function (): void {
     expect(config('access.api_guards'))->toBe([]);
     expect(config('access.trust_api_guard_in_console'))->toBeFalse();
     expect(config('access.permission_enum'))->toBeNull();
-    expect(config('access.table_names'))->toBe([
-        'groups' => 'user_groups',
-        'group_user' => 'user_group_user',
-        'group_role' => 'user_group_role',
-    ]);
+    expect(config('access.migrations.load'))->toBeTrue();
+    expect(config('access.table_names'))->toBeNull();
     expect(config('access.two_factor.exempt_route_names'))->toContain('logout')
         ->and(config('access.two_factor.exempt_route_names'))->toContain('security.*');
 });
 
-it('keeps access.table_names as plain config literals with no env() wiring', function (): void {
-    $configSource = (string) file_get_contents(dirname(__DIR__, 1).'/../config/access.php');
-    $tableNamesBlock = Str::between($configSource, "'table_names' => [", '],');
+it('loads the package group migrations by default', function (): void {
+    $packageMigrations = realpath(dirname(__DIR__, 1).'/../database/migrations');
+    $loaded = collect(app('migrator')->paths())
+        ->map(static fn (string $path): string => (string) realpath($path))
+        ->filter(static fn (string $path): bool => $path !== '')
+        ->all();
 
-    expect($tableNamesBlock)->not->toContain('env(')
-        ->and($tableNamesBlock)->toContain("'user_groups'")
-        ->and($tableNamesBlock)->toContain("'user_group_user'")
-        ->and($tableNamesBlock)->toContain("'user_group_role'");
+    expect($packageMigrations)->not->toBeFalse()
+        ->and($loaded)->toContain($packageMigrations);
 });
 
 it('publishes the config source into a temporary directory outside vendor', function (): void {
@@ -46,7 +43,9 @@ it('publishes the config source into a temporary directory outside vendor', func
 
     expect($target)->toBeFile()
         ->and(str_contains((string) realpath($target), DIRECTORY_SEPARATOR.'vendor'.DIRECTORY_SEPARATOR))->toBeFalse()
-        ->and(file_get_contents($target))->toContain("'api_guards'");
+        ->and(file_get_contents($target))->toContain("'api_guards'")
+        ->and(file_get_contents($target))->toContain("'migrations'")
+        ->and(file_get_contents($target))->not->toContain("'table_names'");
 
     unlink($target);
     rmdir($tempDir);

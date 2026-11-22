@@ -29,7 +29,8 @@ use Spatie\Permission\PermissionRegistrar;
  * ContainerActorResolver, stamps API actors onto queued jobs, clears
  * context on Octane termination (scoped bindings cover per-request/test reset),
  * resets the Spatie team id at job boundaries, loads the package group
- * migrations, and binds package-default adapters.
+ * migrations when access.migrations.load is true, and binds package-default
+ * adapters.
  *
  * Note for the boot-check PR (design §3.3 / AC12): an ActorResolver presence
  * check can never fail as designed — this provider always binds
@@ -58,10 +59,7 @@ final class AccessServiceProvider extends ServiceProvider
         $this->app->singleton(TeamContext::class, NoTeamContext::class);
 
         $this->app->singleton(GroupRoleSource::class, function (Application $app): GroupRoleSource {
-            return new EloquentGroupRoleSource(
-                $app->make(DatabaseManager::class),
-                $app->make(ConfigRepository::class),
-            );
+            return new EloquentGroupRoleSource($app->make(DatabaseManager::class));
         });
 
         $this->app->singleton(PermissionVocabulary::class, function (Application $app): PermissionVocabulary {
@@ -80,7 +78,11 @@ final class AccessServiceProvider extends ServiceProvider
 
     public function boot(): void
     {
-        $this->loadMigrationsFrom(__DIR__.'/../../database/migrations');
+        $config = $this->app->make(ConfigRepository::class);
+
+        if ($config->get('access.migrations.load', true) === true) {
+            $this->loadMigrationsFrom(__DIR__.'/../../database/migrations');
+        }
 
         if ($this->app->runningInConsole()) {
             $this->publishes([

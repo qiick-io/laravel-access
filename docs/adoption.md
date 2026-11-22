@@ -31,15 +31,17 @@ ignored by default. Product tests that need the guard path should call
 `access.trust_api_guard_in_console`) and `disable()` in tearDown. The resolver
 honours that flag only when `app()->environment('testing')` is true.
 
-The package ships migrations for `user_groups`, `user_group_user` and
-`user_group_role` (with `public_id`, `metadata`, membership `expires_at`).
-Defaults live in `access.table_names` (config only — never `env()`); products
-may override while externa 1.x settles knowledge #124 Q5. Spatie's tables stay
-Spatie's. Pre-1.0 products delete their own `create_user_groups_tables`
-migration; externa 1.x follows the additive path in the standards review.
+The package ships migrations for fixed table names `user_groups`,
+`user_group_user` and `user_group_role` (with `public_id`, `metadata`,
+membership `expires_at`). Names are not configurable (Q5). Spatie's tables
+stay Spatie's. `access.migrations.load` defaults to `true`; externa 1.x sets
+it to `false` and adopts the same shape through an additive migration so its
+released tables keep the standard names until v2. Pre-1.0 products delete
+their own `create_user_groups_tables` migration.
 
-When Spatie teams are on, set `permission.column_names.team_foreign_key` to
-`organisation_id` and use uuid team columns. Products assert that with
+Assert the group schema with `Qiick\Access\Testing\AssertsGroupTablesSchema`
+(AC17). When Spatie teams are on, set `permission.column_names.team_foreign_key`
+to `organisation_id` and use uuid team columns; products assert that with
 `Qiick\Access\Testing\AssertsSpatieTeamSchema` (A3).
 
 `EffectivePermissionResolver` (later PR) must apply group role ids **in the
