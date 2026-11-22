@@ -1,7 +1,8 @@
 # Reference: contracts
 
-Normative public API (`@api`) from the binding design §2.2. Implementations
-land in feature PRs; this page is the name and duty list for adopters.
+Normative public API (`@api`) from the binding design §2.2. The interfaces and
+`ActorContext` / `ActorKind` ship in this package; default implementations land
+in later feature PRs. This page is the name and duty list for adopters.
 
 | Type | Duty |
 | --- | --- |

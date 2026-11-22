@@ -17,12 +17,22 @@ return [
 
     'ignoring' => [
         'Contracts' => [
-            // Design §2.2: public contract names without Contract suffix.
-            // Entries land with each contracts PR.
+            // Design §2.2: names without Contract suffix; ActorKind/ActorContext are
+            // not interfaces but live under Contracts/ as the design lays out.
+            'Qiick\Access\Contracts\ActorKind',
+            'Qiick\Access\Contracts\ActorContext',
+            'Qiick\Access\Contracts\ActorResolver',
+            'Qiick\Access\Contracts\PermissionVocabulary',
+            'Qiick\Access\Contracts\RoleCatalog',
+            'Qiick\Access\Contracts\GroupRoleSource',
+            'Qiick\Access\Contracts\TeamContext',
+            'Qiick\Access\Contracts\TwoFactorPolicy',
+            'Qiick\Access\Contracts\TwoFactorResponder',
+            'Qiick\Access\Contracts\AuthorizationResponder',
         ],
         'Enums' => [
-            // Design §2.2: ActorKind (not *Enum).
-            // Entries land with the ActorKind PR.
+            // Design §2.2: ActorKind (not *Enum); kept for Enums-namespace rule.
+            'Qiick\Access\Contracts\ActorKind',
         ],
     ],
 
