@@ -7,8 +7,8 @@ declare(strict_types=1);
  * DTOs are the shared qiick rules in NamingArchitectureTest.php (configured in
  * naming-architecture.php).
  */
-arch('the Laravel namespace only holds the service provider')
-    ->expect('Qiick\Access\Laravel')
+arch('the service provider keeps its ServiceProvider suffix')
+    ->expect('Qiick\Access\Laravel\AccessServiceProvider')
     ->toHaveSuffix('ServiceProvider');
 
 arch('src never imports Illuminate Foundation types')

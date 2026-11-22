@@ -10,6 +10,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Actor runtime: scoped `AccessContext`, `ContainerActorResolver` (bound as
+  `ActorResolver`), `CarriesActorContext` job middleware, `ActorPayloadStamper`
+  for queue payload carry (sync connection nests; async replaces), Octane /
+  scoped clears (no request-start middleware that would wipe outer actors on
+  sub-requests), guard-signal ignored outside HTTP unless
+  `access.trust_api_guard_in_console` /
+  `Qiick\Access\Testing\TrustApiGuardInConsole` is enabled for product tests,
+  and `Queue::createPayloadUsing` hooks left intact for other packages.
 - Contracts (`@api`): `ActorKind`, `ActorContext`, `ActorResolver`,
   `PermissionVocabulary`, `RoleCatalog`, `GroupRoleSource`, `TeamContext`,
   `TwoFactorPolicy`, `TwoFactorResponder`, `AuthorizationResponder`.

@@ -32,6 +32,22 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Trust API guard in console (testing only)
+    |--------------------------------------------------------------------------
+    |
+    | Under PHPUnit, runningInConsole() is always true, so the API-guard signal
+    | is ignored by default (jobs/commands stay unattended). Product feature
+    | tests that need the guard path must enable this via
+    | Qiick\Access\Testing\TrustApiGuardInConsole::enable() and disable() in
+    | tearDown. ContainerActorResolver honours the flag only when
+    | app()->environment('testing') is true — never a production lever.
+    |
+    */
+
+    'trust_api_guard_in_console' => false,
+
+    /*
+    |--------------------------------------------------------------------------
     | Permission vocabulary
     |--------------------------------------------------------------------------
     |

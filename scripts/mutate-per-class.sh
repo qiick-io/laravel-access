@@ -14,13 +14,21 @@ cd "$ROOT"
 # Populated as feature PRs land (design §11 mutation targets).
 CLASSES=(
   'Qiick\Access\Contracts\ActorContext'
+  'Qiick\Access\Laravel\AccessContext'
+  'Qiick\Access\Laravel\ContainerActorResolver'
+  'Qiick\Access\Laravel\CarriesActorContext'
+  'Qiick\Access\Laravel\ActorPayloadStamper'
 )
 
 CLASS_FILES=(
   'src/Contracts/ActorContext.php'
+  'src/Laravel/AccessContext.php'
+  'src/Laravel/ContainerActorResolver.php'
+  'src/Laravel/CarriesActorContext.php'
+  'src/Laravel/ActorPayloadStamper.php'
 )
 
-# Other files under Contracts\ that must not dilute the ActorContext run.
+# Other mutation-target siblings ignored while mutating one class.
 SIBLING_FILES=(
   'src/Contracts/ActorKind.php'
   'src/Contracts/ActorResolver.php'
@@ -31,6 +39,7 @@ SIBLING_FILES=(
   'src/Contracts/TeamContext.php'
   'src/Contracts/TwoFactorPolicy.php'
   'src/Contracts/TwoFactorResponder.php'
+  'src/Laravel/AccessServiceProvider.php'
 )
 
 MIN="${MUTATE_MIN:-95}"
@@ -69,7 +78,7 @@ for index in "${!CLASSES[@]}"; do
   set -e
 
   # Strip ANSI before parsing — pest colours the Score line.
-  score="$(sed $'s/\x1b\\[[0-9;]*m//g' "${output}" | rg -o 'Score:[[:space:]]+[0-9.]+%' | tail -1 | rg -o '[0-9.]+' | head -1 || true)"
+  score="$(sed $'s/\x1b\\[[0-9;]*m//g' "${output}" | grep -oE 'Score:[[:space:]]+[0-9.]+%' | tail -1 | grep -oE '[0-9.]+' | head -1 || true)"
   if [[ -z "${score}" ]]; then
     score='?'
   fi
