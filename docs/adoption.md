@@ -12,8 +12,10 @@ Each product:
    responder, and the authorization responder.
 3. Sets `permission.register_permission_check_method` to `false` and
    `permission.events_enabled` to `true`.
-4. Replaces its resolver copy, 2FA middleware, permission middleware/trait and
-   `Gate::before` closure with this package.
+4. Replaces its resolver copy, 2FA middleware and `Gate::before` closure with
+   this package. It keeps its own permission middleware and FormRequest trait
+   until the package ships `EnsureUserHasPermission` and
+   `AuthorizesWithPermission` (not implemented yet).
 5. Rewrites Policy `$actor->can(PermissionEnum…)` calls to the resolver (R5).
 6. Lists remaining direct `hasPermission()` call sites in `qiick-standards.json`
    (`access.direct_checks`) with reason, decision link and `review_by`.

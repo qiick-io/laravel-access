@@ -199,4 +199,6 @@ more specific, they win.
   `SpatieTeamContext`, `NoTeamContext`, `EnsureTwoFactorIsEnabled`,
   `SuperAdminGuard`, `EnsureUserHasPermission`, `AuthorizesWithPermission`,
   `AccessServiceProvider` (boot checks). Per-class MSI ≥ 95; no `--covered-only`,
-  no method-level `@pest-mutate-ignore`.
+  no method-level `@pest-mutate-ignore`. `EnsureUserHasPermission` and
+  `AuthorizesWithPermission` are not implemented yet: whoever adds them adds
+  them to `scripts/mutate-per-class.sh` in the same PR.
