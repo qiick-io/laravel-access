@@ -9,9 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 **Upgrade note:** boot now fails unless every guard in `auth.guards` is listed
-in `access.web_guards` (default `web`) or `access.api_guards`. Apps with
-Laravel Sanctum must set `ACCESS_API_GUARDS=sanctum` (Sanctum registers its
-`sanctum` guard), as must any app with its own token guard.
+in `access.web_guards` (`ACCESS_WEB_GUARDS`, default `web`) or
+`access.api_guards` (`ACCESS_API_GUARDS`). Apps with Laravel Sanctum must set
+`ACCESS_API_GUARDS=sanctum` (Sanctum registers its `sanctum` guard), as must
+any app with its own token guard. Every request through `auth:sanctum` then
+resolves as an API actor, including a first-party SPA's cookie requests, so
+those SPA routes must use `auth:web` to stay web sessions. A custom session
+guard (such as a Filament panel guard) goes in `ACCESS_WEB_GUARDS`.
 
 ### Security
 
@@ -22,7 +26,6 @@ Laravel Sanctum must set `ACCESS_API_GUARDS=sanctum` (Sanctum registers its
   comparison for group roles too, as for direct roles: a SQL `!=` followed the
   collation and also dropped look-alikes such as `Super-Admin` on MySQL /
   MariaDB.
-
 - A team-local Spatie role named `super-admin` (`roles.organisation_id` set)
   no longer mints an instance super-admin: the C30 read counts only global
   roles, directly and through instance groups, and the package refuses to save
@@ -38,6 +41,9 @@ Laravel Sanctum must set `ACCESS_API_GUARDS=sanctum` (Sanctum registers its
 
 ### Changed
 
+- The resolver reads role ids through the role model's own key (qualified in
+  joins), not a hard-coded `id`. `access.web_guards` reads
+  `ACCESS_WEB_GUARDS` (comma-separated, default `web`).
 - The super-admin verdict is cached per principal (no team key) and cleared
   by `forget()` / `flush()`; a super-admin's `roleNamesFor()` lists the
   current team's roles plus the super-admin role, never another

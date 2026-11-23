@@ -120,7 +120,15 @@ scope half is the product's (or `qiick/laravel-api-keys`'s)
 **Classify every guard.** Boot fails unless each guard in `auth.guards` is in
 `access.web_guards` or `access.api_guards` (`ACCESS_API_GUARDS`, Sanctum's
 `sanctum` guard included). A token guard in neither would make its users look
-like web sessions. At runtime the rule holds for guards added after boot too:
+like web sessions. Two consequences:
+
+- With `ACCESS_API_GUARDS=sanctum`, every request through `auth:sanctum` is an
+  API actor, including a first-party SPA's cookie-authenticated requests.
+  Put first-party SPA routes behind `auth:web` so they stay web sessions.
+- A product's own session guard (a Filament panel guard, for example) goes in
+  `ACCESS_WEB_GUARDS` (comma-separated; default `web`).
+
+At runtime the rule holds for guards added after boot too:
 on HTTP, any default guard outside `access.web_guards` resolves as an API
 actor, so it never gets the super-admin pass.
 
