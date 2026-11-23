@@ -30,7 +30,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `GateBefore` (single `Gate::before`: API actors never get super-admin /
   permission grants; Policy arguments abstain) and scoped
   `EffectivePermissionResolver` (direct ∪ group roles/permissions, C30
-  team-filter bypass for super-admin, process-local cache with request/job /
+  team-filter bypass for super-admin that unsets the `roles` relation before
+  and after the unfiltered read, so neither a team-filtered nor an unfiltered
+  relation leaks between teams, process-local cache with request/job /
   Spatie event clears). Boot refuses any
   `permission.register_permission_check_method` other than boolean `false`
   (Spatie enables its own callback for every truthy value),

@@ -76,23 +76,11 @@ final class EffectivePermissionResolver
      */
     public function isDirectSuperAdmin(Authenticatable $user): bool
     {
-        $teamsWereEnabled = $this->registrar->teams;
-
-        if ($teamsWereEnabled) {
-            $this->registrar->teams = false;
-        }
-
-        try {
-            return in_array(
-                $this->roleCatalog->superAdminRoleName(),
-                $this->pluckRoleNames($user),
-                true,
-            );
-        } finally {
-            if ($teamsWereEnabled) {
-                $this->registrar->teams = true;
-            }
-        }
+        return in_array(
+            $this->roleCatalog->superAdminRoleName(),
+            $this->directRoleNamesIgnoringTeamFilter($user),
+            true,
+        );
     }
 
     /**
@@ -189,23 +177,48 @@ final class EffectivePermissionResolver
      */
     private function roleNamesIgnoringTeamFilter(Authenticatable $user): array
     {
+        // Instance groups only — organisation membership must not mint
+        // instance super-admin (is_instance / C30).
+        return $this->uniqueSortedStrings([
+            ...$this->directRoleNamesIgnoringTeamFilter($user),
+            ...$this->roleNamesForIds($this->groupRoles->instanceRoleIdsFor($user)),
+        ]);
+    }
+
+    /**
+     * Direct role names across every team (C30). Under teams the `roles`
+     * relation is unset before the read, so a relation loaded with the current
+     * team's filter cannot hide an instance super-admin, and again after it,
+     * so the unfiltered relation never outlives this call: Spatie's
+     * getRoleNames() and getAllPermissions() reuse a loaded relation, and an
+     * unfiltered one would grant another organisation's roles in the current
+     * team, even on a `fresh` check.
+     *
+     * @return list<string>
+     */
+    private function directRoleNamesIgnoringTeamFilter(Authenticatable $user): array
+    {
         $teamsWereEnabled = $this->registrar->teams;
 
-        if ($teamsWereEnabled) {
-            $this->registrar->teams = false;
+        if (! $teamsWereEnabled) {
+            return $this->pluckRoleNames($user);
         }
 
+        $this->unsetRolesRelation($user);
+        $this->registrar->teams = false;
+
         try {
-            // Instance groups only — organisation membership must not mint
-            // instance super-admin (is_instance / C30).
-            return $this->uniqueSortedStrings([
-                ...$this->pluckRoleNames($user),
-                ...$this->roleNamesForIds($this->groupRoles->instanceRoleIdsFor($user)),
-            ]);
+            return $this->pluckRoleNames($user);
         } finally {
-            if ($teamsWereEnabled) {
-                $this->registrar->teams = true;
-            }
+            $this->registrar->teams = true;
+            $this->unsetRolesRelation($user);
+        }
+    }
+
+    private function unsetRolesRelation(Authenticatable $user): void
+    {
+        if (method_exists($user, 'unsetRelation')) {
+            $user->unsetRelation('roles');
         }
     }
 
