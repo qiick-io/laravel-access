@@ -14,9 +14,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   no longer mints an instance super-admin: the C30 read counts only global
   roles, directly and through instance groups, and the package refuses to save
   a team-local role with the reserved name (`ReservedRoleNameGuard`).
-- `EloquentGroupRoleSource` gives group roles only to `access.group_member_model`
-  (default `auth.providers.users.model`), so another guard's principal sharing
-  an id no longer inherits them.
+- `EloquentGroupRoleSource` gives group roles only to models on the table and
+  connection of `access.group_member_model` (default
+  `auth.providers.users.model`), so another guard's principal sharing an id,
+  including a subclass with its own table, no longer inherits them.
 - The resolver keys its cache and identity by Spatie principal (morph class +
   id), so a role event on a model sharing the morph class clears the entry,
   and `GateBefore` compares principals the same way

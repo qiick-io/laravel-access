@@ -10,6 +10,7 @@ use Qiick\Access\Contracts\TeamContext;
 use Qiick\Access\Laravel\EloquentGroupRoleSource;
 use Qiick\Access\Laravel\NoTeamContext;
 use Qiick\Access\Tests\Support\FakeAuthenticatable;
+use Qiick\Access\Tests\Support\SpatieUser;
 
 beforeEach(function (): void {
     // user_group_user.user_id points at this model's table only.
@@ -296,4 +297,44 @@ it('gives group roles only to the member model, not to another principal with th
     config()->set('auth.providers.users.model', null);
 
     expect($source->instanceRoleIdsFor(new FakeAuthenticatable(10)))->toBe([]);
+})->group('engines');
+
+/**
+ * A subclass of the member model on its own table: another principal (review B1).
+ */
+final class OwnTableAdmin extends SpatieUser
+{
+    protected $table = 'admins';
+}
+
+it('gives no group roles to a subclass of the member model that has its own table', function (): void {
+    config()->set('auth.providers.users.model', SpatieUser::class);
+
+    $connection = app('db')->connection();
+    $connection->table('user_groups')->insert([
+        'id' => 1,
+        'public_id' => '11111111-1111-7111-8111-111111111111',
+        'name' => 'instance-admins',
+        'organisation_id' => null,
+        'is_instance' => true,
+        'deleted_at' => null,
+    ]);
+    $connection->table('user_group_user')->insert(['user_id' => 1, 'user_group_id' => 1, 'expires_at' => null]);
+    $connection->table('user_group_role')->insert(['user_group_id' => 1, 'role_id' => 1]);
+
+    $user = (new SpatieUser)->forceFill(['id' => 1]);
+    $sameTableSubclass = (new class extends SpatieUser {})->forceFill(['id' => 1]);
+    $ownTableAdmin = (new OwnTableAdmin)->forceFill(['id' => 1]);
+    $otherConnectionUser = (new class extends SpatieUser
+    {
+        protected $connection = 'replica';
+    })->forceFill(['id' => 1]);
+    $source = app(GroupRoleSource::class);
+
+    expect($source->instanceRoleIdsFor($user))->toBe([1])
+        ->and($source->instanceRoleIdsFor($sameTableSubclass))->toBe([1])
+        ->and($source->instanceRoleIdsFor($ownTableAdmin))->toBe([])
+        ->and($source->roleIdsFor($ownTableAdmin))->toBe([])
+        ->and($source->instanceRoleIdsFor($otherConnectionUser))->toBe([])
+        ->and($source->instanceRoleIdsFor(new FakeAuthenticatable(1)))->toBe([]);
 })->group('engines');

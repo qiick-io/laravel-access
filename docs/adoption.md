@@ -70,8 +70,9 @@ legacy unscoped groups, and organisation groups matching the current
 `organisation_id` on the role) counts, whatever team the assignment was made
 in; a team-local role with the reserved name never mints an instance
 super-admin, and the package refuses to save one. Group memberships count
-only for `access.group_member_model` (default `auth.providers.users.model`),
-so another guard's principal with the same id inherits no group roles. With
+only for models on the table and connection of `access.group_member_model`
+(default `auth.providers.users.model`), so another guard's principal with the
+same id, a subclass with its own table included, inherits no group roles. With
 teams, bind `TeamContext` to `SpatieTeamContext` through the container
 (`singleton(TeamContext::class, SpatieTeamContext::class)`): that binding wires
 the resolver flush its constructor requires. `isDirectSuperAdmin()` is the same filter-off check for a **direct**
