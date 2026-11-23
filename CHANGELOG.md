@@ -39,7 +39,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `permission.events_enabled !== true`, and missing
   `RoleCatalog` / 2FA / `AuthorizationResponder` bindings (R4, A1, AC12).
   `GateBefore` resolves scoped deps per invoke (no cross-request resolver
-  leak), abstains on bound-context / Gate user identity mismatch, and
+  leak), abstains on bound-context / Gate user identity mismatch (type and
+  identifier; the resolver cache is keyed by both too), and
   `RequestHandled` clears `AccessContext`. Under Spatie teams,
   `permissionsFor` / `roleNamesFor` agree with `isSuperAdmin` (C30).
 - Actor runtime: scoped `AccessContext`, `ContainerActorResolver` (bound as

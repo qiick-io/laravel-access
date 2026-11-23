@@ -27,3 +27,11 @@ it('abstains when the bound context user is not the Gate user (N1 / §3.3)', fun
     expect($gateBefore($other, 'any-ability'))->toBeNull()
         ->and($gateBefore($bound, 'any-ability'))->toBeTrue();
 });
+
+it('abstains when the bound user and the Gate user share an identifier but not a type (§3.3)', function (): void {
+    $bound = new PermissionedFakeUser(1);
+    $otherGuardUser = new class(1, ['super-admin']) extends PermissionedFakeUser {};
+    AccessContext::enter(new ActorContext(ActorKind::WebSession, $bound));
+
+    expect(app(GateBefore::class)($otherGuardUser, 'any-ability'))->toBeNull();
+});

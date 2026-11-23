@@ -15,8 +15,9 @@ use Spatie\Permission\PermissionRegistrar;
 
 /**
  * Resolves effective roles and permissions from direct Spatie assignments and
- * active group roles (design §4). Process-local cache keyed by user and team;
- * scoped per request/job so a missed clear cannot outlive one unit of work.
+ * active group roles (design §4). Process-local cache keyed by user type,
+ * identifier and team; scoped per request/job so a missed clear cannot outlive
+ * one unit of work.
  *
  * Super-admin is resolved without the Spatie team filter (C30). Group role
  * permission names are loaded for the returned role ids (already team-specific
@@ -27,7 +28,11 @@ use Spatie\Permission\PermissionRegistrar;
 final class EffectivePermissionResolver
 {
     /**
-     * @var array<string, array{permissions: list<string>, role_names: list<string>, role_ids: list<string>}>
+     * Keyed by user type, then identifier, then team. The type is part of the
+     * key: two Authenticatable models (a web user and another guard's
+     * principal) can share an identifier and must never share permissions.
+     *
+     * @var array<class-string, array<string, array<string, array{permissions: list<string>, role_names: list<string>, role_ids: list<string>}>>>
      */
     private array $cache = [];
 
@@ -112,13 +117,7 @@ final class EffectivePermissionResolver
             return;
         }
 
-        $prefix = $this->userKey($user).':';
-
-        foreach (array_keys($this->cache) as $cacheKey) {
-            if (str_starts_with($cacheKey, $prefix)) {
-                unset($this->cache[$cacheKey]);
-            }
-        }
+        unset($this->cache[$user::class][$this->identifierKey($user)]);
 
         $this->unsetRelations($user, 'roles', 'permissions', 'groups');
     }
@@ -133,10 +132,12 @@ final class EffectivePermissionResolver
      */
     private function resolve(Authenticatable $user): array
     {
-        $cacheKey = $this->userKey($user).':'.$this->teamKey();
+        $userType = $user::class;
+        $identifier = $this->identifierKey($user);
+        $teamKey = $this->teamKey();
 
-        if (isset($this->cache[$cacheKey])) {
-            return $this->cache[$cacheKey];
+        if (isset($this->cache[$userType][$identifier][$teamKey])) {
+            return $this->cache[$userType][$identifier][$teamKey];
         }
 
         // Under teams Spatie filters these relations by the team current when
@@ -157,14 +158,14 @@ final class EffectivePermissionResolver
         $roleNamesIgnoringTeam = $this->roleNamesIgnoringTeamFilter($user);
 
         if (in_array($this->roleCatalog->superAdminRoleName(), $roleNamesIgnoringTeam, true)) {
-            return $this->cache[$cacheKey] = [
+            return $this->cache[$userType][$identifier][$teamKey] = [
                 'permissions' => $this->vocabulary->all(),
                 'role_names' => $roleNamesIgnoringTeam,
                 'role_ids' => $roleIds,
             ];
         }
 
-        return $this->cache[$cacheKey] = [
+        return $this->cache[$userType][$identifier][$teamKey] = [
             'permissions' => $this->uniqueSortedStrings([
                 ...$this->pluckPermissionNames($user),
                 ...$this->permissionNamesForRoleIds($groupRoleIds),
@@ -233,7 +234,7 @@ final class EffectivePermissionResolver
         return var_export($this->teamContext->currentId(), true);
     }
 
-    private function userKey(Authenticatable $user): string
+    private function identifierKey(Authenticatable $user): string
     {
         $identifier = $user->getAuthIdentifier();
 

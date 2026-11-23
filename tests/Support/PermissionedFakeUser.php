@@ -7,7 +7,7 @@ namespace Qiick\Access\Tests\Support;
 /**
  * Authenticatable with Spatie-like role and permission helpers for resolver tests.
  */
-final class PermissionedFakeUser extends FakeAuthenticatable
+class PermissionedFakeUser extends FakeAuthenticatable
 {
     public int $permissionCalls = 0;
 

@@ -70,8 +70,13 @@ final class GateBefore
         return null;
     }
 
+    /**
+     * Type and identifier: another guard's principal can share the bound
+     * user's identifier without being that user.
+     */
     private function isSameIdentity(Authenticatable $boundUser, Authenticatable $gateUser): bool
     {
-        return $boundUser->getAuthIdentifier() === $gateUser->getAuthIdentifier();
+        return $boundUser::class === $gateUser::class
+            && $boundUser->getAuthIdentifier() === $gateUser->getAuthIdentifier();
     }
 }
