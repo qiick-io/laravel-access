@@ -108,6 +108,7 @@ it('flags every Gate ability method and permission string literals inside a Poli
     ]);
 
     expect($violations)->toHaveCount(1);
+    expect($violations[0])->toContain('() with');
 })->with([
     'can with a permission literal' => ["\$actor->can('can-show-users')"],
     'double-quoted literal' => ['$actor->can("can-show-users")'],
@@ -601,10 +602,10 @@ it('survives truncated files', function (): void {
 });
 
 it('only allows the Inertia share method of a HandleInertiaRequests class', function (string $class, string $method, int $expectedCount): void {
-    expect(scanProduct(['app/Share.php' => "<?php\nfinal class {$class}\n{\n    public function {$method}(\$r, \$u)\n    {\n        return \$r->hasPermission(\$u, 'x');\n    }\n}\n"]))
+    expect(scanProduct(['app/Share.php' => "<?php\nnamespace App\\Http\\Middleware;\nfinal class {$class}\n{\n    public function {$method}(\$r, \$u)\n    {\n        return \$r->hasPermission(\$u, 'x');\n    }\n}\n"]))
         ->toHaveCount($expectedCount);
 })->with([
-    'global namespace share' => ['HandleInertiaRequests', 'share', 0],
+    'default share class' => ['HandleInertiaRequests', 'share', 0],
     'look-alike class' => ['NotHandleInertiaRequests', 'share', 1],
     'other method' => ['HandleInertiaRequests', 'version', 1],
 ]);
@@ -700,4 +701,140 @@ it('matches the enum when its class is given with a leading backslash', function
     $scanner = new DirectPermissionCheckScanner('\\'.FakePermissionEnum::class, new DateTimeImmutable('2026-11-23'));
 
     expect($scanner->scan($root, ['app'], "{$root}/qiick-standards.json")[0])->toContain(ENUM_MESSAGE);
+});
+
+// Review of #14: evasions and a false positive found by an independent review.
+
+it('judges a class attribute as part of its Policy', function (): void {
+    $violations = scanProduct([
+        'app/Policies/PostPolicy.php' => POLICY_HEADER.<<<'PHP'
+            #[Requires(fn ($actor) => $actor->can(FakePermissionEnum::CanShowUsers))]
+            #[Other]
+            final class PostPolicy
+            {
+            }
+            PHP,
+    ]);
+
+    expect($violations)->toHaveCount(1)
+        ->and($violations[0])->toContain('in App\Policies\PostPolicy: can() '.ENUM_MESSAGE);
+});
+
+it('resolves trait method aliases of watched methods across files', function (): void {
+    $violations = scanProduct([
+        'app/Concerns/UsesChecks.php' => <<<'PHP'
+            <?php
+
+            namespace App\Concerns;
+
+            final class CheckService
+            {
+                use ChecksPermissions { hasPermission as checkPermission; ChecksPermissions::hasPermission as protected verify; }
+                use Authorizable { can as mayDo; insteadof Other; }
+
+                public function run($resolver, $user): bool
+                {
+                    return $resolver->checkPermission($user, 'can-show-users') && $this->verify($user, 'x');
+                }
+            }
+            PHP,
+        'app/Policies/PostPolicy.php' => POLICY_HEADER."final class PostPolicy\n{\n    public function view(\$actor): bool\n    {\n        return \$actor->mayDo(FakePermissionEnum::CanShowUsers);\n    }\n}\n",
+    ]);
+
+    expect($violations)->toHaveCount(3)
+        ->and($violations[0])->toContain('App\Concerns\CheckService::run')
+        ->and($violations[2])->toContain('can() '.ENUM_MESSAGE);
+});
+
+it('fails closed on Gate facade methods outside the known list in a Policy', function (string $call, int $expectedCount): void {
+    expect(scanPolicyBody("return {$call};", POLICY_HEADER."use Illuminate\\Support\\Facades\\Gate;\n\n"))->toHaveCount($expectedCount);
+})->with([
+    'macro' => ['Gate::checkPermission($actor, FakePermissionEnum::CanShowUsers)', 1],
+    'global alias macro' => ['\Gate::checkPermission($actor, \'x\')', 1],
+    'fully qualified macro' => ['\Illuminate\Support\Facades\Gate::checkPermission($actor, \'x\')', 1],
+    'known method' => ["Gate::allows('update-own')", 0],
+    'forUser chain' => ["Gate::forUser(\$actor)->allows('update-own')", 0],
+    'has' => ["Gate::has('update-own')", 0],
+    'getPolicyFor' => ['Gate::getPolicyFor($a)', 0],
+    'unimported Gate in a namespace' => ["\\App\\Policies\\Gate::checkPermission('x')", 0],
+    'other facade' => ["Cache::checkPermission('x')", 0],
+]);
+
+it('allows only the configured Inertia share class', function (): void {
+    $share = static fn (string $namespace): string => "<?php\nnamespace {$namespace};\nfinal class HandleInertiaRequests\n{\n    public function share(\$r, \$u)\n    {\n        return \$r->hasPermission(\$u, 'x');\n    }\n}\n";
+    $root = productTree([
+        'app/Http/Middleware/HandleInertiaRequests.php' => $share('App\Http\Middleware'),
+        'app/Wrong/HandleInertiaRequests.php' => $share('App\Wrong'),
+    ]);
+
+    expect((new DirectPermissionCheckScanner(FakePermissionEnum::class, new DateTimeImmutable('2026-11-23')))->scan($root, ['app'], "{$root}/qiick-standards.json"))
+        ->toBe(['app/Wrong/HandleInertiaRequests.php:7 direct hasPermission() at site App\Wrong\HandleInertiaRequests::share is not listed in qiick-standards.json access.direct_checks (AC9).'])
+        ->and((new DirectPermissionCheckScanner(FakePermissionEnum::class, new DateTimeImmutable('2026-11-23'), '\App\Wrong\HandleInertiaRequests'))->scan($root, ['app'], "{$root}/qiick-standards.json"))
+        ->toHaveCount(1)
+        ->and((new DirectPermissionCheckScanner(FakePermissionEnum::class, new DateTimeImmutable('2026-11-23'), '\App\Wrong\HandleInertiaRequests'))->scan($root, ['app'], "{$root}/qiick-standards.json")[0])
+        ->toStartWith('app/Http/Middleware/HandleInertiaRequests.php:7 ');
+});
+
+it('does not take a watched name used as plain data for a callable', function (): void {
+    expect(scanPolicyBody("\$labels = ['can' => 'Can', 'hasPermission' => 'x'];\nreturn \$this->label('can') === 'can' ? 'hasPermission' : 'can';"))->toBe([])
+        ->and(scanProduct(['app/Labels.php' => "<?php\nfunction label() { return 'hasPermission'; }\n"]))->toBe([]);
+});
+
+it('still takes a watched name assigned to a variable or placed in an array callable for a call', function (string $body, int $expectedCount): void {
+    expect(scanProduct(['app/Tool.php' => "<?php\nfunction tool(\$r, \$u) { {$body} }\n"]))->toHaveCount($expectedCount);
+})->with([
+    'assigned' => ["\$m = 'hasPermission'; return \$r->\$m(\$u, 'x');", 1],
+    'array callable' => ["return array_map([\$r, 'hasPermission'], [\$u]);", 1],
+    'reflection argument' => ["return new ReflectionMethod(\$r, 'hasPermission');", 1],
+]);
+
+it('owns class attributes for traits, enums and modified classes, and only until the body', function (string $declaration): void {
+    $violations = scanProduct([
+        'app/Policies/Unit.php' => "<?php\nnamespace App\\Policies;\n#[Meta(['a', 'b'])]\n#[Requires(fn (\$actor) => \$actor->can('can-show-users'))]\n{$declaration}\n{\n    public function view(\$actor): bool\n    {\n        return \$actor->can('can-show-users');\n    }\n}\n",
+    ]);
+
+    expect($violations)->toHaveCount(2)
+        ->and($violations[0])->toStartWith('app/Policies/Unit.php:4 in App\\Policies\\Posts')
+        ->and($violations[1])->toContain('in App\\Policies\\Posts::view:');
+})->with([
+    'abstract class' => ['abstract class Posts'],
+    'readonly class' => ['final readonly class Posts'],
+    'trait' => ['trait Posts'],
+    'enum' => ['enum Posts: string'],
+]);
+
+it('names the owner of a class attribute in the global namespace', function (): void {
+    expect(scanProduct(['app/PostPolicy.php' => "<?php\n#[Requires(fn (\$a) => \$a->can('can-show-users'))]\nclass PostPolicy {}\n"])[0])
+        ->toStartWith('app/PostPolicy.php:2 in PostPolicy: can()');
+});
+
+it('reads every trait alias form and ignores aliases of unwatched methods', function (): void {
+    $source = <<<'PHP'
+        <?php
+
+        namespace App;
+
+        final class Tool
+        {
+            use A { hasPermission as public openCheck; }
+            use B { hasAssignedPermission as private hiddenCheck; }
+            use C { helper as hasPermission; }
+
+            public function run($r, $u)
+            {
+                $r->openCheck($u, 'x');
+                $r->hiddenCheck($u, 'x');
+                $callable = [$r, 'openCheck'];
+
+                return $r->hasPermission($u, 'x');
+            }
+        }
+        PHP;
+
+    expect(scanProduct(['app/Tool.php' => $source]))->toHaveCount(4);
+});
+
+it('applies the Gate macro rule only inside Policies', function (): void {
+    expect(scanProduct(['app/Http/Controllers/PostController.php' => "<?php\nnamespace App\\Http\\Controllers;\nuse Illuminate\\Support\\Facades\\Gate;\nfinal class PostController\n{\n    public function index(\$a)\n    {\n        return Gate::checkPermission(\$a, 'x');\n    }\n}\n"]))
+        ->toBe([]);
 });

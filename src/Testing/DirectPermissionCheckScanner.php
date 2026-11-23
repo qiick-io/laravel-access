@@ -32,10 +32,13 @@ use SplFileInfo;
  * as calls, and class names resolve through the file's namespace and `use`
  * imports. A watched method name written as a string (`[$resolver,
  * 'hasPermission']`, `$object->{'can'}(...)`, a name held in a variable)
- * counts as a call. Known limit: a name assembled from pieces at runtime
- * (`'has'.'Permission'`) is not seen; inside a Policy any dynamically named
- * call fails anyway, and so does an ability method name written as a string
- * (fail-closed, even for a property read such as `->{'can'}`).
+ * counts as a call, and a trait alias of a watched method (`use T {
+ * hasPermission as checkPermission; }`) counts as that method in every scanned
+ * file. Inside a Policy, class attributes count as part of the class, and a
+ * static `Gate::` method outside the known Gate API (a macro) fails. Known
+ * limit: a name assembled from pieces (`'has'.'Permission'`) or read from
+ * configuration at runtime is not seen outside Policies; inside a Policy any
+ * dynamically named call fails anyway.
  *
  * @api
  */
@@ -48,13 +51,29 @@ final class DirectPermissionCheckScanner
 
     private readonly DateTimeImmutable $today;
 
+    /** The one site allowed to read permissions directly: the Inertia share (design §6). */
+    private readonly string $inertiaShareSite;
+
+    /**
+     * Trait method aliases of watched methods found in the scanned files
+     * (`use T { hasPermission as checkPermission; }`): lower-cased alias =>
+     * lower-cased watched name.
+     *
+     * @var array<string, string>
+     */
+    private array $methodAliases = [];
+
     /**
      * @param  string  $permissionEnumClass  the product's string-backed PermissionEnum
+     * @param  string  $inertiaShareClass  the product's Inertia middleware, whose `share()` may read permissions
      *
      * @throws InvalidArgumentException when the class is not a string-backed enum
      */
-    public function __construct(string $permissionEnumClass, ?DateTimeImmutable $today = null)
-    {
+    public function __construct(
+        string $permissionEnumClass,
+        ?DateTimeImmutable $today = null,
+        string $inertiaShareClass = 'App\Http\Middleware\HandleInertiaRequests',
+    ) {
         $permissionNames = [];
 
         foreach (is_subclass_of($permissionEnumClass, BackedEnum::class) ? $permissionEnumClass::cases() : [null] as $permission) {
@@ -68,6 +87,7 @@ final class DirectPermissionCheckScanner
         $this->permissionEnumClass = strtolower(ltrim($permissionEnumClass, '\\'));
         $this->permissionNames = $permissionNames;
         $this->today = $today ?? new DateTimeImmutable('today');
+        $this->inertiaShareSite = strtolower(ltrim($inertiaShareClass, '\\')).'::share';
     }
 
     /**
@@ -84,13 +104,24 @@ final class DirectPermissionCheckScanner
         $standardsViolations = $this->validateListedSites($this->readDirectChecks($standardsFile), $listedSites);
         $foundSites = [];
         $violations = [];
+        $tokensByFile = [];
 
         foreach ($this->phpFiles($basePath, $paths) as $relativePath => $absolutePath) {
-            foreach ($this->scanFile($relativePath, (string) file_get_contents($absolutePath)) as [$line, $site, $message]) {
+            $tokensByFile[$relativePath] = array_values(array_filter(
+                PhpToken::tokenize((string) file_get_contents($absolutePath)),
+                static fn (PhpToken $token): bool => ! $token->isIgnorable(),
+            ));
+        }
+
+        // A trait alias declared in one file can be called from any other.
+        $this->methodAliases = array_merge(...array_map($this->readMethodAliases(...), array_values($tokensByFile)));
+
+        foreach ($tokensByFile as $relativePath => $tokens) {
+            foreach ($this->scanFile($relativePath, $tokens) as [$line, $site, $message]) {
                 if ($message === null) {
                     $foundSites[] = strtolower($site);
 
-                    if (isset($listedSites[strtolower($site)]) || str_ends_with(strtolower('\\'.$site), '\\handleinertiarequests::share')) {
+                    if (isset($listedSites[strtolower($site)]) || strtolower($site) === $this->inertiaShareSite) {
                         continue;
                     }
 
@@ -225,15 +256,11 @@ final class DirectPermissionCheckScanner
      * check (the caller decides whether it is listed) or [line, site,
      * message] for a Policy violation.
      *
+     * @param  list<PhpToken>  $tokens
      * @return list<array{int, string, string|null}>
      */
-    private function scanFile(string $relativePath, string $source): array
+    private function scanFile(string $relativePath, array $tokens): array
     {
-        $tokens = array_values(array_filter(
-            PhpToken::tokenize($source),
-            static fn (PhpToken $token): bool => ! $token->isIgnorable(),
-        ));
-
         $namespace = '';
         /** @var array<string, string> $imports lower-cased alias => class name */
         $imports = [];
@@ -241,11 +268,17 @@ final class DirectPermissionCheckScanner
         $braces = [];
         $pendingScope = null;
         $findings = [];
+        /** @var array{string, int}|null $attributeOwner the class a pre-body attribute belongs to, and the attribute's end */
+        $attributeOwner = null;
 
         foreach ($tokens as $index => $token) {
+            if ($token->is(T_ATTRIBUTE) && $attributeOwner === null) {
+                $attributeOwner = $this->attributeOwner($tokens, $index, $namespace);
+            }
+
             $previousText = ($tokens[$index - 1] ?? null)?->text;
             $nextToken = $tokens[$index + 1] ?? $token;
-            $scopes = array_values(array_filter($braces));
+            $scopes = array_filter($braces);
 
             if ($token->is(T_NAMESPACE) && $nextToken->is([T_STRING, T_NAME_QUALIFIED])) {
                 $namespace = $nextToken->text;
@@ -269,16 +302,79 @@ final class DirectPermissionCheckScanner
             } elseif ($token->text === '}') {
                 array_pop($braces);
             } else {
-                [$site, $isPolicy] = $this->site($scopes, $relativePath);
+                [$site, $isPolicy] = $attributeOwner === null
+                    ? $this->site($scopes, $relativePath)
+                    : [$attributeOwner[0], $this->isPolicyClass($attributeOwner[0])];
                 $finding = $this->judgeToken($tokens, $index, $isPolicy, $namespace, $imports);
 
                 if ($finding !== false) {
                     $findings[] = [$token->line, $site, $finding];
                 }
             }
+
+            if ($index === ($attributeOwner[1] ?? null)) {
+                $attributeOwner = null;
+            }
         }
 
         return $findings;
+    }
+
+    /**
+     * For an attribute before a class, trait or enum declaration (code that
+     * runs for that class, outside its braces): the class name and the index
+     * of the last attribute token. Null for any other attribute.
+     *
+     * @param  list<PhpToken>  $tokens
+     * @return array{string, int}|null
+     */
+    private function attributeOwner(array $tokens, int $attributeIndex, string $namespace): ?array
+    {
+        $nesting = 0;
+        $attributeEnd = null;
+
+        foreach (array_slice($tokens, $attributeIndex, preserve_keys: true) as $index => $token) {
+            if ($token->is(T_ATTRIBUTE) || $token->text === '[') {
+                $nesting++;
+            } elseif ($token->text === ']') {
+                $nesting--;
+                $attributeEnd = $nesting === 0 ? $index : $attributeEnd;
+            } elseif ($nesting === 0 && ! $token->is([T_FINAL, T_ABSTRACT, T_READONLY])) {
+                return $token->is([T_CLASS, T_TRAIT, T_ENUM]) && $attributeEnd !== null
+                    ? [ltrim($namespace.'\\'.($tokens[$index + 1] ?? $token)->text, '\\'), $attributeEnd]
+                    : null;
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Trait method aliases of watched methods in one file: `use T {
+     * hasPermission as checkPermission; T::can as protected mayDo; }`.
+     *
+     * @param  list<PhpToken>  $tokens
+     * @return array<string, string> lower-cased alias => lower-cased watched name
+     */
+    private function readMethodAliases(array $tokens): array
+    {
+        $aliases = [];
+
+        foreach ($tokens as $index => $token) {
+            if (! $token->is(T_AS) || ! ($tokens[$index - 1] ?? $token)->is(T_STRING)) {
+                continue;
+            }
+
+            $originalName = strtolower($tokens[$index - 1]->text);
+            $aliasToken = ($tokens[$index + 1] ?? $token)->is([T_PUBLIC, T_PROTECTED, T_PRIVATE]) ? ($tokens[$index + 2] ?? $token) : ($tokens[$index + 1] ?? $token);
+            $isWatched = $this->isPolicyAbilityMethod($originalName) || $this->judgeDirectCheck($originalName, false) === null;
+
+            if ($isWatched && $aliasToken->is(T_STRING)) {
+                $aliases[strtolower($aliasToken->text)] = $originalName;
+            }
+        }
+
+        return $aliases;
     }
 
     /**
@@ -293,8 +389,19 @@ final class DirectPermissionCheckScanner
         $token = $tokens[$index];
 
         if ($token->is(T_CONSTANT_ENCAPSED_STRING)) {
-            // A watched method name held in a string is a call built at runtime.
+            // A watched method name assigned to a variable, used as a braced
+            // method name (`->{'name'}`) or passed after an object
+            // (`[$object, 'name']`, `fn($object, 'name')`) is a call built at
+            // runtime; anywhere else it is plain data.
+            $context = ($tokens[$index - 1] ?? $token)->text.' '.($tokens[$index + 1] ?? $token)->text;
+            $isCallableName = str_starts_with($context, '= ') || in_array($context, ['{ }', ', ]', ', )'], true);
+
+            if (! $isCallableName) {
+                return false;
+            }
+
             $methodName = strtolower(substr($token->text, 1, -1));
+            $methodName = $this->methodAliases[$methodName] ?? $methodName;
 
             return $this->isPolicyAbilityMethod($methodName) && $isPolicy
                 ? "'{$methodName}' as a callable in a Policy cannot be verified statically (AC9)."
@@ -318,6 +425,12 @@ final class DirectPermissionCheckScanner
         }
 
         $methodName = strtolower($nameToken->text);
+        $methodName = $this->methodAliases[$methodName] ?? $methodName;
+
+        if ($isPolicy && $token->is(T_DOUBLE_COLON) && $this->isGateFacade($tokens[$index - 1] ?? $token, $namespace, $imports)
+            && ! $this->isPolicyAbilityMethod($methodName) && ! in_array($methodName, ['has', 'foruser', 'getpolicyfor'], true)) {
+            return "Gate::{$methodName}() is not a known Gate method, so a macro cannot be verified statically in a Policy (AC9).";
+        }
 
         if (! $this->isPolicyAbilityMethod($methodName) || ! $isPolicy) {
             return $this->judgeDirectCheck($methodName, $isPolicy);
@@ -344,6 +457,15 @@ final class DirectPermissionCheckScanner
     private function judgeDirectCheck(string $methodName, bool $isPolicy): ?false
     {
         return in_array($methodName, ['haspermission', 'hasassignedpermission'], true) && ! $isPolicy ? null : false;
+    }
+
+    /**
+     * @param  array<string, string>  $imports
+     */
+    private function isGateFacade(PhpToken $classToken, string $namespace, array $imports): bool
+    {
+        // `\Gate` (or `Gate` in the global namespace) is Laravel's facade alias.
+        return in_array(strtolower($this->resolveClassName($classToken, $namespace, $imports)), ['illuminate\\support\\facades\\gate', 'gate'], true);
     }
 
     private function isPolicyAbilityMethod(string $methodName): bool
@@ -462,7 +584,7 @@ final class DirectPermissionCheckScanner
      * method (closures and anonymous classes report their enclosing method),
      * or the file path outside classes; and whether that class is a Policy.
      *
-     * @param  list<array{kind: string, name: string}>  $scopes
+     * @param  array<int, array{kind: string, name: string}>  $scopes
      * @return array{string, bool}
      */
     private function site(array $scopes, string $relativePath): array
@@ -482,8 +604,11 @@ final class DirectPermissionCheckScanner
             return [$relativePath, false];
         }
 
-        $isPolicy = str_ends_with($className, 'Policy') || str_contains("\\{$className}\\", '\\Policies\\');
+        return [$methodName === null ? $className : "{$className}::{$methodName}", $this->isPolicyClass($className)];
+    }
 
-        return [$methodName === null ? $className : "{$className}::{$methodName}", $isPolicy];
+    private function isPolicyClass(string $className): bool
+    {
+        return str_ends_with($className, 'Policy') || str_contains("\\{$className}\\", '\\Policies\\');
     }
 }

@@ -29,6 +29,7 @@ afterEach(function (): void {
 });
 
 it('passes for a super-admin web session and fails behind every API actor kind (AC2)', function (): void {
+    ProbeAbility::enable();
     $ability = ProbeAbility::register($this->app);
     $gate = app(Gate::class);
     $superAdmin = new PermissionedFakeUser(1, ['super-admin']);
@@ -56,4 +57,16 @@ it('refuses to register outside a unit-test run', function (): void {
         ->toThrow(LogicException::class, 'test-only');
 
     expect(app(Gate::class)->has(ProbeAbility::NAME))->toBeFalse();
+});
+
+it('refuses to register in a unit-test run without the explicit opt-in', function (): void {
+    expect(fn () => ProbeAbility::register($this->app))
+        ->toThrow(LogicException::class, 'ProbeAbility::enable()');
+
+    ProbeAbility::enable();
+    config()->set('access.testing.probe_ability', 'yes');
+
+    expect(fn () => ProbeAbility::register($this->app))
+        ->toThrow(LogicException::class, 'ProbeAbility::enable()')
+        ->and(app(Gate::class)->has(ProbeAbility::NAME))->toBeFalse();
 });

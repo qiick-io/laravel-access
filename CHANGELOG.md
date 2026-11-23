@@ -61,7 +61,11 @@ guard (such as a Filament panel guard) goes in `ACCESS_WEB_GUARDS`.
   the Inertia share unless `access.direct_checks` in qiick-standards.json
   lists the site with a reason, a decision and a `review_by` that has not
   passed. It reads PHP tokens, resolves names through namespaces and imports,
-  ignores comments and strings, and fails closed on dynamically built calls.
+  ignores comments and strings, fails closed on dynamically built calls and
+  `Gate::` macros in Policies, treats class attributes as part of their class,
+  resolves trait aliases of watched methods, and exempts only the configured
+  Inertia middleware's `share()`. `ProbeAbility` also needs
+  `ProbeAbility::enable()` from the test suite.
 
 - `EnsureUserHasPermission` route middleware (`permission:<value>`, alias
   registered by the product) and `AuthorizesWithPermission` FormRequest trait
