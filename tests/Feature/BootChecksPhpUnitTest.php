@@ -42,7 +42,7 @@ it('fails when register_permission_check_method is anything but boolean false (R
     $config->set('permission.register_permission_check_method', $configuredValue);
 
     expect(fn () => $checks->assertSpatiePermissionCheckMethodDisabled($config))
-        ->toThrow(RuntimeException::class, 'register_permission_check_method');
+        ->toThrow(RuntimeException::class, 'register_permission_check_method must be boolean false, got '.get_debug_type($configuredValue));
 
     $config->set('permission.register_permission_check_method', false);
 })->with('non_false_permission_check_method_values');

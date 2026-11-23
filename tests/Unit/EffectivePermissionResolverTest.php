@@ -122,6 +122,37 @@ it('keys the cache by user type as well as identifier', function (): void {
         ->and($webUser->permissionCalls)->toBe(1);
 });
 
+it('caches the super-admin verdict until forget', function (): void {
+    $user = new PermissionedFakeUser(11, ['super-admin']);
+
+    $roleCatalog = Mockery::mock(RoleCatalog::class);
+    $roleCatalog->shouldReceive('superAdminRoleName')->andReturn('super-admin');
+
+    $groupRoles = Mockery::mock(GroupRoleSource::class);
+    $groupRoles->shouldReceive('instanceRoleIdsFor')->andReturn([]);
+
+    $registrar = Mockery::mock(PermissionRegistrar::class);
+    $registrar->teams = false;
+
+    $resolver = new EffectivePermissionResolver(
+        $roleCatalog,
+        $groupRoles,
+        Mockery::mock(PermissionVocabulary::class),
+        Mockery::mock(TeamContext::class),
+        $registrar,
+    );
+
+    expect($resolver->isSuperAdmin($user))->toBeTrue();
+
+    $user->setRoleNames([]);
+
+    expect($resolver->isSuperAdmin($user))->toBeTrue();
+
+    $resolver->forget($user);
+
+    expect($resolver->isSuperAdmin($user))->toBeFalse();
+});
+
 it('fresh bypasses a warm cache entry', function (): void {
     $user = new PermissionedFakeUser(4, ['member'], ['can-show-users']);
 

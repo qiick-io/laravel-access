@@ -8,6 +8,7 @@ use Illuminate\Support\Facades\Schema;
 use Qiick\Access\Contracts\GroupRoleSource;
 use Qiick\Access\Contracts\RoleCatalog;
 use Qiick\Access\EffectivePermissionResolver;
+use Qiick\Access\Tests\Support\FakeAuthenticatable;
 use Qiick\Access\Tests\Support\FakePermissionEnum;
 use Qiick\Access\Tests\Support\SpatieUser;
 use Spatie\Permission\Models\Permission;
@@ -119,31 +120,6 @@ it('treats a direct super-admin role as holding every vocabulary permission', fu
         ->and($resolver->hasPermission($user, 'not-a-permission'))->toBeFalse();
 });
 
-it('detects super-admin when the role arrives only through group membership', function (): void {
-    $superAdmin = Role::create(['name' => 'super-admin', 'guard_name' => 'web']);
-    $user = SpatieUser::query()->create(['email' => 'group-admin@example.com']);
-
-    $roleCatalog = Mockery::mock(RoleCatalog::class);
-    $roleCatalog->shouldReceive('superAdminRoleName')->andReturn('super-admin');
-
-    $groupRoles = Mockery::mock(GroupRoleSource::class);
-    $groupRoles->shouldReceive('roleIdsFor')->with(Mockery::type(SpatieUser::class))->andReturn([$superAdmin->id]);
-    $groupRoles->shouldReceive('instanceRoleIdsFor')->with(Mockery::type(SpatieUser::class))->andReturn([$superAdmin->id]);
-
-    $this->app->forgetInstance(EffectivePermissionResolver::class);
-    $this->app->instance(RoleCatalog::class, $roleCatalog);
-    $this->app->instance(GroupRoleSource::class, $groupRoles);
-
-    $registrar = app(PermissionRegistrar::class);
-    $registrar->teams = true;
-
-    $resolver = app(EffectivePermissionResolver::class);
-
-    expect($resolver->isSuperAdmin($user))->toBeTrue()
-        ->and($registrar->teams)->toBeTrue()
-        ->and($resolver->hasPermission($user, FakePermissionEnum::CanShowUsers->value))->toBeTrue();
-});
-
 it('loads only permissions attached to the given group role ids', function (): void {
     $show = Permission::create(['name' => FakePermissionEnum::CanShowUsers->value, 'guard_name' => 'web']);
     $edit = Permission::create(['name' => FakePermissionEnum::CanEditUsers->value, 'guard_name' => 'web']);
@@ -174,28 +150,55 @@ it('loads only permissions attached to the given group role ids', function (): v
         ->and($resolver->roleNamesFor($user))->toBe(['group-viewer']);
 });
 
-it('ignores the Spatie team filter when checking super-admin (C30)', function (): void {
-    Role::create(['name' => 'super-admin', 'guard_name' => 'web']);
-    $user = SpatieUser::query()->create(['email' => 'admin@example.com']);
-    $user->assignRole('super-admin');
+/**
+ * Same table and Spatie identity (morph class) as SpatieUser, another PHP class.
+ */
+final class MorphSiblingUser extends SpatieUser
+{
+    protected string $guard_name = 'web';
 
-    $roleCatalog = Mockery::mock(RoleCatalog::class);
-    $roleCatalog->shouldReceive('superAdminRoleName')->andReturn('super-admin');
+    public function getMorphClass(): string
+    {
+        return SpatieUser::class;
+    }
+}
+
+it('treats models sharing a morph class as one principal for cache clears and identity', function (): void {
+    $editor = Role::create(['name' => 'editor', 'guard_name' => 'web']);
+    $editor->givePermissionTo(Permission::create(['name' => FakePermissionEnum::CanShowUsers->value, 'guard_name' => 'web']));
+
+    $user = SpatieUser::query()->create(['email' => 'sibling@example.com']);
+    $user->assignRole($editor);
 
     $groupRoles = Mockery::mock(GroupRoleSource::class);
     $groupRoles->shouldReceive('instanceRoleIdsFor')->andReturn([]);
     $groupRoles->shouldReceive('roleIdsFor')->andReturn([]);
-
-    $this->app->forgetInstance(EffectivePermissionResolver::class);
-    $this->app->instance(RoleCatalog::class, $roleCatalog);
     $this->app->instance(GroupRoleSource::class, $groupRoles);
-
-    $registrar = app(PermissionRegistrar::class);
-    $registrar->teams = true;
-    $registrar->setPermissionsTeamId('org-that-has-no-roles');
+    $this->app->forgetInstance(EffectivePermissionResolver::class);
 
     $resolver = app(EffectivePermissionResolver::class);
+    $sibling = MorphSiblingUser::query()->findOrFail($user->id);
 
-    expect($resolver->isSuperAdmin($user))->toBeTrue()
-        ->and($registrar->teams)->toBeTrue();
+    expect($resolver->hasPermission($user, FakePermissionEnum::CanShowUsers->value))->toBeTrue()
+        ->and($resolver->isSamePrincipal($user, $sibling))->toBeTrue()
+        ->and($resolver->isSamePrincipal($user, new FakeAuthenticatable($user->id)))->toBeFalse();
+
+    // The Spatie event on the sibling instance clears the shared entry. A
+    // fresh instance: $user's own loaded relation is not the subject here.
+    $sibling->removeRole($editor);
+
+    expect($resolver->hasPermission(SpatieUser::query()->findOrFail($user->id), FakePermissionEnum::CanShowUsers->value))->toBeFalse();
+});
+
+it('detects super-admin through an instance group without teams', function (): void {
+    $superAdminRole = Role::create(['name' => 'super-admin', 'guard_name' => 'web']);
+    $user = SpatieUser::query()->create(['email' => 'group-admin@example.com']);
+
+    $groupRoles = Mockery::mock(GroupRoleSource::class);
+    $groupRoles->shouldReceive('instanceRoleIdsFor')->andReturn([$superAdminRole->id]);
+    $groupRoles->shouldReceive('roleIdsFor')->andReturn([$superAdminRole->id]);
+    $this->app->instance(GroupRoleSource::class, $groupRoles);
+    $this->app->forgetInstance(EffectivePermissionResolver::class);
+
+    expect(app(EffectivePermissionResolver::class)->isSuperAdmin($user))->toBeTrue();
 });

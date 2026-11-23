@@ -62,9 +62,14 @@ final class AccessBootChecks
      */
     public function assertSpatiePermissionCheckMethodDisabled(ConfigRepository $config): void
     {
-        if ($config->get('permission.register_permission_check_method') !== false) {
+        $configuredValue = $config->get('permission.register_permission_check_method');
+
+        if ($configuredValue !== false) {
+            // The type tells an env() "0" or "off" (strings) apart from a missing key (null).
+            $configuredType = get_debug_type($configuredValue);
+
             throw new RuntimeException(
-                'permission.register_permission_check_method must be false; GateBefore replaces Spatie\'s Gate::before (R4).',
+                "permission.register_permission_check_method must be boolean false, got {$configuredType}; GateBefore replaces Spatie's Gate::before (R4).",
             );
         }
     }

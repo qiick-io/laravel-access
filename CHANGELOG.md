@@ -8,6 +8,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+
+- A team-local Spatie role named `super-admin` (`roles.organisation_id` set)
+  no longer mints an instance super-admin: the C30 read counts only global
+  roles, directly and through instance groups, and the package refuses to save
+  a team-local role with the reserved name (`ReservedRoleNameGuard`).
+- `EloquentGroupRoleSource` gives group roles only to `access.group_member_model`
+  (default `auth.providers.users.model`), so another guard's principal sharing
+  an id no longer inherits them.
+- The resolver keys its cache and identity by Spatie principal (morph class +
+  id), so a role event on a model sharing the morph class clears the entry,
+  and `GateBefore` compares principals the same way
+  (`EffectivePermissionResolver::isSamePrincipal()`).
+
+### Changed
+
+- The super-admin verdict is cached per principal (no team key) and cleared
+  by `forget()` / `flush()`; a super-admin's `roleNamesFor()` lists the
+  current team's roles plus the super-admin role, never another
+  organisation's.
+- `SpatieTeamContext` requires its resolver-flush closure.
+- The `register_permission_check_method` boot error names the type it got.
+
 ### Added
 
 - Group schema: nullable `user_groups.organisation_id`, `is_instance`, and an

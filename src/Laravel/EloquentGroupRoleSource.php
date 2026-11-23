@@ -6,6 +6,7 @@ namespace Qiick\Access\Laravel;
 
 use Closure;
 use Illuminate\Contracts\Auth\Authenticatable;
+use Illuminate\Contracts\Config\Repository as ConfigRepository;
 use Illuminate\Database\DatabaseManager;
 use Illuminate\Database\Query\Builder;
 use Qiick\Access\Contracts\GroupRoleSource;
@@ -23,6 +24,11 @@ use Qiick\Access\Contracts\TeamContext;
  * that do not use organisations (externa 1.x). Super-admin elevation through
  * groups uses only {@see instanceRoleIdsFor()} (is_instance groups).
  *
+ * Memberships belong to one model: user_group_user.user_id points at its
+ * table. Only that model (`access.group_member_model`, default
+ * `auth.providers.users.model`, subclasses included) gets group roles; another
+ * guard's principal sharing an identifier gets none.
+ *
  * Resolves the connection per call so a singleton binding stays Octane-safe.
  *
  * @api
@@ -32,6 +38,7 @@ final class EloquentGroupRoleSource implements GroupRoleSource
     public function __construct(
         private readonly DatabaseManager $database,
         private readonly TeamContext $teamContext,
+        private readonly ConfigRepository $config,
     ) {}
 
     /**
@@ -72,6 +79,10 @@ final class EloquentGroupRoleSource implements GroupRoleSource
      */
     private function pluckRoleIds(Authenticatable $user, Closure $constrainGroups): array
     {
+        if (! $this->isGroupMember($user)) {
+            return [];
+        }
+
         $now = now();
 
         $query = $this->database->connection()
@@ -111,5 +122,13 @@ final class EloquentGroupRoleSource implements GroupRoleSource
         }
 
         return $normalized;
+    }
+
+    private function isGroupMember(Authenticatable $user): bool
+    {
+        $memberModel = $this->config->get('access.group_member_model')
+            ?? $this->config->get('auth.providers.users.model');
+
+        return is_string($memberModel) && $user instanceof $memberModel;
     }
 }
