@@ -132,6 +132,56 @@ At runtime the rule holds for guards added after boot too:
 on HTTP, any default guard outside `access.web_guards` resolves as an API
 actor, so it never gets the super-admin pass.
 
+## Conformance helpers (tests only)
+
+`Qiick\Access\Testing\ProbeAbility::register($this->app)` defines the AC2
+probe ability (always `false`) and returns its name. A super-admin web session
+passes it; the same user behind a key, an OAuth grant or the public door must
+not. Call `ProbeAbility::enable()` in the test suite first: registering throws
+outside a unit-test run and without that explicit opt-in, so `APP_ENV=testing`
+alone never activates it.
+
+`Qiick\Access\Testing\DirectPermissionCheckScanner` is the AC9 static check:
+
+```php
+$violations = (new DirectPermissionCheckScanner(PermissionEnum::class))
+    ->scan(base_path(), ['app', 'routes'], base_path('qiick-standards.json'));
+
+expect($violations)->toBe([]);
+```
+
+It fails on any Gate ability call (`can`, `cannot`, `cant`, `canAny`,
+`allows`, `denies`, `authorize`, `inspect`) with a permission inside a Policy,
+on one whose ability it cannot read statically, and on dynamically named calls
+in Policies, and on any static `Gate::` method outside the known Gate API (a
+macro). Class attributes count as part of their class, and trait aliases of a
+watched method (`use T { hasPermission as checkPermission; }`) count as that
+method. Outside Policies and the Inertia share (`share()` of
+`App\Http\Middleware\HandleInertiaRequests`, or the class passed as the
+scanner's third argument), each direct `hasPermission()` /
+`hasAssignedPermission()` site must be listed:
+
+```json
+"access": {
+  "direct_checks": [
+    { "site": "App\\Ai\\Agents\\AppAssistant::tools", "reason": "tool inventory before a model exists",
+      "decision": "knowledge/...", "review_by": "2027-03-01" }
+  ]
+}
+```
+
+A site is `Class::method` (closures and anonymous classes count as their
+enclosing method), or the file path for code outside classes. Entries need a
+reason, a decision and a `review_by` date that has not passed, and an entry
+whose site has no check left fails, so the list only shrinks.
+
+Known limits: a method name built at runtime from pieces (`'has'.'Permission'`)
+or read from configuration (`$resolver->{config('...')}(...)`) is not seen
+outside Policies; inside a Policy any dynamically named call fails. A watched
+name counts as a callable string only when assigned to a variable, used as a
+braced method name or passed after an object (`[$object, 'name']`), so data
+strings such as `return 'can';` are not flagged.
+
 `SuperAdminGuard` last-admin protection relies on `SELECT … FOR UPDATE`.
 SQLite does not honour those locks; production deployments must use MySQL,
 MariaDB or PostgreSQL.

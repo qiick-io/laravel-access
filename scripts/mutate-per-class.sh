@@ -32,6 +32,8 @@ CLASSES=(
   'Qiick\Access\Laravel\ReservedRoleNameGuard'
   'Qiick\Access\Http\EnsureUserHasPermission'
   'Qiick\Access\Http\Concerns\AuthorizesWithPermission'
+  'Qiick\Access\Testing\ProbeAbility'
+  'Qiick\Access\Testing\DirectPermissionCheckScanner'
 )
 
 CLASS_FILES=(
@@ -54,6 +56,8 @@ CLASS_FILES=(
   'src/Laravel/ReservedRoleNameGuard.php'
   'src/Http/EnsureUserHasPermission.php'
   'src/Http/Concerns/AuthorizesWithPermission.php'
+  'src/Testing/ProbeAbility.php'
+  'src/Testing/DirectPermissionCheckScanner.php'
 )
 
 # Other mutation-target siblings ignored while mutating one class.

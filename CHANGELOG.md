@@ -53,6 +53,20 @@ guard (such as a Filament panel guard) goes in `ACCESS_WEB_GUARDS`.
 
 ### Added
 
+- Test-only conformance helpers (design §2.1 / §13.1): `Testing\ProbeAbility`
+  registers the AC2 probe ability (defined as `false`, refuses to register
+  outside a unit-test run), and `Testing\DirectPermissionCheckScanner` is the
+  AC9 static check: no Gate ability call with a permission in Policies, and no
+  direct `hasPermission()` / `hasAssignedPermission()` outside Policies and
+  the Inertia share unless `access.direct_checks` in qiick-standards.json
+  lists the site with a reason, a decision and a `review_by` that has not
+  passed. It reads PHP tokens, resolves names through namespaces and imports,
+  ignores comments and strings, fails closed on dynamically built calls and
+  `Gate::` macros in Policies, treats class attributes as part of their class,
+  resolves trait aliases of watched methods, and exempts only the configured
+  Inertia middleware's `share()`. `ProbeAbility` also needs
+  `ProbeAbility::enable()` from the test suite.
+
 - `EnsureUserHasPermission` route middleware (`permission:<value>`, alias
   registered by the product) and `AuthorizesWithPermission` FormRequest trait
   (design §6), sharing one decision and the product `AuthorizationResponder`
