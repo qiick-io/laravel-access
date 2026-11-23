@@ -10,6 +10,7 @@ use Illuminate\Contracts\Auth\Factory as AuthFactory;
 use Illuminate\Contracts\Config\Repository as ConfigRepository;
 use Illuminate\Contracts\Foundation\Application;
 use Illuminate\Database\DatabaseManager;
+use Illuminate\Database\Eloquent\Model;
 use Illuminate\Queue\Events\JobFailed;
 use Illuminate\Queue\Events\JobProcessed;
 use Illuminate\Queue\Events\JobProcessing;
@@ -87,6 +88,7 @@ final class AccessServiceProvider extends ServiceProvider
             return new EloquentGroupRoleSource(
                 $app->make(DatabaseManager::class),
                 $app->make(TeamContext::class),
+                $app->make(ConfigRepository::class),
             );
         });
 
@@ -164,6 +166,7 @@ final class AccessServiceProvider extends ServiceProvider
         $this->registerRequestClears();
         $this->registerQueueActorPropagation();
         $this->registerPermissionEventClears();
+        $this->registerReservedRoleNameGuard();
     }
 
     private function registerGateBefore(): void
@@ -248,6 +251,21 @@ final class AccessServiceProvider extends ServiceProvider
         Event::listen(RoleDetachedEvent::class, $forget);
         Event::listen(PermissionAttachedEvent::class, $forget);
         Event::listen(PermissionDetachedEvent::class, $forget);
+    }
+
+    private function registerReservedRoleNameGuard(): void
+    {
+        // Read from config, not PermissionRegistrar: building the registrar at
+        // boot would freeze its teams settings before the product's config.
+        $roleClass = $this->app->make(ConfigRepository::class)->get('permission.models.role');
+
+        if (! is_string($roleClass)) {
+            return;
+        }
+
+        Event::listen("eloquent.saving: {$roleClass}", function (Model $role): void {
+            $this->app->make(ReservedRoleNameGuard::class)->assertAllowed($role);
+        });
     }
 
     private function flushResolver(): void

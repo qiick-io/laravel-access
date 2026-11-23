@@ -6,7 +6,9 @@ namespace Qiick\Access\Laravel;
 
 use Closure;
 use Illuminate\Contracts\Auth\Authenticatable;
+use Illuminate\Contracts\Config\Repository as ConfigRepository;
 use Illuminate\Database\DatabaseManager;
+use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Query\Builder;
 use Qiick\Access\Contracts\GroupRoleSource;
 use Qiick\Access\Contracts\TeamContext;
@@ -23,6 +25,12 @@ use Qiick\Access\Contracts\TeamContext;
  * that do not use organisations (externa 1.x). Super-admin elevation through
  * groups uses only {@see instanceRoleIdsFor()} (is_instance groups).
  *
+ * Memberships belong to one model: user_group_user.user_id points at its
+ * table. Only models on that table and connection (`access.group_member_model`,
+ * default `auth.providers.users.model`) get group roles; another guard's
+ * principal sharing an identifier, including a subclass with its own table,
+ * gets none.
+ *
  * Resolves the connection per call so a singleton binding stays Octane-safe.
  *
  * @api
@@ -32,6 +40,7 @@ final class EloquentGroupRoleSource implements GroupRoleSource
     public function __construct(
         private readonly DatabaseManager $database,
         private readonly TeamContext $teamContext,
+        private readonly ConfigRepository $config,
     ) {}
 
     /**
@@ -72,6 +81,10 @@ final class EloquentGroupRoleSource implements GroupRoleSource
      */
     private function pluckRoleIds(Authenticatable $user, Closure $constrainGroups): array
     {
+        if (! $this->isGroupMember($user)) {
+            return [];
+        }
+
         $now = now();
 
         $query = $this->database->connection()
@@ -111,5 +124,28 @@ final class EloquentGroupRoleSource implements GroupRoleSource
         }
 
         return $normalized;
+    }
+
+    private function isGroupMember(Authenticatable $user): bool
+    {
+        $memberModel = $this->config->get('access.group_member_model')
+            ?? $this->config->get('auth.providers.users.model');
+
+        if (! is_string($memberModel)) {
+            return false;
+        }
+
+        if (! is_a($memberModel, Model::class, true)) {
+            return $user instanceof $memberModel;
+        }
+
+        // user_group_user.user_id holds ids of the member model's table: any
+        // model on that table and connection is the same principal (STI and
+        // same-table subclasses), a subclass with its own table is not.
+        $member = new $memberModel;
+
+        return $user instanceof Model
+            && $user->getTable() === $member->getTable()
+            && $user->getConnectionName() === $member->getConnectionName();
     }
 }

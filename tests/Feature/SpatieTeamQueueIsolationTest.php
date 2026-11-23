@@ -40,12 +40,7 @@ beforeEach(function (): void {
     });
 
     $this->app->register(PermissionServiceProvider::class);
-    $this->app->singleton(TeamContext::class, function () {
-        return new SpatieTeamContext(
-            $this->app->make(PermissionRegistrar::class),
-            $this->app->make('auth'),
-        );
-    });
+    $this->app->singleton(TeamContext::class, SpatieTeamContext::class);
 });
 
 afterEach(function (): void {

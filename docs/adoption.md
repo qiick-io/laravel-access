@@ -66,7 +66,16 @@ PostgreSQL.
 `EffectivePermissionResolver` applies group role ids from instance groups,
 legacy unscoped groups, and organisation groups matching the current
 `TeamContext`. Super-admin via groups counts **only** `is_instance` groups
-(C30). `isDirectSuperAdmin()` is the same filter-off check for a **direct**
+(C30). Under teams, only the **global** super-admin role (no
+`organisation_id` on the role) counts, whatever team the assignment was made
+in; a team-local role with the reserved name never mints an instance
+super-admin, and the package refuses to save one. Group memberships count
+only for models on the table and connection of `access.group_member_model`
+(default `auth.providers.users.model`), so another guard's principal with the
+same id, a subclass with its own table included, inherits no group roles. With
+teams, bind `TeamContext` to `SpatieTeamContext` through the container
+(`singleton(TeamContext::class, SpatieTeamContext::class)`): that binding wires
+the resolver flush its constructor requires. `isDirectSuperAdmin()` is the same filter-off check for a **direct**
 role only — products use it with `TwoFactorPolicy::hasUsableFactor()` for
 break-glass (P6); the OIDC break-glass seam stays outside this package (R7).
 Register `EnsureTwoFactorIsEnabled` on the web stack; exempt routes live in

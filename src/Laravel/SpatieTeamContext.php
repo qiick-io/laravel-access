@@ -27,13 +27,15 @@ final class SpatieTeamContext implements TeamContext
     /**
      * The flush drops every resolver entry, not only the actor's: a warm entry
      * for any user would otherwise outlive a switch away from its team and back.
+     * Required, so a hand-built instance cannot silently skip it (C29); the
+     * container binding in AccessServiceProvider wires the resolver flush.
      *
-     * @param  Closure(): void|null  $flushResolvedPermissions
+     * @param  Closure(): void  $flushResolvedPermissions
      */
     public function __construct(
         private readonly PermissionRegistrar $registrar,
         private readonly AuthFactory $auth,
-        private readonly ?Closure $flushResolvedPermissions = null,
+        private readonly Closure $flushResolvedPermissions,
     ) {}
 
     public function currentId(): string|int|null
@@ -46,9 +48,7 @@ final class SpatieTeamContext implements TeamContext
         $this->registrar->setPermissionsTeamId($id);
         $this->registrar->forgetCachedPermissions();
 
-        if ($this->flushResolvedPermissions !== null) {
-            ($this->flushResolvedPermissions)();
-        }
+        ($this->flushResolvedPermissions)();
 
         $user = $this->resolveActorUser();
         if ($user === null) {

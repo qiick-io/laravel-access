@@ -22,7 +22,7 @@ it('reads and sets the Spatie permissions team id', function (): void {
     $auth = Mockery::mock(AuthFactory::class);
     $auth->shouldReceive('guard')->andReturn($guard);
 
-    $context = new SpatieTeamContext($registrar, $auth);
+    $context = new SpatieTeamContext($registrar, $auth, static function (): void {});
 
     expect($context->currentId())->toBe(7);
 
@@ -196,7 +196,7 @@ it('unsets relations on the AccessContext actor even when the default guard has 
     $auth = Mockery::mock(AuthFactory::class);
     $auth->shouldReceive('guard')->andReturn($guard);
 
-    (new SpatieTeamContext($registrar, $auth))->switchTo('org-b');
+    (new SpatieTeamContext($registrar, $auth, static function (): void {}))->switchTo('org-b');
 
     // The bound actor survives the switch: an API actor stays an API actor.
     expect($boundUser->unsetRelations)->toBe(['roles', 'permissions'])

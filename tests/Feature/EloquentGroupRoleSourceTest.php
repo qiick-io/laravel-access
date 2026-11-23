@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Schema;
 use Qiick\Access\Contracts\GroupRoleSource;
@@ -9,8 +10,12 @@ use Qiick\Access\Contracts\TeamContext;
 use Qiick\Access\Laravel\EloquentGroupRoleSource;
 use Qiick\Access\Laravel\NoTeamContext;
 use Qiick\Access\Tests\Support\FakeAuthenticatable;
+use Qiick\Access\Tests\Support\SpatieUser;
 
 beforeEach(function (): void {
+    // user_group_user.user_id points at this model's table only.
+    config()->set('auth.providers.users.model', FakeAuthenticatable::class);
+
     Schema::create('user_groups', function (Blueprint $table): void {
         $table->id();
         $table->uuid('public_id');
@@ -194,7 +199,7 @@ it('scopes organisation groups to the current team and always includes instance 
     $teamContext = Mockery::mock(TeamContext::class);
     $teamContext->shouldReceive('currentId')->andReturn('aaaaaaaa-aaaa-7aaa-8aaa-aaaaaaaaaaaa');
 
-    $source = new EloquentGroupRoleSource(app('db'), $teamContext);
+    $source = new EloquentGroupRoleSource(app('db'), $teamContext, app('config'));
     $user = new FakeAuthenticatable(10);
 
     expect($source->roleIdsFor($user))->toBe([1, 2])
@@ -222,8 +227,114 @@ it('does not treat organisation-group roles as instance super-admin sources', fu
         'role_id' => 99,
     ]);
 
-    $source = new EloquentGroupRoleSource(app('db'), new NoTeamContext);
+    $source = new EloquentGroupRoleSource(app('db'), new NoTeamContext, app('config'));
 
     expect($source->roleIdsFor(new FakeAuthenticatable(10)))->toBe([])
         ->and($source->instanceRoleIdsFor(new FakeAuthenticatable(10)))->toBe([]);
+})->group('engines');
+
+it('gives group roles only to the member model, not to another principal with the same id', function (): void {
+    $connection = app('db')->connection();
+    $connection->table('user_groups')->insert([
+        'id' => 1,
+        'public_id' => '11111111-1111-7111-8111-111111111111',
+        'name' => 'instance-admins',
+        'organisation_id' => null,
+        'is_instance' => true,
+        'deleted_at' => null,
+    ]);
+    $connection->table('user_group_user')->insert(['user_id' => 10, 'user_group_id' => 1, 'expires_at' => null]);
+    $connection->table('user_group_role')->insert(['user_group_id' => 1, 'role_id' => 1]);
+
+    $otherGuardPrincipal = new class(10) implements Authenticatable
+    {
+        public function __construct(private readonly int $id) {}
+
+        public function getAuthIdentifierName(): string
+        {
+            return 'id';
+        }
+
+        public function getAuthIdentifier(): int
+        {
+            return $this->id;
+        }
+
+        public function getAuthPasswordName(): string
+        {
+            return 'password';
+        }
+
+        public function getAuthPassword(): string
+        {
+            return '';
+        }
+
+        public function getRememberToken(): ?string
+        {
+            return null;
+        }
+
+        public function setRememberToken($value): void {}
+
+        public function getRememberTokenName(): string
+        {
+            return 'remember_token';
+        }
+    };
+    $source = app(GroupRoleSource::class);
+
+    expect($source->instanceRoleIdsFor(new FakeAuthenticatable(10)))->toBe([1])
+        ->and($source->instanceRoleIdsFor($otherGuardPrincipal))->toBe([])
+        ->and($source->roleIdsFor($otherGuardPrincipal))->toBe([]);
+
+    config()->set('access.group_member_model', $otherGuardPrincipal::class);
+
+    expect($source->instanceRoleIdsFor($otherGuardPrincipal))->toBe([1])
+        ->and($source->instanceRoleIdsFor(new FakeAuthenticatable(10)))->toBe([]);
+
+    config()->set('access.group_member_model', null);
+    config()->set('auth.providers.users.model', null);
+
+    expect($source->instanceRoleIdsFor(new FakeAuthenticatable(10)))->toBe([]);
+})->group('engines');
+
+/**
+ * A subclass of the member model on its own table: another principal (review B1).
+ */
+final class OwnTableAdmin extends SpatieUser
+{
+    protected $table = 'admins';
+}
+
+it('gives no group roles to a subclass of the member model that has its own table', function (): void {
+    config()->set('auth.providers.users.model', SpatieUser::class);
+
+    $connection = app('db')->connection();
+    $connection->table('user_groups')->insert([
+        'id' => 1,
+        'public_id' => '11111111-1111-7111-8111-111111111111',
+        'name' => 'instance-admins',
+        'organisation_id' => null,
+        'is_instance' => true,
+        'deleted_at' => null,
+    ]);
+    $connection->table('user_group_user')->insert(['user_id' => 1, 'user_group_id' => 1, 'expires_at' => null]);
+    $connection->table('user_group_role')->insert(['user_group_id' => 1, 'role_id' => 1]);
+
+    $user = (new SpatieUser)->forceFill(['id' => 1]);
+    $sameTableSubclass = (new class extends SpatieUser {})->forceFill(['id' => 1]);
+    $ownTableAdmin = (new OwnTableAdmin)->forceFill(['id' => 1]);
+    $otherConnectionUser = (new class extends SpatieUser
+    {
+        protected $connection = 'replica';
+    })->forceFill(['id' => 1]);
+    $source = app(GroupRoleSource::class);
+
+    expect($source->instanceRoleIdsFor($user))->toBe([1])
+        ->and($source->instanceRoleIdsFor($sameTableSubclass))->toBe([1])
+        ->and($source->instanceRoleIdsFor($ownTableAdmin))->toBe([])
+        ->and($source->roleIdsFor($ownTableAdmin))->toBe([])
+        ->and($source->instanceRoleIdsFor($otherConnectionUser))->toBe([])
+        ->and($source->instanceRoleIdsFor(new FakeAuthenticatable(1)))->toBe([]);
 })->group('engines');

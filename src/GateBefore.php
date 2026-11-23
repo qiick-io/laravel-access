@@ -37,10 +37,12 @@ final class GateBefore
         $actors = $this->app->make(ActorResolver::class);
         $context = $actors->current();
 
+        $resolver = $this->app->make(EffectivePermissionResolver::class);
+
         // Design §3.3: bound context user must be the Gate user, else abstain.
         $boundUser = $context->user;
 
-        if ($boundUser !== null && ! $this->isSameIdentity($boundUser, $user)) {
+        if ($boundUser !== null && ! $resolver->isSamePrincipal($boundUser, $user)) {
             return null;
         }
 
@@ -55,8 +57,6 @@ final class GateBefore
             return null;
         }
 
-        $resolver = $this->app->make(EffectivePermissionResolver::class);
-
         if ($resolver->isSuperAdmin($user)) {
             return true;
         }
@@ -68,15 +68,5 @@ final class GateBefore
         }
 
         return null;
-    }
-
-    /**
-     * Type and identifier: another guard's principal can share the bound
-     * user's identifier without being that user.
-     */
-    private function isSameIdentity(Authenticatable $boundUser, Authenticatable $gateUser): bool
-    {
-        return $boundUser::class === $gateUser::class
-            && $boundUser->getAuthIdentifier() === $gateUser->getAuthIdentifier();
     }
 }

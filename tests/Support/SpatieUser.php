@@ -10,7 +10,7 @@ use Spatie\Permission\Traits\HasRoles;
 /**
  * Minimal Eloquent user with Spatie HasRoles for resolver feature tests.
  */
-final class SpatieUser extends Authenticatable
+class SpatieUser extends Authenticatable
 {
     use HasRoles;
 

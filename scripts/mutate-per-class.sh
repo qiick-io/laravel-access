@@ -29,6 +29,7 @@ CLASSES=(
   'Qiick\Access\Laravel\AccessBootChecks'
   'Qiick\Access\Http\EnsureTwoFactorIsEnabled'
   'Qiick\Access\SuperAdminGuard'
+  'Qiick\Access\Laravel\ReservedRoleNameGuard'
 )
 
 CLASS_FILES=(
@@ -48,6 +49,7 @@ CLASS_FILES=(
   'src/Laravel/AccessBootChecks.php'
   'src/Http/EnsureTwoFactorIsEnabled.php'
   'src/SuperAdminGuard.php'
+  'src/Laravel/ReservedRoleNameGuard.php'
 )
 
 # Other mutation-target siblings ignored while mutating one class.
