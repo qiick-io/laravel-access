@@ -474,14 +474,28 @@ final class EffectivePermissionResolver
             return [];
         }
 
+        $roleClass = $this->registrar->getRoleClass();
+
+        if (! is_a($roleClass, Model::class, true)) {
+            return [];
+        }
+
+        // The super-admin role's own permissions never count (§6). Compared
+        // in PHP, exactly like direct roles: a SQL `!=` would follow the
+        // column collation and also drop look-alikes such as `Super-Admin`
+        // on case-insensitive MySQL / MariaDB.
+        $roleIdsExceptSuperAdmin = $roleClass::query()
+            ->whereIn('id', $roleIds)
+            ->get(['id', 'name'])
+            ->reject(fn (Model $role): bool => $role->getAttribute('name') === $this->roleCatalog->superAdminRoleName())
+            ->modelKeys();
+
         $names = [];
 
         foreach (
             $permissionClass::query()
-                ->whereHas('roles', function ($query) use ($roleIds): void {
-                    // The super-admin role's own permissions never count (§6).
-                    $query->whereIn('roles.id', $roleIds)
-                        ->where('roles.name', '!=', $this->roleCatalog->superAdminRoleName());
+                ->whereHas('roles', static function ($query) use ($roleIdsExceptSuperAdmin): void {
+                    $query->whereIn('roles.id', $roleIdsExceptSuperAdmin);
                 })
                 ->pluck('name') as $permissionName
         ) {

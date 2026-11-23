@@ -25,9 +25,11 @@ function makeResolver(
     bool $runningInConsole = false,
     bool $trustApiGuardInConsole = false,
     bool $isTestingEnvironment = true,
+    mixed $webGuards = ['web'],
 ): ContainerActorResolver {
     $config = Mockery::mock(ConfigRepository::class);
     $config->shouldReceive('get')->with('access.api_guards', [])->andReturn($apiGuards);
+    $config->shouldReceive('get')->with('access.web_guards', [])->andReturn($webGuards);
     $config->shouldReceive('get')->with('access.trust_api_guard_in_console', false)->andReturn($trustApiGuardInConsole);
 
     $auth = Mockery::mock(AuthFactory::class);
@@ -88,40 +90,51 @@ it('does not treat a non-API guard as an API actor', function (): void {
         ->and($context->isApiActor())->toBeFalse();
 });
 
-it('ignores a non-array api_guards config value', function (): void {
+// Re-review R1: any default guard outside access.web_guards is an API guard,
+// so malformed or empty guard lists fail closed instead of passing as web.
+it('treats a guard outside web_guards as an API guard, listed in api_guards or not', function (): void {
     AccessContext::enter(new ActorContext(ActorKind::WebSession, new FakeAuthenticatable));
 
-    $context = makeResolver('api_key', 'api_key')->current();
-
-    expect($context->isApiActor())->toBeFalse();
+    expect(makeResolver([], 'late-token')->current()->isApiActor())->toBeTrue()
+        ->and(makeResolver('api_key', 'api_key')->current()->isApiActor())->toBeTrue()
+        ->and(makeResolver([], 'web')->current()->isApiActor())->toBeFalse();
 });
 
-it('ignores empty and non-string entries in api_guards', function (): void {
+it('treats a guard listed in both web_guards and api_guards as an API guard', function (): void {
     AccessContext::enter(new ActorContext(ActorKind::WebSession, new FakeAuthenticatable));
 
-    expect(makeResolver(['', null, 1], 'api_key')->current()->isApiActor())->toBeFalse();
-    expect(makeResolver(['', 'api_key'], 'api_key')->current()->isApiActor())->toBeTrue();
+    expect(makeResolver(['web'], 'web')->current()->isApiActor())->toBeTrue();
 });
 
-it('does not treat an empty-string guard name as an API guard', function (): void {
+it('fails closed on a non-array web_guards config value', function (): void {
     AccessContext::enter(new ActorContext(ActorKind::WebSession, new FakeAuthenticatable));
 
-    expect(makeResolver([''], '')->current()->isApiActor())->toBeFalse();
+    expect(makeResolver([], 'web', webGuards: 'web')->current()->isApiActor())->toBeTrue();
 });
 
-it('does not treat a null default driver as matching a null config entry', function (): void {
+it('ignores empty and non-string entries in the guard lists', function (): void {
     AccessContext::enter(new ActorContext(ActorKind::WebSession, new FakeAuthenticatable));
 
-    expect(makeResolver([null], '')->current()->isApiActor())->toBeFalse();
+    expect(makeResolver([], 'web', webGuards: ['', null, 1])->current()->isApiActor())->toBeTrue()
+        ->and(makeResolver([], 'web', webGuards: ['', 'web'])->current()->isApiActor())->toBeFalse()
+        ->and(makeResolver(['', null, 1], 'web')->current()->isApiActor())->toBeFalse()
+        ->and(makeResolver(['', 'api_key'], 'api_key', webGuards: ['web', 'api_key'])->current()->isApiActor())->toBeTrue();
+});
+
+it('never treats an empty or null default guard as a web guard', function (): void {
+    AccessContext::enter(new ActorContext(ActorKind::WebSession, new FakeAuthenticatable));
+
+    expect(makeResolver([], '', webGuards: [''])->current()->isApiActor())->toBeTrue();
 
     $config = Mockery::mock(ConfigRepository::class);
-    $config->shouldReceive('get')->with('access.api_guards', [])->andReturn([null]);
+    $config->shouldReceive('get')->with('access.api_guards', [])->andReturn([]);
+    $config->shouldReceive('get')->with('access.web_guards', [])->andReturn([null]);
     $auth = Mockery::mock(AuthFactory::class);
     $auth->shouldReceive('getDefaultDriver')->andReturn(null);
     $app = Mockery::mock(Application::class);
     $app->shouldReceive('runningInConsole')->andReturn(false);
 
-    expect((new ContainerActorResolver($config, $auth, $app))->current()->isApiActor())->toBeFalse();
+    expect((new ContainerActorResolver($config, $auth, $app))->current()->isApiActor())->toBeTrue();
 });
 
 it('never reads request input when resolving a bound API actor', function (): void {

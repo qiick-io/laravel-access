@@ -6,10 +6,13 @@ use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Schema;
 use Qiick\Access\Contracts\GroupRoleSource;
+use Qiick\Access\Contracts\PermissionVocabulary;
 use Qiick\Access\Contracts\RoleCatalog;
+use Qiick\Access\Contracts\TeamContext;
 use Qiick\Access\EffectivePermissionResolver;
 use Qiick\Access\Tests\Support\FakeAuthenticatable;
 use Qiick\Access\Tests\Support\FakePermissionEnum;
+use Qiick\Access\Tests\Support\PermissionedFakeUser;
 use Qiick\Access\Tests\Support\SpatieUser;
 use Spatie\Permission\Models\Permission;
 use Spatie\Permission\Models\Role;
@@ -231,3 +234,62 @@ it('leaves the super-admin role\'s own permissions out of the assigned ceiling, 
         ->and($resolver->hasAssignedPermission($groupAdmin, FakePermissionEnum::CanEditUsers->value))->toBeFalse()
         ->and($resolver->hasAssignedPermission($groupAdmin, FakePermissionEnum::CanShowUsers->value))->toBeTrue();
 });
+
+it('compares the super-admin role name exactly, the same way for direct and group roles', function (): void {
+    // A look-alike: an ordinary role. A case-insensitive SQL collation
+    // (MySQL / MariaDB) must not mistake it for the super-admin role.
+    $lookAlikeRole = Role::create(['name' => 'Super-Admin', 'guard_name' => 'web']);
+    $lookAlikeRole->givePermissionTo(Permission::create(['name' => FakePermissionEnum::CanShowUsers->value, 'guard_name' => 'web']));
+
+    $directHolder = SpatieUser::query()->create(['email' => 'direct-look-alike@example.com']);
+    $directHolder->assignRole($lookAlikeRole);
+    $groupHolder = SpatieUser::query()->create(['email' => 'group-look-alike@example.com']);
+
+    $groupRoles = Mockery::mock(GroupRoleSource::class);
+    $groupRoles->shouldReceive('instanceRoleIdsFor')->andReturn([]);
+    $groupRoles->shouldReceive('roleIdsFor')->andReturnUsing(
+        static fn (SpatieUser $user): array => $user->is($groupHolder) ? [$lookAlikeRole->id] : [],
+    );
+    $this->app->instance(GroupRoleSource::class, $groupRoles);
+    $this->app->forgetInstance(EffectivePermissionResolver::class);
+
+    $resolver = app(EffectivePermissionResolver::class);
+
+    expect($resolver->isSuperAdmin($directHolder))->toBeFalse()
+        ->and($resolver->hasAssignedPermission($directHolder, FakePermissionEnum::CanShowUsers->value))->toBeTrue()
+        ->and($resolver->isSuperAdmin($groupHolder))->toBeFalse()
+        ->and($resolver->hasAssignedPermission($groupHolder, FakePermissionEnum::CanShowUsers->value))->toBeTrue();
+})->group('engines');
+
+it('grants no group permissions when the Spatie permission or role class is not a model', function (string $permissionClass, string $roleClass): void {
+    $user = new PermissionedFakeUser(16, [], ['can-show-users']);
+
+    $roleCatalog = Mockery::mock(RoleCatalog::class);
+    $roleCatalog->shouldReceive('superAdminRoleName')->andReturn('super-admin');
+
+    $groupRoles = Mockery::mock(GroupRoleSource::class);
+    $groupRoles->shouldReceive('instanceRoleIdsFor')->andReturn([]);
+    $groupRoles->shouldReceive('roleIdsFor')->andReturn([Role::create(['name' => 'group-viewer', 'guard_name' => 'web'])->id]);
+
+    $teamContext = Mockery::mock(TeamContext::class);
+    $teamContext->shouldReceive('currentId')->andReturn(null);
+
+    $registrar = Mockery::mock(PermissionRegistrar::class);
+    $registrar->teams = false;
+    $registrar->shouldReceive('getPermissionClass')->andReturn($permissionClass);
+    $registrar->shouldReceive('getRoleClass')->andReturn($roleClass);
+
+    $resolver = new EffectivePermissionResolver(
+        $roleCatalog,
+        $groupRoles,
+        Mockery::mock(PermissionVocabulary::class),
+        $teamContext,
+        $registrar,
+    );
+
+    // Reaching the query with a non-model class would throw.
+    expect($resolver->hasAssignedPermission($user, 'can-show-users'))->toBeTrue();
+})->with([
+    'permission class not a model' => [stdClass::class, Role::class],
+    'role class not a model' => [Permission::class, stdClass::class],
+]);
