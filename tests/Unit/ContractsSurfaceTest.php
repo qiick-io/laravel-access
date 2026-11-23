@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use Qiick\Access\Contracts\ActiveUsers;
 use Qiick\Access\Contracts\ActorResolver;
+use Qiick\Access\Contracts\ApiActorScopeCheck;
 use Qiick\Access\Contracts\AuthorizationResponder;
 use Qiick\Access\Contracts\GroupRoleSource;
 use Qiick\Access\Contracts\PermissionVocabulary;
@@ -24,4 +25,5 @@ it('exposes every design §2.2 contract interface', function (string $interface)
     TwoFactorResponder::class,
     AuthorizationResponder::class,
     ActiveUsers::class,
+    ApiActorScopeCheck::class,
 ]);

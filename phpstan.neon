@@ -6,6 +6,8 @@ parameters:
     paths:
         - src
         - config
+        # Uses AuthorizesWithPermission, so PHPStan analyses the trait.
+        - tests/Support/PermissionGatedRequest.php
     tmpDir: build/phpstan
     treatPhpDocTypesAsCertain: false
     bootstrapFiles:

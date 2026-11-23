@@ -12,10 +12,9 @@ Each product:
    responder, and the authorization responder.
 3. Sets `permission.register_permission_check_method` to `false` and
    `permission.events_enabled` to `true`.
-4. Replaces its resolver copy, 2FA middleware and `Gate::before` closure with
-   this package. It keeps its own permission middleware and FormRequest trait
-   until the package ships `EnsureUserHasPermission` and
-   `AuthorizesWithPermission` (not implemented yet).
+4. Replaces its resolver copy, 2FA middleware, permission middleware and
+   FormRequest trait, and `Gate::before` closure with this package (see
+   "Permission middleware and FormRequest trait" below).
 5. Rewrites Policy `$actor->can(PermissionEnum…)` calls to the resolver (R5).
 6. Lists remaining direct `hasPermission()` call sites in `qiick-standards.json`
    (`access.direct_checks`) with reason, decision link and `review_by`.
@@ -88,6 +87,40 @@ Products must set `permission.register_permission_check_method` to `false` and
 `permission.events_enabled` to `true` before boot; the provider fails closed
 otherwise (R4, A1). Bind `RoleCatalog`, `TwoFactorPolicy`,
 `TwoFactorResponder` and `AuthorizationResponder` or boot fails (AC12).
+
+## Permission middleware and FormRequest trait
+
+The package does not register a middleware alias (it would collide with the
+product's own). Register it in `bootstrap/app.php`:
+
+```php
+->withMiddleware(function (Middleware $middleware): void {
+    $middleware->alias([
+        'permission' => \Qiick\Access\Http\EnsureUserHasPermission::class,
+    ]);
+})
+```
+
+and gate route groups with `permission:<PermissionEnum value>`.
+`permission:a,b` requires **all** listed permissions; a route with none
+throws. Spatie's `a|b` and wildcard syntaxes are not supported: names match
+exactly, so they deny. In a FormRequest, `use AuthorizesWithPermission;` and
+call `$this->authorizePermission(PermissionEnum::X->value)` from
+`authorize()`. Denials use the product `AuthorizationResponder` body in both.
+
+A web actor passes with the permission from the resolver, super-admin
+included, only when the request's guard is in `access.web_guards` (default
+`web`) and its user is the bound `AccessContext` user, if one is bound. An API
+actor passes only when the credential's scopes allow the permission **and** its
+owner currently holds it (read fresh, never through super-admin: neither the
+vocabulary grant nor permissions attached to the super-admin role count). The
+scope half is the product's (or `qiick/laravel-api-keys`'s)
+`ApiActorScopeCheck` binding; with none bound, every API actor is denied.
+
+**Classify every guard.** Boot fails unless each guard in `auth.guards` is in
+`access.web_guards` or `access.api_guards` (`ACCESS_API_GUARDS`, Sanctum's
+`sanctum` guard included). A token guard in neither would make its users look
+like web sessions.
 
 `SuperAdminGuard` last-admin protection relies on `SELECT … FOR UPDATE`.
 SQLite does not honour those locks; production deployments must use MySQL,

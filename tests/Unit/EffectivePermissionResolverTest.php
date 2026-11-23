@@ -153,6 +153,38 @@ it('caches the super-admin verdict until forget', function (): void {
     expect($resolver->isSuperAdmin($user))->toBeFalse();
 });
 
+it('reports assigned permissions without the super-admin grant, cached unless fresh', function (): void {
+    $superAdmin = new PermissionedFakeUser(9, ['super-admin'], ['can-show-users']);
+
+    $roleCatalog = Mockery::mock(RoleCatalog::class);
+    $roleCatalog->shouldReceive('superAdminRoleName')->andReturn('super-admin');
+
+    $groupRoles = Mockery::mock(GroupRoleSource::class);
+    $groupRoles->shouldReceive('instanceRoleIdsFor')->andReturn([]);
+    $groupRoles->shouldReceive('roleIdsFor')->andReturn([]);
+
+    $vocabulary = Mockery::mock(PermissionVocabulary::class);
+    $vocabulary->shouldReceive('all')->andReturn(['can-show-users', 'can-edit-users']);
+
+    $teamContext = Mockery::mock(TeamContext::class);
+    $teamContext->shouldReceive('currentId')->andReturn(null);
+
+    $registrar = Mockery::mock(PermissionRegistrar::class);
+    $registrar->teams = false;
+
+    $resolver = new EffectivePermissionResolver($roleCatalog, $groupRoles, $vocabulary, $teamContext, $registrar);
+
+    expect($resolver->permissionsFor($superAdmin))->toBe(['can-show-users', 'can-edit-users'])
+        ->and($resolver->hasAssignedPermission($superAdmin, 'can-show-users'))->toBeTrue()
+        ->and($resolver->hasAssignedPermission($superAdmin, 'can-edit-users'))->toBeFalse();
+
+    $superAdmin->setPermissionNames([]);
+
+    expect($resolver->hasAssignedPermission($superAdmin, 'can-show-users'))->toBeTrue()
+        ->and($superAdmin->permissionCalls)->toBe(1)
+        ->and($resolver->hasAssignedPermission($superAdmin, 'can-show-users', true))->toBeFalse();
+});
+
 it('fresh bypasses a warm cache entry', function (): void {
     $user = new PermissionedFakeUser(4, ['member'], ['can-show-users']);
 
