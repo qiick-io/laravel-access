@@ -32,6 +32,20 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Web guards
+    |--------------------------------------------------------------------------
+    |
+    | Guard names of interactive web sessions. Every guard in auth.guards must
+    | be listed here or in api_guards, or boot fails: a token guard classified
+    | as neither would otherwise take the web path and reach the super-admin
+    | grant. EnsureUserHasPermission denies users of any other guard.
+    |
+    */
+
+    'web_guards' => ['web'],
+
+    /*
+    |--------------------------------------------------------------------------
     | Trust API guard in console (testing only)
     |--------------------------------------------------------------------------
     |

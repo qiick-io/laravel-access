@@ -40,7 +40,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   body. API actors pass only with credential scopes (new optional
   `ApiActorScopeCheck` contract) ∩ the owner's currently assigned permissions
   (`EffectivePermissionResolver::hasAssignedPermission(..., fresh: true)`),
-  never through super-admin, and are denied when no scope check is bound.
+  never through super-admin (neither the vocabulary grant nor permissions on
+  the super-admin role), and are denied when no scope check is bound.
+  `permission:a,b` requires every listed permission. Web actors pass only on
+  an `access.web_guards` guard and as the bound actor's user; boot fails when
+  a guard in `auth.guards` is in neither `web_guards` nor `api_guards`.
   Both are per-class mutation targets.
 
 - Group schema: nullable `user_groups.organisation_id`, `is_instance`, and an

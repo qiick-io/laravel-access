@@ -101,17 +101,26 @@ product's own). Register it in `bootstrap/app.php`:
 })
 ```
 
-and gate route groups with `permission:<PermissionEnum value>`. In a
-FormRequest, `use AuthorizesWithPermission;` and call
-`$this->authorizePermission(PermissionEnum::X->value)` from `authorize()`.
-Denials use the product `AuthorizationResponder` body in both.
+and gate route groups with `permission:<PermissionEnum value>`.
+`permission:a,b` requires **all** listed permissions; a route with none
+throws. Spatie's `a|b` and wildcard syntaxes are not supported: names match
+exactly, so they deny. In a FormRequest, `use AuthorizesWithPermission;` and
+call `$this->authorizePermission(PermissionEnum::X->value)` from
+`authorize()`. Denials use the product `AuthorizationResponder` body in both.
 
 A web actor passes with the permission from the resolver, super-admin
-included. An API actor passes only when the credential's scopes allow the
-permission **and** its owner currently holds it (read fresh, without the
-super-admin grant). The scope half is the product's (or
-`qiick/laravel-api-keys`'s) `ApiActorScopeCheck` binding; with none bound,
-every API actor is denied.
+included, only when the request's guard is in `access.web_guards` (default
+`web`) and its user is the bound `AccessContext` user, if one is bound. An API
+actor passes only when the credential's scopes allow the permission **and** its
+owner currently holds it (read fresh, never through super-admin: neither the
+vocabulary grant nor permissions attached to the super-admin role count). The
+scope half is the product's (or `qiick/laravel-api-keys`'s)
+`ApiActorScopeCheck` binding; with none bound, every API actor is denied.
+
+**Classify every guard.** Boot fails unless each guard in `auth.guards` is in
+`access.web_guards` or `access.api_guards` (`ACCESS_API_GUARDS`, Sanctum's
+`sanctum` guard included). A token guard in neither would make its users look
+like web sessions.
 
 `SuperAdminGuard` last-admin protection relies on `SELECT … FOR UPDATE`.
 SQLite does not honour those locks; production deployments must use MySQL,

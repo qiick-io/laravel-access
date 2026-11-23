@@ -107,12 +107,12 @@ function requestAs(?SpatieUser $user): Request
     return $request;
 }
 
-function passThroughPermissionMiddleware(Request $request, string $permission): Response
+function passThroughPermissionMiddleware(Request $request, string ...$permissions): Response
 {
     return app(EnsureUserHasPermission::class)->handle(
         $request,
         static fn (): Response => new Response('next'),
-        $permission,
+        ...$permissions,
     );
 }
 
@@ -226,4 +226,76 @@ it('authorizes a FormRequest with the same decision and body', function (): void
         expect($exception->getResponse()->getStatusCode())->toBe(403)
             ->and($exception->getResponse()->getContent())->toBe('forbidden:can-edit-users');
     }
+});
+
+it('requires every permission listed on the route', function (): void {
+    $user = userWithPermissions(FakePermissionEnum::CanShowUsers->value);
+    $bothUser = userWithPermissions(FakePermissionEnum::CanShowUsers->value, FakePermissionEnum::CanEditUsers->value);
+
+    expect(passThroughPermissionMiddleware(requestAs($user), FakePermissionEnum::CanShowUsers->value, FakePermissionEnum::CanEditUsers->value)->getContent())
+        ->toBe('forbidden:can-edit-users')
+        ->and(passThroughPermissionMiddleware(requestAs($bothUser), FakePermissionEnum::CanShowUsers->value, FakePermissionEnum::CanEditUsers->value)->getContent())
+        ->toBe('next');
+});
+
+it('refuses a route that names no permission', function (): void {
+    expect(fn () => passThroughPermissionMiddleware(requestAs(userWithPermissions())))
+        ->toThrow(InvalidArgumentException::class, 'permission:');
+});
+
+it('denies a user authenticated by a guard that is neither web nor API', function (): void {
+    $owner = userWithPermissions(FakePermissionEnum::CanShowUsers->value);
+    $owner->assignRole('super-admin');
+
+    // A token guard the product forgot to list in access.api_guards.
+    config()->set('auth.guards.token', ['driver' => 'session', 'provider' => 'users']);
+    auth()->shouldUse('token');
+
+    expect(passThroughPermissionMiddleware(requestAs($owner), FakePermissionEnum::CanShowUsers->value)->getContent())
+        ->toBe('forbidden:can-show-users');
+
+    config()->set('access.web_guards', ['web', 'token']);
+
+    expect(passThroughPermissionMiddleware(requestAs($owner), FakePermissionEnum::CanShowUsers->value)->getContent())
+        ->toBe('next');
+});
+
+it('denies a web request whose user is not the bound actor', function (): void {
+    $boundUser = userWithPermissions();
+    $requestUser = userWithPermissions(FakePermissionEnum::CanShowUsers->value);
+    AccessContext::enter(new ActorContext(ActorKind::WebSession, $boundUser));
+
+    expect(passThroughPermissionMiddleware(requestAs($requestUser), FakePermissionEnum::CanShowUsers->value)->getContent())
+        ->toBe('forbidden:can-show-users')
+        ->and(passThroughPermissionMiddleware(requestAs($boundUser), FakePermissionEnum::CanShowUsers->value)->getContent())
+        ->toBe('forbidden:can-show-users');
+
+    $boundUser->givePermissionTo(FakePermissionEnum::CanShowUsers->value);
+
+    expect(passThroughPermissionMiddleware(requestAs($boundUser), FakePermissionEnum::CanShowUsers->value)->getContent())
+        ->toBe('next');
+});
+
+it('never counts the super-admin role\'s own permissions for an API actor', function (): void {
+    $superAdminRole = Role::findByName('super-admin');
+    $superAdminRole->givePermissionTo(FakePermissionEnum::CanEditUsers->value);
+    $editorRole = Role::create(['name' => 'editor', 'guard_name' => 'web']);
+    $editorRole->givePermissionTo(FakePermissionEnum::CanShowUsers->value);
+
+    Permission::create(['name' => 'can-delete-users', 'guard_name' => 'web']);
+    $owner = userWithPermissions('can-delete-users');
+    $owner->assignRole($superAdminRole, $editorRole);
+    enterApiActor($owner);
+    $this->app->instance(ApiActorScopeCheck::class, new ListedScopeCheck([
+        FakePermissionEnum::CanShowUsers->value,
+        FakePermissionEnum::CanEditUsers->value,
+        'can-delete-users',
+    ]));
+
+    expect(passThroughPermissionMiddleware(requestAs(null), FakePermissionEnum::CanEditUsers->value)->getContent())
+        ->toBe('forbidden:can-edit-users')
+        ->and(passThroughPermissionMiddleware(requestAs(null), FakePermissionEnum::CanShowUsers->value)->getContent())
+        ->toBe('next')
+        ->and(passThroughPermissionMiddleware(requestAs(null), 'can-delete-users')->getContent())
+        ->toBe('next');
 });

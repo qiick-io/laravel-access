@@ -202,3 +202,32 @@ it('detects super-admin through an instance group without teams', function (): v
 
     expect(app(EffectivePermissionResolver::class)->isSuperAdmin($user))->toBeTrue();
 });
+
+it('leaves the super-admin role\'s own permissions out of the assigned ceiling, direct or through a group', function (): void {
+    $superAdminRole = Role::create(['name' => 'super-admin', 'guard_name' => 'web']);
+    $superAdminRole->givePermissionTo(Permission::create(['name' => FakePermissionEnum::CanEditUsers->value, 'guard_name' => 'web']));
+    $viewerRole = Role::create(['name' => 'viewer', 'guard_name' => 'web']);
+    $viewerRole->givePermissionTo(Permission::create(['name' => FakePermissionEnum::CanShowUsers->value, 'guard_name' => 'web']));
+
+    $directAdmin = SpatieUser::query()->create(['email' => 'direct-admin@example.com']);
+    $directAdmin->assignRole($superAdminRole);
+    $groupAdmin = SpatieUser::query()->create(['email' => 'group-admin@example.com']);
+
+    $groupRoles = Mockery::mock(GroupRoleSource::class);
+    $groupRoles->shouldReceive('instanceRoleIdsFor')->andReturnUsing(
+        static fn (SpatieUser $user): array => $user->is($groupAdmin) ? [$superAdminRole->id] : [],
+    );
+    $groupRoles->shouldReceive('roleIdsFor')->andReturnUsing(
+        static fn (SpatieUser $user): array => $user->is($groupAdmin) ? [$superAdminRole->id, $viewerRole->id] : [],
+    );
+    $this->app->instance(GroupRoleSource::class, $groupRoles);
+    $this->app->forgetInstance(EffectivePermissionResolver::class);
+
+    $resolver = app(EffectivePermissionResolver::class);
+
+    expect($resolver->isSuperAdmin($directAdmin))->toBeTrue()
+        ->and($resolver->hasAssignedPermission($directAdmin, FakePermissionEnum::CanEditUsers->value))->toBeFalse()
+        ->and($resolver->isSuperAdmin($groupAdmin))->toBeTrue()
+        ->and($resolver->hasAssignedPermission($groupAdmin, FakePermissionEnum::CanEditUsers->value))->toBeFalse()
+        ->and($resolver->hasAssignedPermission($groupAdmin, FakePermissionEnum::CanShowUsers->value))->toBeTrue();
+});

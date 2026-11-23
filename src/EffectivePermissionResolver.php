@@ -380,6 +380,11 @@ final class EffectivePermissionResolver
     }
 
     /**
+     * Direct permissions and those of direct roles, except the super-admin
+     * role's own: a super-admin's web grant is the whole vocabulary anyway,
+     * and an API actor's owner ceiling must never include anything that comes
+     * from the super-admin role (design §6).
+     *
      * @return list<string>
      */
     private function pluckPermissionNames(Authenticatable $user): array
@@ -392,21 +397,40 @@ final class EffectivePermissionResolver
             $user->loadMissing(['permissions', 'roles.permissions']);
         }
 
-        $names = [];
+        if (! $user instanceof Model) {
+            // Not an Eloquent HasRoles model: no role to set apart.
+            return $this->permissionNamesOf(Collection::wrap($user->getAllPermissions())->all());
+        }
 
-        foreach (Collection::wrap($user->getAllPermissions()) as $permission) {
-            if (! is_object($permission) || ! method_exists($permission, 'getAttribute')) {
+        // Spatie's direct permissions are the `permissions` relation loaded above.
+        $permissions = Collection::wrap($user->getRelationValue('permissions'))->all();
+
+        foreach (Collection::wrap($user->getRelationValue('roles'))->all() as $role) {
+            if (! $role instanceof Model || $role->getAttribute('name') === $this->roleCatalog->superAdminRoleName()) {
                 continue;
             }
 
-            $permissionName = $permission->getAttribute('name');
+            $permissions = [...$permissions, ...Collection::wrap($role->getRelationValue('permissions'))->all()];
+        }
 
-            if (is_string($permissionName) && $permissionName !== '') {
-                $names[] = $permissionName;
+        return $this->permissionNamesOf($permissions);
+    }
+
+    /**
+     * @param  array<array-key, mixed>  $permissions
+     * @return list<string>
+     */
+    private function permissionNamesOf(array $permissions): array
+    {
+        $names = [];
+
+        foreach ($permissions as $permission) {
+            if (is_object($permission) && method_exists($permission, 'getAttribute')) {
+                $names[] = $permission->getAttribute('name');
             }
         }
 
-        return $names;
+        return $this->stringsOnly($names);
     }
 
     /**
@@ -454,8 +478,10 @@ final class EffectivePermissionResolver
 
         foreach (
             $permissionClass::query()
-                ->whereHas('roles', static function ($query) use ($roleIds): void {
-                    $query->whereIn('roles.id', $roleIds);
+                ->whereHas('roles', function ($query) use ($roleIds): void {
+                    // The super-admin role's own permissions never count (§6).
+                    $query->whereIn('roles.id', $roleIds)
+                        ->where('roles.name', '!=', $this->roleCatalog->superAdminRoleName());
                 })
                 ->pluck('name') as $permissionName
         ) {

@@ -118,3 +118,32 @@ it('assert() runs every boot check', function (): void {
     expect(fn () => $checks->assert())->toThrow(RuntimeException::class, RoleCatalog::class);
     app()->instance(RoleCatalog::class, $previous);
 });
+
+it('fails when an auth guard is neither a web nor an API guard', function (): void {
+    $checks = app(AccessBootChecks::class);
+    $config = app(ConfigRepository::class);
+    $config->set('auth.guards', ['web' => [], 'token' => [], 'api-key' => []]);
+    $config->set('access.web_guards', ['web']);
+    $config->set('access.api_guards', ['api-key']);
+
+    expect(fn () => $checks->assertEveryGuardClassified($config))
+        ->toThrow(RuntimeException::class, 'Auth guard [token] is in neither');
+
+    expect(fn () => $checks->assert())
+        ->toThrow(RuntimeException::class, 'Auth guard [token]');
+
+    $config->set('access.api_guards', ['api-key', 'token']);
+    $checks->assertEveryGuardClassified($config);
+
+    $config->set('access.web_guards', 'web');
+    expect(fn () => $checks->assertEveryGuardClassified($config))
+        ->toThrow(RuntimeException::class, 'Auth guard [web]');
+
+    $config->set('access.web_guards', ['web']);
+    $config->set('access.api_guards', 'token');
+    expect(fn () => $checks->assertEveryGuardClassified($config))
+        ->toThrow(RuntimeException::class, 'Auth guard [token]');
+
+    $config->set('auth.guards', 'web');
+    $checks->assertEveryGuardClassified($config);
+});

@@ -5,8 +5,10 @@ declare(strict_types=1);
 namespace Qiick\Access\Http;
 
 use Closure;
+use Illuminate\Contracts\Config\Repository as ConfigRepository;
 use Illuminate\Contracts\Container\Container;
 use Illuminate\Http\Request;
+use InvalidArgumentException;
 use Qiick\Access\Contracts\ActorResolver;
 use Qiick\Access\Contracts\ApiActorScopeCheck;
 use Qiick\Access\Contracts\AuthorizationResponder;
@@ -14,10 +16,14 @@ use Qiick\Access\EffectivePermissionResolver;
 use Symfony\Component\HttpFoundation\Response;
 
 /**
- * Route middleware `permission:<PermissionEnum value>` (design §6). Products
- * register the alias themselves.
+ * Route middleware `permission:<PermissionEnum value>[,<value>...]` (design
+ * §6): every listed permission is required. Products register the alias.
  *
- * A web actor needs the permission from the resolver (super-admin included).
+ * A web actor needs the permission from the resolver (super-admin included),
+ * and only when the request's guard is listed in `access.web_guards` and its
+ * user is the bound actor's user, if one is bound. A user authenticated by any
+ * other guard (a token guard missing from `access.api_guards`) is denied, so
+ * it never reaches the web super-admin grant.
  * An API actor needs both the credential's scopes (ApiActorScopeCheck) and the
  * owner's currently assigned permission, read fresh and without the
  * super-admin grant, so a key owned by a super-admin reaches only its scopes
@@ -35,14 +41,29 @@ final class EnsureUserHasPermission
         private readonly EffectivePermissionResolver $permissions,
         private readonly AuthorizationResponder $responder,
         private readonly Container $container,
+        private readonly ConfigRepository $config,
     ) {}
 
     /**
      * @param  Closure(Request): Response  $next
+     *
+     * @throws InvalidArgumentException when the route names no permission
      */
-    public function handle(Request $request, Closure $next, string $permission): Response
+    public function handle(Request $request, Closure $next, string ...$permissions): Response
     {
-        return $this->forbiddenResponse($request, $permission) ?? $next($request);
+        if ($permissions === []) {
+            throw new InvalidArgumentException('The permission: middleware needs at least one permission name (permission:<value>[,<value>...]).');
+        }
+
+        foreach ($permissions as $permission) {
+            $forbiddenResponse = $this->forbiddenResponse($request, $permission);
+
+            if ($forbiddenResponse !== null) {
+                return $forbiddenResponse;
+            }
+        }
+
+        return $next($request);
     }
 
     /**
@@ -65,7 +86,10 @@ final class EnsureUserHasPermission
         if (! $actor->isApiActor()) {
             $user = $request->user();
 
-            return $user !== null && $this->permissions->hasPermission($user, $permission);
+            return $user !== null
+                && $this->isWebGuard()
+                && ($actor->user === null || $this->permissions->isSamePrincipal($actor->user, $user))
+                && $this->permissions->hasPermission($user, $permission);
         }
 
         if ($actor->user === null || ! $this->container->bound(ApiActorScopeCheck::class)) {
@@ -76,5 +100,13 @@ final class EnsureUserHasPermission
 
         return $scopeCheck->allows($actor, $permission)
             && $this->permissions->hasAssignedPermission($actor->user, $permission, true);
+    }
+
+    private function isWebGuard(): bool
+    {
+        $webGuards = $this->config->get('access.web_guards', []);
+
+        return is_array($webGuards)
+            && in_array($this->config->get('auth.defaults.guard'), $webGuards, true);
     }
 }

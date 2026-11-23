@@ -31,6 +31,7 @@ final class AccessBootChecks
         $this->assertRequiredBindings();
         $this->assertSpatiePermissionCheckMethodDisabled($config);
         $this->assertSpatieEventsEnabled($config);
+        $this->assertEveryGuardClassified($config);
     }
 
     public function assertRequiredBindings(): void
@@ -71,6 +72,32 @@ final class AccessBootChecks
             throw new RuntimeException(
                 "permission.register_permission_check_method must be boolean false, got {$configuredType}; GateBefore replaces Spatie's Gate::before (R4).",
             );
+        }
+    }
+
+    /**
+     * Every auth guard is either a web guard or an API guard. An unclassified
+     * token guard would make its users look like web sessions, so API rules
+     * (no super-admin, scopes ∩ owner) would not apply to them (design §6).
+     *
+     * @throws RuntimeException naming the first unclassified guard
+     */
+    public function assertEveryGuardClassified(ConfigRepository $config): void
+    {
+        $guards = $config->get('auth.guards', []);
+        $webGuards = $config->get('access.web_guards', []);
+        $apiGuards = $config->get('access.api_guards', []);
+        $classifiedGuards = [
+            ...(is_array($webGuards) ? $webGuards : []),
+            ...(is_array($apiGuards) ? $apiGuards : []),
+        ];
+
+        foreach (array_keys(is_array($guards) ? $guards : []) as $guard) {
+            if (! in_array($guard, $classifiedGuards, true)) {
+                throw new RuntimeException(
+                    "Auth guard [{$guard}] is in neither access.web_guards nor access.api_guards; classify it so API actors cannot pass as web sessions.",
+                );
+            }
         }
     }
 
