@@ -41,7 +41,7 @@ use Spatie\Permission\PermissionRegistrar;
  *
  * Boots Gate::before via GateBefore, scoped EffectivePermissionResolver,
  * required-binding checks (AC12), and refuses
- * permission.register_permission_check_method === true (R4) and
+ * permission.register_permission_check_method !== false (R4) and
  * permission.events_enabled !== true (A1). Also merges
  * config, binds AccessContext / ContainerActorResolver, stamps API actors onto
  * queued jobs, clears context and resolver caches on Octane / request / job

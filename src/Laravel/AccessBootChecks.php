@@ -52,9 +52,17 @@ final class AccessBootChecks
         }
     }
 
+    /**
+     * Only boolean false is accepted: Spatie registers its own Gate::before for
+     * any truthy value (1, "1", "false", "yes"), and an unset key falls back to
+     * Spatie's default of true. Its callback would grant the Gate user's
+     * permissions to API actors, the gap GateBefore closes (R4 / AC1 / AC2).
+     *
+     * @throws RuntimeException when the value is not exactly false
+     */
     public function assertSpatiePermissionCheckMethodDisabled(ConfigRepository $config): void
     {
-        if ($config->get('permission.register_permission_check_method') === true) {
+        if ($config->get('permission.register_permission_check_method') !== false) {
             throw new RuntimeException(
                 'permission.register_permission_check_method must be false; GateBefore replaces Spatie\'s Gate::before (R4).',
             );

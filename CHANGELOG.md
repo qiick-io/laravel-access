@@ -31,8 +31,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   permission grants; Policy arguments abstain) and scoped
   `EffectivePermissionResolver` (direct ∪ group roles/permissions, C30
   team-filter bypass for super-admin, process-local cache with request/job /
-  Spatie event clears). Boot refuses
-  `permission.register_permission_check_method === true`,
+  Spatie event clears). Boot refuses any
+  `permission.register_permission_check_method` other than boolean `false`
+  (Spatie enables its own callback for every truthy value),
   `permission.events_enabled !== true`, and missing
   `RoleCatalog` / 2FA / `AuthorizationResponder` bindings (R4, A1, AC12).
   `GateBefore` resolves scoped deps per invoke (no cross-request resolver

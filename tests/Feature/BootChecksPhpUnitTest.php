@@ -21,6 +21,32 @@ it('fails when register_permission_check_method is true (R4)', function (): void
     $config->set('permission.register_permission_check_method', false);
 });
 
+/**
+ * Spatie registers its own Gate::before for any truthy value, and an unset key
+ * falls back to Spatie's default of true, so only boolean false is safe (R4).
+ *
+ * @return list<mixed>
+ */
+dataset('non_false_permission_check_method_values', [
+    'integer one' => 1,
+    'string one' => '1',
+    'string false' => 'false',
+    'string zero' => '0',
+    'string yes' => 'yes',
+    'null' => null,
+]);
+
+it('fails when register_permission_check_method is anything but boolean false (R4)', function (mixed $configuredValue): void {
+    $checks = app(AccessBootChecks::class);
+    $config = app(ConfigRepository::class);
+    $config->set('permission.register_permission_check_method', $configuredValue);
+
+    expect(fn () => $checks->assertSpatiePermissionCheckMethodDisabled($config))
+        ->toThrow(RuntimeException::class, 'register_permission_check_method');
+
+    $config->set('permission.register_permission_check_method', false);
+})->with('non_false_permission_check_method_values');
+
 it('fails when permission.events_enabled is not true (A1 / N3)', function (): void {
     $checks = app(AccessBootChecks::class);
     $config = app(ConfigRepository::class);
