@@ -15,8 +15,9 @@ use Spatie\Permission\PermissionRegistrar;
 
 /**
  * Resolves effective roles and permissions from direct Spatie assignments and
- * active group roles (design §4). Process-local cache keyed by user and team;
- * scoped per request/job so a missed clear cannot outlive one unit of work.
+ * active group roles (design §4). Process-local cache keyed by user type,
+ * identifier and team; scoped per request/job so a missed clear cannot outlive
+ * one unit of work.
  *
  * Super-admin is resolved without the Spatie team filter (C30). Group role
  * permission names are loaded for the returned role ids (already team-specific
@@ -27,7 +28,11 @@ use Spatie\Permission\PermissionRegistrar;
 final class EffectivePermissionResolver
 {
     /**
-     * @var array<string, array{permissions: list<string>, role_names: list<string>, role_ids: list<string>}>
+     * Keyed by user type, then identifier, then team. The type is part of the
+     * key: two Authenticatable models (a web user and another guard's
+     * principal) can share an identifier and must never share permissions.
+     *
+     * @var array<class-string, array<string, array<string, array{permissions: list<string>, role_names: list<string>, role_ids: list<string>}>>>
      */
     private array $cache = [];
 
@@ -76,23 +81,11 @@ final class EffectivePermissionResolver
      */
     public function isDirectSuperAdmin(Authenticatable $user): bool
     {
-        $teamsWereEnabled = $this->registrar->teams;
-
-        if ($teamsWereEnabled) {
-            $this->registrar->teams = false;
-        }
-
-        try {
-            return in_array(
-                $this->roleCatalog->superAdminRoleName(),
-                $this->pluckRoleNames($user),
-                true,
-            );
-        } finally {
-            if ($teamsWereEnabled) {
-                $this->registrar->teams = true;
-            }
-        }
+        return in_array(
+            $this->roleCatalog->superAdminRoleName(),
+            $this->directRoleNamesIgnoringTeamFilter($user),
+            true,
+        );
     }
 
     /**
@@ -124,19 +117,9 @@ final class EffectivePermissionResolver
             return;
         }
 
-        $prefix = $this->userKey($user).':';
+        unset($this->cache[$user::class][$this->identifierKey($user)]);
 
-        foreach (array_keys($this->cache) as $cacheKey) {
-            if (str_starts_with($cacheKey, $prefix)) {
-                unset($this->cache[$cacheKey]);
-            }
-        }
-
-        if (method_exists($user, 'unsetRelation')) {
-            $user->unsetRelation('roles');
-            $user->unsetRelation('permissions');
-            $user->unsetRelation('groups');
-        }
+        $this->unsetRelations($user, 'roles', 'permissions', 'groups');
     }
 
     public function flush(): void
@@ -149,10 +132,18 @@ final class EffectivePermissionResolver
      */
     private function resolve(Authenticatable $user): array
     {
-        $cacheKey = $this->userKey($user).':'.$this->teamKey();
+        $userType = $user::class;
+        $identifier = $this->identifierKey($user);
+        $teamKey = $this->teamKey();
 
-        if (isset($this->cache[$cacheKey])) {
-            return $this->cache[$cacheKey];
+        if (isset($this->cache[$userType][$identifier][$teamKey])) {
+            return $this->cache[$userType][$identifier][$teamKey];
+        }
+
+        // Under teams Spatie filters these relations by the team current when
+        // they were loaded, possibly another one than this entry's (C29).
+        if ($this->registrar->teams) {
+            $this->unsetRelations($user, 'roles', 'permissions');
         }
 
         $directRoleIds = $this->pluckRoleIds($user);
@@ -167,14 +158,14 @@ final class EffectivePermissionResolver
         $roleNamesIgnoringTeam = $this->roleNamesIgnoringTeamFilter($user);
 
         if (in_array($this->roleCatalog->superAdminRoleName(), $roleNamesIgnoringTeam, true)) {
-            return $this->cache[$cacheKey] = [
+            return $this->cache[$userType][$identifier][$teamKey] = [
                 'permissions' => $this->vocabulary->all(),
                 'role_names' => $roleNamesIgnoringTeam,
                 'role_ids' => $roleIds,
             ];
         }
 
-        return $this->cache[$cacheKey] = [
+        return $this->cache[$userType][$identifier][$teamKey] = [
             'permissions' => $this->uniqueSortedStrings([
                 ...$this->pluckPermissionNames($user),
                 ...$this->permissionNamesForRoleIds($groupRoleIds),
@@ -189,23 +180,52 @@ final class EffectivePermissionResolver
      */
     private function roleNamesIgnoringTeamFilter(Authenticatable $user): array
     {
+        // Instance groups only — organisation membership must not mint
+        // instance super-admin (is_instance / C30).
+        return $this->uniqueSortedStrings([
+            ...$this->directRoleNamesIgnoringTeamFilter($user),
+            ...$this->roleNamesForIds($this->groupRoles->instanceRoleIdsFor($user)),
+        ]);
+    }
+
+    /**
+     * Direct role names across every team (C30). Under teams the `roles`
+     * relation is unset before the read, so a relation loaded with the current
+     * team's filter cannot hide an instance super-admin, and again after it,
+     * so the unfiltered relation never outlives this call: Spatie's
+     * getRoleNames() and getAllPermissions() reuse a loaded relation, and an
+     * unfiltered one would grant another organisation's roles in the current
+     * team, even on a `fresh` check.
+     *
+     * @return list<string>
+     */
+    private function directRoleNamesIgnoringTeamFilter(Authenticatable $user): array
+    {
         $teamsWereEnabled = $this->registrar->teams;
 
-        if ($teamsWereEnabled) {
-            $this->registrar->teams = false;
+        if (! $teamsWereEnabled) {
+            return $this->pluckRoleNames($user);
         }
 
+        $this->unsetRelations($user, 'roles');
+        $this->registrar->teams = false;
+
         try {
-            // Instance groups only — organisation membership must not mint
-            // instance super-admin (is_instance / C30).
-            return $this->uniqueSortedStrings([
-                ...$this->pluckRoleNames($user),
-                ...$this->roleNamesForIds($this->groupRoles->instanceRoleIdsFor($user)),
-            ]);
+            return $this->pluckRoleNames($user);
         } finally {
-            if ($teamsWereEnabled) {
-                $this->registrar->teams = true;
-            }
+            $this->registrar->teams = true;
+            $this->unsetRelations($user, 'roles');
+        }
+    }
+
+    private function unsetRelations(Authenticatable $user, string ...$relations): void
+    {
+        if (! method_exists($user, 'unsetRelation')) {
+            return;
+        }
+
+        foreach ($relations as $relation) {
+            $user->unsetRelation($relation);
         }
     }
 
@@ -214,7 +234,7 @@ final class EffectivePermissionResolver
         return var_export($this->teamContext->currentId(), true);
     }
 
-    private function userKey(Authenticatable $user): string
+    private function identifierKey(Authenticatable $user): string
     {
         $identifier = $user->getAuthIdentifier();
 

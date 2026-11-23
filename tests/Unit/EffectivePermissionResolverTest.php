@@ -88,6 +88,40 @@ it('caches permissions per user and team until forget', function (): void {
         ->and($user->permissionCalls)->toBe(2);
 });
 
+it('keys the cache by user type as well as identifier', function (): void {
+    $webUser = new PermissionedFakeUser(42, [], ['can-show-users']);
+    $otherGuardUser = new class(42) extends PermissionedFakeUser {};
+
+    $roleCatalog = Mockery::mock(RoleCatalog::class);
+    $roleCatalog->shouldReceive('superAdminRoleName')->andReturn('super-admin');
+
+    $groupRoles = Mockery::mock(GroupRoleSource::class);
+    $groupRoles->shouldReceive('instanceRoleIdsFor')->andReturn([]);
+    $groupRoles->shouldReceive('roleIdsFor')->andReturn([]);
+
+    $teamContext = Mockery::mock(TeamContext::class);
+    $teamContext->shouldReceive('currentId')->andReturn(null);
+
+    $registrar = Mockery::mock(PermissionRegistrar::class);
+    $registrar->teams = false;
+
+    $resolver = new EffectivePermissionResolver(
+        $roleCatalog,
+        $groupRoles,
+        Mockery::mock(PermissionVocabulary::class),
+        $teamContext,
+        $registrar,
+    );
+
+    expect($resolver->hasPermission($webUser, 'can-show-users'))->toBeTrue()
+        ->and($resolver->hasPermission($otherGuardUser, 'can-show-users'))->toBeFalse();
+
+    $resolver->forget($otherGuardUser);
+
+    expect($resolver->hasPermission($webUser, 'can-show-users'))->toBeTrue()
+        ->and($webUser->permissionCalls)->toBe(1);
+});
+
 it('fresh bypasses a warm cache entry', function (): void {
     $user = new PermissionedFakeUser(4, ['member'], ['can-show-users']);
 

@@ -30,13 +30,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `GateBefore` (single `Gate::before`: API actors never get super-admin /
   permission grants; Policy arguments abstain) and scoped
   `EffectivePermissionResolver` (direct ∪ group roles/permissions, C30
-  team-filter bypass for super-admin, process-local cache with request/job /
-  Spatie event clears). Boot refuses
-  `permission.register_permission_check_method === true`,
+  team-filter bypass for super-admin that unsets the `roles` relation before
+  and after the unfiltered read, so neither a team-filtered nor an unfiltered
+  relation leaks between teams, process-local cache with request/job /
+  Spatie event clears). Boot refuses any
+  `permission.register_permission_check_method` other than boolean `false`
+  (Spatie enables its own callback for every truthy value),
   `permission.events_enabled !== true`, and missing
   `RoleCatalog` / 2FA / `AuthorizationResponder` bindings (R4, A1, AC12).
   `GateBefore` resolves scoped deps per invoke (no cross-request resolver
-  leak), abstains on bound-context / Gate user identity mismatch, and
+  leak), abstains on bound-context / Gate user identity mismatch (type and
+  identifier; the resolver cache is keyed by both too), and
   `RequestHandled` clears `AccessContext`. Under Spatie teams,
   `permissionsFor` / `roleNamesFor` agree with `isSuperAdmin` (C30).
 - Actor runtime: scoped `AccessContext`, `ContainerActorResolver` (bound as
@@ -51,7 +55,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   groups and expired memberships excluded; instance / org / legacy scoping;
   `instanceRoleIdsFor` for super-admin; fixed table names; Octane-safe
   connection resolve), `SpatiePermissionVocabulary` (from `access.permission_enum`),
-  and `SpatieTeamContext` (clears the AccessContext actor).
+  and `SpatieTeamContext` (`switchTo()` unsets the actor user's `roles` /
+  `permissions` relations and keeps the bound `AccessContext` actor, flushes
+  the package resolver cache through the provider-wired binding, and the
+  resolver ignores `roles` / `permissions` relations loaded under another team).
   `SpatieTeamQueueBoundary` isolates Spatie team ids on async workers and
   restores the request team after sync-connection jobs.
 - Package migrations for fixed `user_groups` / `user_group_user` /

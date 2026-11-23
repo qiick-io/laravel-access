@@ -13,7 +13,9 @@
 Shared authorization core for qiick Laravel products: one `Gate::before`, the
 effective-permission resolver (direct ∪ group roles, soft-deleted groups
 excluded), a typed actor context so API actors never get the super-admin pass,
-enforced 2FA middleware, permission route middleware and a FormRequest trait.
+and enforced 2FA middleware. The design's permission route middleware
+(`EnsureUserHasPermission`) and FormRequest trait (`AuthorizesWithPermission`)
+are not implemented yet.
 
 Part of the qiick fleet. Binding design:
 `projects/qiick/packages/laravel-access-design.md` in the knowledge base
@@ -74,7 +76,8 @@ composer analyse   # PHPStan level max
 ```
 
 Mutation targets (design §11) run per class at MSI ≥ 95 via
-`scripts/mutate-per-class.sh` in CI. Real-HTTP middleware tests use `php -S`
+`scripts/mutate-per-class.sh` in CI. `EnsureUserHasPermission` and
+`AuthorizesWithPermission` join the script when they are implemented. Real-HTTP middleware tests use `php -S`
 (no shell wrapper; torn down in `tearDown`).
 
 ## License
