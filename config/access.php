@@ -38,11 +38,16 @@ return [
     | Guard names of interactive web sessions. Every guard in auth.guards must
     | be listed here or in api_guards, or boot fails: a token guard classified
     | as neither would otherwise take the web path and reach the super-admin
-    | grant. EnsureUserHasPermission denies users of any other guard.
+    | grant. EnsureUserHasPermission denies users of any other guard. Add a
+    | product's own session guard here (for example Filament's panel guard),
+    | comma-separated in ACCESS_WEB_GUARDS.
     |
     */
 
-    'web_guards' => ['web'],
+    'web_guards' => array_values(array_filter(array_map(
+        static fn (string $guard): string => trim($guard),
+        explode(',', (string) env('ACCESS_WEB_GUARDS', 'web')),
+    ), static fn (string $guard): bool => $guard !== '')),
 
     /*
     |--------------------------------------------------------------------------

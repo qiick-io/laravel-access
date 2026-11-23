@@ -333,14 +333,18 @@ final class EffectivePermissionResolver
             return [];
         }
 
+        // The role model's own key; objects that are not an Eloquent relation
+        // (test doubles, custom role stores) expose `id`.
+        $roleKeyName = $relation instanceof BelongsToMany ? $relation->getRelated()->getKeyName() : 'id';
+        $selectedKey = $relation instanceof BelongsToMany ? $relation->getRelated()->getQualifiedKeyName() : 'id';
         $ids = [];
 
-        foreach (Collection::wrap($relation->get(['id'])) as $role) {
+        foreach (Collection::wrap($relation->get([$selectedKey])) as $role) {
             if (! is_object($role) || ! method_exists($role, 'getAttribute')) {
                 continue;
             }
 
-            $roleId = $role->getAttribute('id');
+            $roleId = $role->getAttribute($roleKeyName);
 
             if (is_int($roleId) || is_string($roleId)) {
                 $ids[] = $roleId;
@@ -449,7 +453,8 @@ final class EffectivePermissionResolver
             return [];
         }
 
-        $query = $roleClass::query()->whereIn('id', $roleIds);
+        $roleModel = new $roleClass;
+        $query = $roleClass::query()->whereIn($roleModel->getKeyName(), $roleIds);
 
         if ($isGlobalOnly && $this->registrar->teams) {
             $query->whereNull($this->registrar->teamsKey);
@@ -484,9 +489,10 @@ final class EffectivePermissionResolver
         // in PHP, exactly like direct roles: a SQL `!=` would follow the
         // column collation and also drop look-alikes such as `Super-Admin`
         // on case-insensitive MySQL / MariaDB.
+        $roleModel = new $roleClass;
         $roleIdsExceptSuperAdmin = $roleClass::query()
-            ->whereIn('id', $roleIds)
-            ->get(['id', 'name'])
+            ->whereIn($roleModel->getKeyName(), $roleIds)
+            ->get([$roleModel->getKeyName(), 'name'])
             ->reject(fn (Model $role): bool => $role->getAttribute('name') === $this->roleCatalog->superAdminRoleName())
             ->modelKeys();
 
@@ -494,8 +500,8 @@ final class EffectivePermissionResolver
 
         foreach (
             $permissionClass::query()
-                ->whereHas('roles', static function ($query) use ($roleIdsExceptSuperAdmin): void {
-                    $query->whereIn('roles.id', $roleIdsExceptSuperAdmin);
+                ->whereHas('roles', static function ($query) use ($roleModel, $roleIdsExceptSuperAdmin): void {
+                    $query->whereIn($roleModel->getQualifiedKeyName(), $roleIdsExceptSuperAdmin);
                 })
                 ->pluck('name') as $permissionName
         ) {
