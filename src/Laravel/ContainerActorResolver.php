@@ -12,8 +12,13 @@ use Qiick\Access\Contracts\ActorKind;
 use Qiick\Access\Contracts\ActorResolver;
 
 /**
- * Reads the bound AccessContext and the configured API-guard signal.
- * Never reads request input (design §3.3 / AC4). The guard signal is ignored
+ * Reads the bound AccessContext and the default-guard signal. Never reads
+ * request input (design §3.3 / AC4). On HTTP, any default guard that is not
+ * listed in access.web_guards is an API guard, listed in access.api_guards or
+ * not: the boot check sees only the guards configured at boot, and a guard
+ * added later must fail closed rather than pass as a web session (no
+ * super-admin, scopes ∩ owner). A guard in both lists is an API guard.
+ * The guard signal is ignored
  * outside an active HTTP request so unattended jobs/commands cannot become
  * API actors via Auth::shouldUse(), unless access.trust_api_guard_in_console
  * is enabled in the testing environment (see config/access.php and
@@ -51,21 +56,32 @@ final class ContainerActorResolver implements ActorResolver
             return false;
         }
 
-        $guards = $this->config->get('access.api_guards', []);
+        $defaultGuard = $this->auth->getDefaultDriver();
+
+        return in_array($defaultGuard, $this->guardNames('access.api_guards'), true)
+            || ! in_array($defaultGuard, $this->guardNames('access.web_guards'), true);
+    }
+
+    /**
+     * @return list<string> the non-empty string entries of a guard-list config key
+     */
+    private function guardNames(string $configKey): array
+    {
+        $guards = $this->config->get($configKey, []);
+
         if (! is_array($guards)) {
-            return false;
+            return [];
         }
 
-        $apiGuards = [];
+        $guardNames = [];
+
         foreach ($guards as $guard) {
             if (is_string($guard) && $guard !== '') {
-                $apiGuards[] = $guard;
+                $guardNames[] = $guard;
             }
         }
 
-        $defaultGuard = $this->auth->getDefaultDriver();
-
-        return in_array($defaultGuard, $apiGuards, true);
+        return $guardNames;
     }
 
     /**

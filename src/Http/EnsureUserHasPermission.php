@@ -102,6 +102,12 @@ final class EnsureUserHasPermission
             && $this->permissions->hasAssignedPermission($actor->user, $permission, true);
     }
 
+    /**
+     * Reads the default guard (`auth.defaults.guard`), which is the guard that
+     * authenticated `$request->user()` as long as authentication goes through
+     * `auth:` middleware or `Auth::shouldUse()`. A product that replaces the
+     * request's user resolver must keep that default guard in step.
+     */
     private function isWebGuard(): bool
     {
         $webGuards = $this->config->get('access.web_guards', []);

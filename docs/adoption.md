@@ -120,7 +120,9 @@ scope half is the product's (or `qiick/laravel-api-keys`'s)
 **Classify every guard.** Boot fails unless each guard in `auth.guards` is in
 `access.web_guards` or `access.api_guards` (`ACCESS_API_GUARDS`, Sanctum's
 `sanctum` guard included). A token guard in neither would make its users look
-like web sessions.
+like web sessions. At runtime the rule holds for guards added after boot too:
+on HTTP, any default guard outside `access.web_guards` resolves as an API
+actor, so it never gets the super-admin pass.
 
 `SuperAdminGuard` last-admin protection relies on `SELECT … FOR UPDATE`.
 SQLite does not honour those locks; production deployments must use MySQL,

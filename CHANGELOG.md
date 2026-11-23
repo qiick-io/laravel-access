@@ -8,7 +8,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+**Upgrade note:** boot now fails unless every guard in `auth.guards` is listed
+in `access.web_guards` (default `web`) or `access.api_guards`. Apps with
+Laravel Sanctum must set `ACCESS_API_GUARDS=sanctum` (Sanctum registers its
+`sanctum` guard), as must any app with its own token guard.
+
 ### Security
+
+- On HTTP, any default guard outside `access.web_guards` is an API actor,
+  listed in `access.api_guards` or not, so a guard added after boot (which the
+  boot check cannot see) gets no super-admin pass from `GateBefore`.
+- The super-admin role's own permissions are excluded by an exact name
+  comparison for group roles too, as for direct roles: a SQL `!=` followed the
+  collation and also dropped look-alikes such as `Super-Admin` on MySQL /
+  MariaDB.
 
 - A team-local Spatie role named `super-admin` (`roles.organisation_id` set)
   no longer mints an instance super-admin: the C30 read counts only global
