@@ -120,11 +120,7 @@ final class EffectivePermissionResolver
             }
         }
 
-        if (method_exists($user, 'unsetRelation')) {
-            $user->unsetRelation('roles');
-            $user->unsetRelation('permissions');
-            $user->unsetRelation('groups');
-        }
+        $this->unsetRelations($user, 'roles', 'permissions', 'groups');
     }
 
     public function flush(): void
@@ -141,6 +137,12 @@ final class EffectivePermissionResolver
 
         if (isset($this->cache[$cacheKey])) {
             return $this->cache[$cacheKey];
+        }
+
+        // Under teams Spatie filters these relations by the team current when
+        // they were loaded, possibly another one than this entry's (C29).
+        if ($this->registrar->teams) {
+            $this->unsetRelations($user, 'roles', 'permissions');
         }
 
         $directRoleIds = $this->pluckRoleIds($user);
@@ -204,21 +206,25 @@ final class EffectivePermissionResolver
             return $this->pluckRoleNames($user);
         }
 
-        $this->unsetRolesRelation($user);
+        $this->unsetRelations($user, 'roles');
         $this->registrar->teams = false;
 
         try {
             return $this->pluckRoleNames($user);
         } finally {
             $this->registrar->teams = true;
-            $this->unsetRolesRelation($user);
+            $this->unsetRelations($user, 'roles');
         }
     }
 
-    private function unsetRolesRelation(Authenticatable $user): void
+    private function unsetRelations(Authenticatable $user, string ...$relations): void
     {
-        if (method_exists($user, 'unsetRelation')) {
-            $user->unsetRelation('roles');
+        if (! method_exists($user, 'unsetRelation')) {
+            return;
+        }
+
+        foreach ($relations as $relation) {
+            $user->unsetRelation($relation);
         }
     }
 

@@ -4,9 +4,12 @@ declare(strict_types=1);
 
 use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use Qiick\Access\Contracts\GroupRoleSource;
+use Qiick\Access\Contracts\TeamContext;
 use Qiick\Access\EffectivePermissionResolver;
+use Qiick\Access\Laravel\SpatieTeamContext;
 use Qiick\Access\Tests\Support\FakePermissionEnum;
 use Qiick\Access\Tests\Support\SpatieUser;
 use Spatie\Permission\Models\Permission;
@@ -17,7 +20,7 @@ use Spatie\Permission\PermissionRegistrar;
  * C30 reads super-admin with Spatie's team filter off. That read must never
  * leave an unfiltered `roles` relation on the user (organisation bleed into the
  * current team), nor trust a filtered relation loaded earlier (hiding an
- * instance super-admin).
+ * instance super-admin). A team switch drops the resolver cache (C29).
  */
 
 beforeEach(function (): void {
@@ -125,4 +128,43 @@ it('finds an instance super-admin even when a team-filtered roles relation is al
         ->and($resolver->isSuperAdmin($checkedUser))->toBeTrue()
         ->and($checkedUser->getRoleNames()->all())->toBe([])
         ->and($registrar->teams)->toBeTrue();
+});
+
+it('drops the resolver cache on a team switch so a revoked permission is not served when the team returns (C29)', function (): void {
+    // How a product that enables teams binds the adapter.
+    $this->app->singleton(TeamContext::class, SpatieTeamContext::class);
+    $this->app->forgetInstance(EffectivePermissionResolver::class);
+
+    $user = userWithOrganisationOneEditorRoleCheckedInOrganisationTwo();
+    $teamContext = app(TeamContext::class);
+    $resolver = app(EffectivePermissionResolver::class);
+
+    $teamContext->switchTo('org-1');
+    expect($resolver->hasPermission($user, FakePermissionEnum::CanShowUsers->value))->toBeTrue();
+
+    $teamContext->switchTo('org-2');
+    // A revocation that fires no Spatie event, so only the switch can clear it.
+    DB::table('role_has_permissions')->delete();
+    $teamContext->switchTo('org-1');
+
+    expect($resolver->hasPermission($user, FakePermissionEnum::CanShowUsers->value))->toBeFalse();
+});
+
+it('ignores roles and permissions relations loaded under another team', function (): void {
+    $registrar = app(PermissionRegistrar::class);
+    $registrar->setPermissionsTeamId('org-1');
+
+    $showUsersPermission = Permission::create(['name' => FakePermissionEnum::CanShowUsers->value, 'guard_name' => 'web']);
+    $organisationEditorRole = Role::create(['name' => 'org-editor', 'guard_name' => 'web', 'organisation_id' => 'org-1']);
+
+    $user = SpatieUser::query()->create(['email' => 'direct@example.com']);
+    $user->givePermissionTo($showUsersPermission);
+    $user->assignRole($organisationEditorRole);
+    $user->load(['roles', 'permissions']);
+
+    $registrar->setPermissionsTeamId('org-2');
+    $resolver = app(EffectivePermissionResolver::class);
+
+    expect($resolver->permissionsFor($user))->toBe([])
+        ->and($resolver->roleNamesFor($user))->toBe([]);
 });

@@ -29,7 +29,7 @@ it('reads and sets the Spatie permissions team id', function (): void {
     $context->switchTo(9);
 });
 
-it('unsets roles and permissions on the authenticated user and runs the forget callback', function (): void {
+it('unsets roles and permissions on the authenticated user and flushes the resolver', function (): void {
     $user = new class implements Authenticatable
     {
         /** @var list<string> */
@@ -82,18 +82,18 @@ it('unsets roles and permissions on the authenticated user and runs the forget c
     $auth = Mockery::mock(AuthFactory::class);
     $auth->shouldReceive('guard')->andReturn($guard);
 
-    $forgotten = null;
+    $flushCount = 0;
     $context = new SpatieTeamContext(
         $registrar,
         $auth,
-        static function (Authenticatable $actor) use (&$forgotten): void {
-            $forgotten = $actor;
+        static function () use (&$flushCount): void {
+            $flushCount++;
         },
     );
 
     $context->switchTo('org-a');
 
-    expect($forgotten)->toBe($user)
+    expect($flushCount)->toBe(1)
         ->and($user->unsetRelations)->toBe(['roles', 'permissions']);
 });
 
@@ -203,7 +203,7 @@ it('unsets relations on the AccessContext actor even when the default guard has 
     AccessContext::clear();
 });
 
-it('skips user work when nobody is authenticated', function (): void {
+it('skips user work but still flushes the resolver when nobody is authenticated', function (): void {
     $registrar = Mockery::mock(PermissionRegistrar::class);
     $registrar->shouldReceive('setPermissionsTeamId')->once()->with(null);
     $registrar->shouldReceive('forgetCachedPermissions')->once()->andReturn(true);
@@ -213,16 +213,17 @@ it('skips user work when nobody is authenticated', function (): void {
     $auth = Mockery::mock(AuthFactory::class);
     $auth->shouldReceive('guard')->andReturn($guard);
 
-    $called = false;
+    $flushCount = 0;
     $context = new SpatieTeamContext(
         $registrar,
         $auth,
-        static function () use (&$called): void {
-            $called = true;
+        static function () use (&$flushCount): void {
+            $flushCount++;
         },
     );
 
     $context->switchTo(null);
 
-    expect($called)->toBeFalse();
+    // Users other than the actor may hold warm entries for the old team (C29).
+    expect($flushCount)->toBe(1);
 });

@@ -71,6 +71,18 @@ final class AccessServiceProvider extends ServiceProvider
 
         $this->app->singleton(TeamContext::class, NoTeamContext::class);
 
+        // Products enabling teams bind TeamContext to SpatieTeamContext; this
+        // binding is what wires the resolver flush into switchTo() (C29).
+        $this->app->bind(SpatieTeamContext::class, function (Application $app): SpatieTeamContext {
+            return new SpatieTeamContext(
+                $app->make(PermissionRegistrar::class),
+                $app->make(AuthFactory::class),
+                function () use ($app): void {
+                    $app->make(EffectivePermissionResolver::class)->flush();
+                },
+            );
+        });
+
         $this->app->singleton(GroupRoleSource::class, function (Application $app): GroupRoleSource {
             return new EloquentGroupRoleSource(
                 $app->make(DatabaseManager::class),
