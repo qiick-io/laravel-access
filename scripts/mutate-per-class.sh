@@ -30,6 +30,8 @@ CLASSES=(
   'Qiick\Access\Http\EnsureTwoFactorIsEnabled'
   'Qiick\Access\SuperAdminGuard'
   'Qiick\Access\Laravel\ReservedRoleNameGuard'
+  'Qiick\Access\Http\EnsureUserHasPermission'
+  'Qiick\Access\Http\Concerns\AuthorizesWithPermission'
 )
 
 CLASS_FILES=(
@@ -50,6 +52,8 @@ CLASS_FILES=(
   'src/Http/EnsureTwoFactorIsEnabled.php'
   'src/SuperAdminGuard.php'
   'src/Laravel/ReservedRoleNameGuard.php'
+  'src/Http/EnsureUserHasPermission.php'
+  'src/Http/Concerns/AuthorizesWithPermission.php'
 )
 
 # Other mutation-target siblings ignored while mutating one class.
@@ -64,6 +68,7 @@ SIBLING_FILES=(
   'src/Contracts/TwoFactorPolicy.php'
   'src/Contracts/TwoFactorResponder.php'
   'src/Contracts/ActiveUsers.php'
+  'src/Contracts/ApiActorScopeCheck.php'
   'src/Laravel/AccessServiceProvider.php'
 )
 

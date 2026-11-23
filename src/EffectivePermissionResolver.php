@@ -33,7 +33,7 @@ final class EffectivePermissionResolver
      * the key: two Authenticatable models (a web user and another guard's
      * principal) can share an identifier and must never share permissions.
      *
-     * @var array<string, array<string, array<string, array{permissions: list<string>, role_names: list<string>, role_ids: list<string>}>>>
+     * @var array<string, array<string, array<string, array{permissions: list<string>, assigned_permissions: list<string>, role_names: list<string>, role_ids: list<string>}>>>
      */
     private array $cache = [];
 
@@ -135,6 +135,23 @@ final class EffectivePermissionResolver
         return in_array($name, $this->permissionsFor($user), true);
     }
 
+    /**
+     * Whether the permission is actually assigned to the user (directly,
+     * through a direct role or through an active group role), ignoring the
+     * super-admin grant. This is the owner ceiling for API actors: super-admin
+     * never applies to them (design §3.1 step 2), so a key owned by a
+     * super-admin reaches only what its owner really holds. Pass `fresh` for
+     * use-time checks behind a credential (§4.2).
+     */
+    public function hasAssignedPermission(Authenticatable $user, string $name, bool $fresh = false): bool
+    {
+        if ($fresh) {
+            $this->forget($user);
+        }
+
+        return in_array($name, $this->resolve($user)['assigned_permissions'], true);
+    }
+
     public function forget(?Authenticatable $user = null): void
     {
         if ($user === null) {
@@ -161,7 +178,7 @@ final class EffectivePermissionResolver
     }
 
     /**
-     * @return array{permissions: list<string>, role_names: list<string>, role_ids: list<string>}
+     * @return array{permissions: list<string>, assigned_permissions: list<string>, role_names: list<string>, role_ids: list<string>}
      */
     private function resolve(Authenticatable $user): array
     {
@@ -189,24 +206,21 @@ final class EffectivePermissionResolver
         // C30 / B2: the same verdict as isSuperAdmin(), so permissionsFor /
         // roleNamesFor agree under teams. Role names stay the current team's,
         // plus the super-admin role, never another organisation's roles.
-        if ($this->isSuperAdmin($user)) {
-            return $this->cache[$principalType][$identifier][$teamKey] = [
-                'permissions' => $this->vocabulary->all(),
-                'role_names' => $this->uniqueSortedStrings([
-                    ...$directRoleNames,
-                    ...$groupRoleNames,
-                    $this->roleCatalog->superAdminRoleName(),
-                ]),
-                'role_ids' => $roleIds,
-            ];
+        $isSuperAdmin = $this->isSuperAdmin($user);
+        $assignedPermissions = $this->uniqueSortedStrings([
+            ...$this->pluckPermissionNames($user),
+            ...$this->permissionNamesForRoleIds($groupRoleIds),
+        ]);
+        $roleNames = [...$directRoleNames, ...$groupRoleNames];
+
+        if ($isSuperAdmin) {
+            $roleNames[] = $this->roleCatalog->superAdminRoleName();
         }
 
         return $this->cache[$principalType][$identifier][$teamKey] = [
-            'permissions' => $this->uniqueSortedStrings([
-                ...$this->pluckPermissionNames($user),
-                ...$this->permissionNamesForRoleIds($groupRoleIds),
-            ]),
-            'role_names' => $this->uniqueSortedStrings([...$directRoleNames, ...$groupRoleNames]),
+            'permissions' => $isSuperAdmin ? $this->vocabulary->all() : $assignedPermissions,
+            'assigned_permissions' => $assignedPermissions,
+            'role_names' => $this->uniqueSortedStrings($roleNames),
             'role_ids' => $roleIds,
         ];
     }

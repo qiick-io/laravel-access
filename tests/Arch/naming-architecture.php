@@ -31,6 +31,13 @@ return [
             'Qiick\Access\Contracts\AuthorizationResponder',
             // Completeness review §3.5 / A7: ActiveUsers has no Contract suffix.
             'Qiick\Access\Contracts\ActiveUsers',
+            // Same naming as the §2.2 contracts: API-actor scope seam behind
+            // EnsureUserHasPermission (fleet rule: scopes ∩ owner, never super-admin).
+            'Qiick\Access\Contracts\ApiActorScopeCheck',
+        ],
+        'traits' => [
+            // Design §2.1 / §13.1: the FormRequest trait is AuthorizesWithPermission.
+            'Qiick\Access\Http\Concerns\AuthorizesWithPermission',
         ],
         'Enums' => [
             // Design §2.2: ActorKind (not *Enum); kept for Enums-namespace rule.

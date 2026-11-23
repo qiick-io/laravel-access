@@ -34,6 +34,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `EnsureUserHasPermission` route middleware (`permission:<value>`, alias
+  registered by the product) and `AuthorizesWithPermission` FormRequest trait
+  (design §6), sharing one decision and the product `AuthorizationResponder`
+  body. API actors pass only with credential scopes (new optional
+  `ApiActorScopeCheck` contract) ∩ the owner's currently assigned permissions
+  (`EffectivePermissionResolver::hasAssignedPermission(..., fresh: true)`),
+  never through super-admin, and are denied when no scope check is bound.
+  Both are per-class mutation targets.
+
 - Group schema: nullable `user_groups.organisation_id`, `is_instance`, and an
   XOR constraint (`is_instance` true only with `organisation_id` NULL) on the
   package `create_user_groups` migration (AC17 / C75; SQLite triggers, SQL

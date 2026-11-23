@@ -17,6 +17,7 @@ that enable Spatie teams. This page is the name and duty list for adopters.
 | `TwoFactorPolicy` | Required / usable factor / any method enabled |
 | `TwoFactorResponder` | `enrol` / `unavailable` HTTP responses |
 | `AuthorizationResponder` | `forbidden` HTTP response for permission middleware |
+| `ApiActorScopeCheck` | Optional. `allows(ActorContext, permission)`: whether an API actor's credential scopes cover the permission, for `EnsureUserHasPermission` / `AuthorizesWithPermission`. Unbound → every API actor is denied |
 | `ActiveUsers` | `query(): Builder` of users that count as active for `SuperAdminGuard` |
 
 Required product bindings (boot fails otherwise): `ActorResolver`,
