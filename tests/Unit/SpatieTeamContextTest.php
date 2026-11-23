@@ -184,7 +184,8 @@ it('unsets relations on the AccessContext actor even when the default guard has 
         }
     };
 
-    AccessContext::enter(new ActorContext(ActorKind::ApiKey, $boundUser, 'cred'));
+    $boundActor = new ActorContext(ActorKind::ApiKey, $boundUser, 'cred');
+    AccessContext::enter($boundActor);
 
     $registrar = Mockery::mock(PermissionRegistrar::class);
     $registrar->shouldReceive('setPermissionsTeamId')->once()->with('org-b');
@@ -197,8 +198,10 @@ it('unsets relations on the AccessContext actor even when the default guard has 
 
     (new SpatieTeamContext($registrar, $auth))->switchTo('org-b');
 
+    // The bound actor survives the switch: an API actor stays an API actor.
     expect($boundUser->unsetRelations)->toBe(['roles', 'permissions'])
-        ->and($guardUser->unsetRelations)->toBe([]);
+        ->and($guardUser->unsetRelations)->toBe([])
+        ->and(AccessContext::current())->toBe($boundActor);
 
     AccessContext::clear();
 });

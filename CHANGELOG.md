@@ -55,7 +55,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   groups and expired memberships excluded; instance / org / legacy scoping;
   `instanceRoleIdsFor` for super-admin; fixed table names; Octane-safe
   connection resolve), `SpatiePermissionVocabulary` (from `access.permission_enum`),
-  and `SpatieTeamContext` (clears the AccessContext actor; `switchTo()` flushes
+  and `SpatieTeamContext` (`switchTo()` unsets the actor user's `roles` /
+  `permissions` relations and keeps the bound `AccessContext` actor, flushes
   the package resolver cache through the provider-wired binding, and the
   resolver ignores `roles` / `permissions` relations loaded under another team).
   `SpatieTeamQueueBoundary` isolates Spatie team ids on async workers and
