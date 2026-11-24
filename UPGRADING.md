@@ -6,6 +6,11 @@ tagged release.
 
 ## Unreleased
 
+- New config keys `access.use_package_gate` (default `true`),
+  `access.gate_shadow` (default `false`) and `access.gate_shadow_log_channel`
+  for externa's switch to the package `Gate::before` (design §9). Nothing
+  changes with the defaults; a published config does not need them. They are
+  removed in v2.
 - The group migration changed before its first install: `user_groups.name`
   is no longer globally unique; `organisation_key` (stored, generated) and a
   unique (`organisation_key`, `name`) replace it. A local database migrated
