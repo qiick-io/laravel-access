@@ -234,6 +234,29 @@ it('gives an instance principal an empty ceiling', function (): void {
     expect(ceiling()->allows($instance->id, FakePermissionEnum::CanShowUsers->value))->toBeFalse();
 });
 
+it('refuses an instance principal by its type, even with a forged organisation and owner', function (): void {
+    $organisationId = (string) Str::uuid();
+    $owner = principals()->forMember(editorIn($organisationId), $organisationId);
+    $instance = principals()->instance('instance_service', 'Instance Admin API');
+
+    // Schema drift: the organisation rule is gone, so the row can be rewritten
+    // into an organisation, under an owner who holds the permission there.
+    if (DB::connection()->getDriverName() === 'sqlite') {
+        DB::statement('DROP TRIGGER principals_organisation_rule_insert');
+        DB::statement('DROP TRIGGER principals_organisation_rule_update');
+    } else {
+        DB::statement('ALTER TABLE principals DROP CONSTRAINT principals_organisation_rule');
+    }
+
+    DB::table('principals')->where('id', $instance->id)->update(['organisation_id' => $organisationId, 'owner_principal_id' => $owner->id]);
+    // An agent the forged instance principal owns: the walk stops there too.
+    $agent = principals()->createService('agent', $organisationId, 'Agent', Principal::query()->findOrFail($instance->id));
+
+    expect(ceiling()->allows($owner->id, FakePermissionEnum::CanShowUsers->value))->toBeTrue()
+        ->and(ceiling()->allows($instance->id, FakePermissionEnum::CanShowUsers->value))->toBeFalse()
+        ->and(ceiling()->allows($agent->id, FakePermissionEnum::CanShowUsers->value))->toBeFalse();
+});
+
 it('reads the ceiling fresh and restores the current team afterwards, also on failure', function (): void {
     $organisationId = (string) Str::uuid();
     $editor = editorIn($organisationId);
@@ -261,14 +284,17 @@ it('gives nothing to a user principal whose user row is gone', function (): void
     config()->set('access.principals.instance_types', []);
     $organisationId = (string) Str::uuid();
     $principal = principals()->forMember(editorIn($organisationId), $organisationId);
-    $principal->forceFill(['user_id' => 999_999]);
+    $unlinked = principals()->forMember(editorIn($organisationId, 'unlinked@example.com'), $organisationId);
 
     expect(ceiling()->allows($principal->id, FakePermissionEnum::CanShowUsers->value))->toBeTrue();
 
-    DB::table('principals')->where('id', $principal->id)->update(['user_id' => null]);
+    // A dangling link (the restrict foreign key dropped) and an erased one.
+    Schema::table('principals', static fn (Blueprint $table) => $table->dropForeign(['user_id']));
+    DB::table('users')->where('id', $principal->user_id)->delete();
+    DB::table('principals')->where('id', $unlinked->id)->update(['user_id' => null]);
 
     expect(ceiling()->allows($principal->id, FakePermissionEnum::CanShowUsers->value))->toBeFalse()
-        ->and(Principal::query()->findOrFail($principal->id)->user_id)->toBeNull();
+        ->and(ceiling()->allows($unlinked->id, FakePermissionEnum::CanShowUsers->value))->toBeFalse();
 });
 
 it('gives nothing when the users model is not authenticatable', function (): void {

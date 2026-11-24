@@ -26,8 +26,9 @@ use Qiick\Access\Laravel\MigrationSettings;
  *   through super-admin (EffectivePermissionResolver::hasAssignedPermission).
  *
  * A service or agent without a user owner, and any instance principal (a
- * declared instance type), has an empty ceiling: its powers come from the
- * product's scopes only. In a single-tenant product the organisation is NULL
+ * declared instance type, refused by its type wherever it appears in the
+ * chain, whatever its row says), has an empty ceiling: its powers come from
+ * the product's scopes only. In a single-tenant product the organisation is NULL
  * all along the chain and the check runs with no team.
  *
  * The team context is switched to the principal's organisation for the check
@@ -65,8 +66,8 @@ final class PrincipalCeiling
     /**
      * The user behind the nearest `user` principal of an active owner chain,
      * and the organisation every principal up to it shares; null when there is
-     * none (an unowned service, an instance principal) or the chain leaves the
-     * organisation.
+     * none (an unowned service), the chain leaves the organisation, or it
+     * reaches a declared instance type before a user.
      *
      * @param  list<Principal>  $chain  the principal, then its owners
      * @return array{Authenticatable, string|null}|null
@@ -74,8 +75,16 @@ final class PrincipalCeiling
     private function owningUser(array $chain): ?array
     {
         $organisationId = ($chain[0] ?? null)?->organisation_id;
+        $instanceTypes = MigrationSettings::instanceTypes();
 
         foreach ($chain as $principal) {
+            // By type first: an instance principal has an empty ceiling even
+            // when a missing organisation rule let its row gain an
+            // organisation and an owner (review of PR #19).
+            if (in_array($principal->type, $instanceTypes, true)) {
+                return null;
+            }
+
             if ($principal->organisation_id !== $organisationId) {
                 return null;
             }

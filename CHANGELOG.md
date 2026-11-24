@@ -15,7 +15,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   active, the nearest `user` principal of the chain in the same organisation,
   and that user must hold the permission there, read fresh and never through
   super-admin; the team is switched for the check and always restored.
-  Unowned services and instance principals get `false`.
+  Unowned services get `false`, and so does any declared instance type,
+  refused by its type anywhere in the chain whatever its row says.
   `PrincipalDirectory::activeOwnerChain()` returns the active chain.
 
 ## [0.1.0] - 2026-11-24
