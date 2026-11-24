@@ -34,6 +34,8 @@ return [
             // Same naming as the §2.2 contracts: API-actor scope seam behind
             // EnsureUserHasPermission (fleet rule: scopes ∩ owner, never super-admin).
             'Qiick\Access\Contracts\ApiActorScopeCheck',
+            // Design §9.2 step 6: the externa legacy callback seam, removed in v2.
+            'Qiick\Access\Contracts\LegacyGateBefore',
         ],
         'traits' => [
             // Design §2.1 / §13.1: the FormRequest trait is AuthorizesWithPermission.

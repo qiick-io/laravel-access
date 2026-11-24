@@ -64,7 +64,7 @@ Products must bind `RoleCatalog`, `TwoFactorPolicy`, `TwoFactorResponder` and
 | 2FA skipped | API actors exempt but get no Gate pass; exempt list minimal; AC10 |
 | Missing binding failing open | Boot check; AC12 |
 | Domain logic leaking into the package | Arch test against `App\`; no domain hook |
-| Supply chain | Pinned Actions, `composer audit`, no lockfile, alerts-only Dependabot |
+| Supply chain | Pinned Actions, `composer audit`, no lockfile, weekly grouped Dependabot updates into `develop` (Composer and Actions) |
 
 ## Development
 

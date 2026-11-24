@@ -6,7 +6,11 @@ tagged release.
 
 ## Unreleased
 
-Nothing yet.
+- New config keys `access.use_package_gate` (default `true`),
+  `access.gate_shadow` (default `false`) and `access.gate_shadow_log_channel`
+  for externa's switch to the package `Gate::before` (design §9). Nothing
+  changes with the defaults; a published config does not need them. They are
+  removed in v2.
 
 ## 0.1.0 (first tagged pre-release)
 
