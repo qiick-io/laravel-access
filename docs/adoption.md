@@ -74,9 +74,13 @@ SQLite rebuilds a table when a migration alters it (adding the organisation
 foreign key, for example) and drops its triggers, which carry the
 organisation and instance-group rules there. The provider calls
 `Qiick\Access\Laravel\AccessSchema::ensureConstraints()` after every
-`migrate` run (`MigrationsEnded`), which recreates them and is a no-op where
-the rules already exist; a migration may also call it directly. Connections
-with a table prefix are not supported.
+`migrate` run (`MigrationsEnded`, skipped for `--pretend`), which recreates
+them and is a no-op where the rules already exist. A product migration that
+alters `principals` or `user_groups` should still call it at its end: when a
+later migration of the same batch fails, `MigrationsEnded` never fires. The
+rules apply only to tables the package owns (`access.migrations.groups` /
+`access.migrations.principals`), and only on the migrated connection.
+Connections with a table prefix are not supported.
 
 Pre-1.0 products delete their own `create_principals_table` (or the
 `principals` block of a larger migration) and recreate the database.
@@ -114,7 +118,9 @@ by writing rows directly; the `Principal` model is fully guarded.
   mint a fresh principal past the tombstone, never commits.
   `principals.user_id` is `ON DELETE RESTRICT`, so deleting a user who still
   has principals any other way throws `UserHasPrincipalsException` (a soft
-  delete is allowed, since it keeps the row);
+  delete is allowed, since it keeps the row). The users model and the
+  principal model must use one database connection: `eraseUser()` refuses
+  otherwise, because the user delete would wait on its own locks;
 - `isActive($principalId)`: the use-time check behind a key: not deactivated,
   not expired, a `user` principal still has its user, an instance-level row
   is one the organisation rule allows, and every owner up the chain is active.

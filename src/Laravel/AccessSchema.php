@@ -28,6 +28,10 @@ use Illuminate\Support\Facades\DB;
  * the CHECK on the other engines keeps the rule it was created with. Keep the
  * config unchanged after migrating.
  *
+ * Each rule applies only to a table the package owns (access.migrations.groups
+ * / access.migrations.principals true); a product's own user_groups is never
+ * touched. Rules are ensured on the given (default: the default) connection.
+ *
  * Connections with a table prefix are not supported: the rule SQL and the
  * catalogue lookups use the bare table names.
  *
@@ -43,7 +47,10 @@ final class AccessSchema
         $connection ??= DB::connection();
         $schema = $connection->getSchemaBuilder();
 
-        if ($schema->hasTable('user_groups')) {
+        // Only tables the package owns: a product that keeps its own
+        // user_groups (access.migrations.groups = false) never gets the
+        // package rule added to it (review R6).
+        if (config('access.migrations.groups', true) === true && $schema->hasTable('user_groups')) {
             $isNumericBoolean = $connection->getDriverName() !== 'pgsql';
 
             self::ensureRule(
@@ -56,7 +63,7 @@ final class AccessSchema
             );
         }
 
-        if ($schema->hasTable('principals') && MigrationSettings::isOrganisationRequired()) {
+        if (config('access.migrations.principals', true) === true && $schema->hasTable('principals') && MigrationSettings::isOrganisationRequired()) {
             $instanceTypes = MigrationSettings::instanceTypes();
 
             self::ensureRule(

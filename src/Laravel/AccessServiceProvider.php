@@ -190,8 +190,13 @@ final class AccessServiceProvider extends ServiceProvider
 
         // SQLite drops a table's triggers whenever a migration rebuilds it, so
         // the package rules are restored after every migrate run (review R3).
-        Event::listen(MigrationsEnded::class, static function (): void {
-            AccessSchema::ensureConstraints();
+        // A dry run (--pretend) must not execute DDL (review N20). Only the
+        // default connection is restored, which is the migrated one under
+        // `migrate --database` (review N21).
+        Event::listen(MigrationsEnded::class, static function (MigrationsEnded $event): void {
+            if (($event->options['pretend'] ?? false) !== true) {
+                AccessSchema::ensureConstraints();
+            }
         });
     }
 

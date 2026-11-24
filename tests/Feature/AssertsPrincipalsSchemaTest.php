@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use Illuminate\Database\Connection;
 use Illuminate\Database\Events\MigrationsEnded;
+use Illuminate\Database\Events\QueryExecuted;
 use Illuminate\Database\QueryException;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\DB;
@@ -305,6 +306,70 @@ it('restores the table rules after every migrate run (review R3)', function (): 
 
     expect(fn () => DB::table('principals')->insert(['id' => (string) Str::uuid7(), 'type' => 'service', 'name' => 'No organisation']))
         ->toThrow(QueryException::class);
+
+    Schema::dropIfExists('principals');
+    Schema::dropIfExists('organisations');
+})->group('engines');
+
+// Second re-review of #17.
+
+it('never applies a rule to a table the package does not own (review R6)', function (bool $hasIsInstance): void {
+    // externa: access.migrations.groups = false and its own user_groups table.
+    config()->set('access.migrations.groups', false);
+    Schema::dropIfExists('user_groups');
+    Schema::create('user_groups', function (Blueprint $table) use ($hasIsInstance): void {
+        $table->id();
+        $table->string('name');
+        $table->uuid('organisation_id')->nullable();
+
+        if ($hasIsInstance) {
+            $table->boolean('is_instance')->default(false);
+        }
+    });
+
+    event(new MigrationsEnded('up'));
+
+    $row = ['name' => 'product group', 'organisation_id' => (string) Str::uuid()];
+    DB::table('user_groups')->insert($hasIsInstance ? [...$row, 'is_instance' => true] : $row);
+
+    expect(DB::table('user_groups')->count())->toBe(1);
+
+    Schema::dropIfExists('user_groups');
+    config()->set('access.migrations.groups', true);
+})->with([
+    'without is_instance' => [false],
+    'with is_instance' => [true],
+])->group('engines');
+
+it('leaves a principals table alone when the package does not own it', function (): void {
+    migratePrincipalsTable(false);
+    config()->set('access.migrations.principals', false);
+    config()->set('access.principals.organisation_required', true);
+
+    event(new MigrationsEnded('up'));
+    DB::table('principals')->insert(['id' => (string) Str::uuid7(), 'type' => 'service', 'name' => 'No organisation']);
+
+    expect(DB::table('principals')->count())->toBe(1);
+
+    config()->set('access.migrations.principals', true);
+})->group('engines');
+
+it('changes nothing during migrate --pretend (review N20)', function (): void {
+    migratePrincipalsTable(true, ['instance_service']);
+    Schema::create('organisations', function (Blueprint $table): void {
+        $table->uuid('id')->primary();
+    });
+    Schema::table('principals', function (Blueprint $table): void {
+        $table->foreign('organisation_id')->references('id')->on('organisations')->restrictOnDelete();
+    });
+    $statements = [];
+    DB::listen(static function (QueryExecuted $query) use (&$statements): void {
+        $statements[] = $query->sql;
+    });
+
+    event(new MigrationsEnded('up', ['pretend' => true]));
+
+    expect(array_filter($statements, static fn (string $sql): bool => preg_match('/^\s*(CREATE TRIGGER|ALTER TABLE)/i', $sql) === 1))->toBe([]);
 
     Schema::dropIfExists('principals');
     Schema::dropIfExists('organisations');
