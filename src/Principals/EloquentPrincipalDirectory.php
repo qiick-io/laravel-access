@@ -133,7 +133,16 @@ final class EloquentPrincipalDirectory implements PrincipalDirectory
 
     public function eraseUser(Authenticatable $user, Closure $deleteUser): void
     {
-        $erased = $this->database->connection()->transaction(function () use ($user, $deleteUser): array {
+        $principalModel = $this->query()->getModel();
+        $connection = $this->database->connection($principalModel->getConnectionName());
+
+        // The user delete waits on the principal rows this transaction locks:
+        // on a second connection it would wait for itself (review R5).
+        if ($this->database->connection((new (MigrationSettings::userModel()))->getConnectionName())->getName() !== $connection->getName()) {
+            throw new LogicException('eraseUser() needs the users model and the principal model on one database connection.');
+        }
+
+        $erased = $connection->transaction(function () use ($connection, $user, $deleteUser): array {
             $erased = [];
 
             foreach ($this->query()->where('user_id', $user->getAuthIdentifier())->lockForUpdate()->get() as $principal) {
@@ -154,7 +163,7 @@ final class EloquentPrincipalDirectory implements PrincipalDirectory
             // place behind an "erased" audit trail, and a restore would let
             // forMember() mint a fresh principal past the tombstone (C17).
             // The raw query ignores soft-delete scopes.
-            if ($this->database->connection()->table(MigrationSettings::usersTable())->where((new (MigrationSettings::userModel()))->getKeyName(), $user->getAuthIdentifier())->exists()) {
+            if ($connection->table(MigrationSettings::usersTable())->where((new (MigrationSettings::userModel()))->getKeyName(), $user->getAuthIdentifier())->exists()) {
                 throw new LogicException('The user row still exists after the erasure callback; erasure needs a hard delete (forceDelete() on a soft-deleting model).');
             }
 

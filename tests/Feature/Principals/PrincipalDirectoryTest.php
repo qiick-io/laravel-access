@@ -631,3 +631,22 @@ it('checks the owner organisation stored in the database, not the in-memory mode
     expect(fn () => directory()->createService('agent', $organisationB, 'Agent', $owner))
         ->toThrow(InvalidArgumentException::class, 'same organisation');
 });
+
+it('refuses an erasure when users and principals use different connections (review R5)', function (): void {
+    migratePrincipals();
+    $principal = directory()->forMember(member(), null);
+    config()->set('database.connections.users_connection', config('database.connections.'.config('database.default')));
+    config()->set('auth.providers.users.model', UsersOnAnotherConnection::class);
+
+    expect(fn () => directory()->eraseUser(member(), static fn (): null => null))
+        ->toThrow(LogicException::class, 'one database connection')
+        ->and(Principal::query()->findOrFail($principal->id)->deactivated_at)->toBeNull();
+});
+
+/**
+ * A users model on a connection name other than the principals' (review R5).
+ */
+class UsersOnAnotherConnection extends ErasableUser
+{
+    protected $connection = 'users_connection';
+}
