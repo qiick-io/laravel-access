@@ -9,6 +9,8 @@ namespace Qiick\Access\Testing;
  * is true. Call enable() in a test (or TestCase setUp) when exercising the
  * guard path; call disable() in tearDown. ContainerActorResolver also requires
  * environment('testing'), so this flag is a no-op outside the test suite.
+ *
+ * @api
  */
 final class TrustApiGuardInConsole
 {

@@ -18,6 +18,8 @@ use RuntimeException;
  * when organisation_id is null). Products that adopt the tables (including
  * externa with access.migrations.load = false) call assertShape() so their
  * schema cannot drift from the package.
+ *
+ * @api
  */
 final class AssertsGroupTablesSchema
 {

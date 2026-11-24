@@ -25,3 +25,68 @@ Required product bindings (boot fails otherwise): `ActorResolver`,
 `AuthorizationResponder`. Bind `ActiveUsers` before resolving `SuperAdminGuard`.
 Package defaults exist for `ContainerActorResolver`,
 `SpatiePermissionVocabulary`, `EloquentGroupRoleSource` and `NoTeamContext`.
+
+## Public API
+
+Everything tagged `@api` in `src/` is public and follows semantic versioning
+from `1.0.0`. Everything tagged `@internal` (`AccessBootChecks`,
+`MigrationSettings`, `ReservedRoleNameGuard`, `UserDeletionGuard`) can change
+in any release: products never call or extend it. Besides the contracts
+above, the public classes are:
+
+| Area | Classes |
+| --- | --- |
+| Gate and resolver | `GateBefore`, `EffectivePermissionResolver`, `SuperAdminGuard` |
+| HTTP | `Http\EnsureUserHasPermission`, `Http\EnsureTwoFactorIsEnabled`, `Http\Concerns\AuthorizesWithPermission` |
+| Actor runtime | `Laravel\AccessContext`, `Laravel\ContainerActorResolver`, `Laravel\CarriesActorContext`, `Laravel\ActorPayloadStamper`, `Laravel\SpatieTeamQueueBoundary` |
+| Adapters | `Laravel\NoTeamContext`, `Laravel\SpatieTeamContext`, `Laravel\EloquentGroupRoleSource`, `Laravel\SpatiePermissionVocabulary` |
+| Schema | `Laravel\AccessSchema`, `Laravel\AccessServiceProvider` |
+| Principals | `Principals\PrincipalDirectory`, `Principals\EloquentPrincipalDirectory`, `Principals\Principal`, `Principals\DeactivationReason` |
+| Test helpers | `Testing\ProbeAbility`, `Testing\DirectPermissionCheckScanner`, `Testing\TrustApiGuardInConsole`, `Testing\AssertsGroupTablesSchema`, `Testing\AssertsSpatieTeamSchema`, `Testing\AssertsPrincipalsSchema` |
+
+## Config keys
+
+`config/access.php`, published with the `access-config` tag. The keys and
+their meaning are public; renaming or removing one is a breaking change.
+
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `access.api_guards` | `ACCESS_API_GUARDS`, empty | Guards whose users are API actors |
+| `access.web_guards` | `ACCESS_WEB_GUARDS`, `web` | Interactive session guards; every guard is in one of the two lists |
+| `access.trust_api_guard_in_console` | `false` | Tests only: honour the API-guard signal in console |
+| `access.permission_enum` | `ACCESS_PERMISSION_ENUM`, null | The product's PermissionEnum for `SpatiePermissionVocabulary` |
+| `access.migrations.groups` | `true` | Load the package group migration |
+| `access.migrations.principals` | `true` | Load the package principals migration |
+| `access.principals.model` | `Principal::class` | Principal model (a subclass is allowed) |
+| `access.principals.types` | `user`, `service`, `agent` | Principal types the product uses |
+| `access.principals.organisation_required` | `false` | Organisation CHECK on principals; read when the migration runs |
+| `access.principals.instance_types` | empty | Singleton instance-level types; read when the migration runs |
+| `access.users_table` | null | Users table for the group membership foreign key |
+| `access.group_member_model` | null (`auth.providers.users.model`) | The only model that gets group roles |
+| `access.two_factor.exempt_route_names` | logout, security, two-factor, passkey, password confirmation | Routes `EnsureTwoFactorIsEnabled` skips |
+
+Environment variables: `ACCESS_API_GUARDS`, `ACCESS_WEB_GUARDS` (both
+comma-separated) and `ACCESS_PERMISSION_ENUM`.
+
+## Events and exceptions
+
+| Type | When |
+| --- | --- |
+| `Principals\PrincipalCreated` | A new principal row is created by `forMember`, `createService` or `instance` (not when an existing one is returned) |
+| `Principals\PrincipalDeactivated` | After `deactivate()` or `eraseUser()` commits, once per deactivated principal; `ownedIds` lists every principal the cascade deactivated with it, so a listener revokes their keys too |
+| `Principals\UserHasPrincipalsException` | A user with principals is deleted outside `eraseUser()` |
+
+Other refusals use PHP's own exceptions: `InvalidArgumentException` for a
+wrong argument (an unknown principal type, an owner in another organisation),
+`LogicException` for a state the design forbids (an erased principal, a user
+row left after erasure), and `RuntimeException` for boot checks. Products
+match on the class, never on the message.
+
+## Migrations
+
+| Set | Files | Switch |
+| --- | --- | --- |
+| Groups | `database/migrations/groups/2026_11_22_120000_create_user_groups_tables.php` | `access.migrations.groups` |
+| Principals | `database/migrations/principals/2026_11_24_100000_create_principals_table.php` | `access.migrations.principals` |
+
+Both freeze at `1.0.0` (forward-only afterwards).

@@ -53,6 +53,12 @@ guard (such as a Filament panel guard) goes in `ACCESS_WEB_GUARDS`.
 
 ### Added
 
+- Reference docs for 1.0: `docs/reference-schema.md` (the Spatie columns
+  products own, A4, and the audit property shape, A5) and, in
+  `docs/reference-contracts.md`, the public classes, config keys,
+  environment variables, events, exceptions and migrations. Every class in
+  `src/` is now tagged `@api` or `@internal`; `UPGRADING.md` states the
+  deprecation policy; the README threat model covers principals.
 - `principals` table (design §15): package migration
   `create_principals_table` with UUID ids, a restrict user link (erasure is a
   job), owner and creator links that survive deletion, a stored generated

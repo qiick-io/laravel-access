@@ -63,6 +63,10 @@ Products must bind `RoleCatalog`, `TwoFactorPolicy`, `TwoFactorResponder` and
 | 2FA skipped | API actors exempt but get no Gate pass; exempt list minimal; AC10 |
 | Missing binding failing open | Boot check; AC12 |
 | Domain logic leaking into the package | Arch test against `App\`; no domain hook |
+| A deleted user keeping a principal, or erasure leaving a principal behind | `principals.user_id` is `ON DELETE RESTRICT`; `eraseUser()` erases, unlinks and deletes the user in one transaction; `UserDeletionGuard` refuses every other delete of a user with principals |
+| A principal owned across organisations, or a deactivated owner still counting | Owners must be active and in the same organisation; `isActive()` walks the owner chain uncached, with a fixed depth and cycle detection; deactivation cascades in one transaction and `PrincipalDeactivated` fires after commit |
+| Two instance principals of one type, or an organisation-less member | Unique index and CHECK (triggers on SQLite) from the migration; race-safe `instance()`; P1–P3 |
+| Principals config drifting from the schema | `Testing\AssertsPrincipalsSchema` proves the refusals on the product's migrated database; P9 |
 | Supply chain | Pinned Actions, `composer audit`, no lockfile, alerts-only Dependabot |
 
 ## Development
