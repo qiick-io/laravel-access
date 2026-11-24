@@ -727,3 +727,24 @@ it('refuses deleting a user who has principals on the principal model connection
     expect(fn () => ErasableUser::query()->findOrFail(1)->delete())->toThrow(UserHasPrincipalsException::class)
         ->and(DB::table('users')->where('id', 1)->exists())->toBeTrue();
 });
+
+/**
+ * A principal subclass whose global scope hides every row.
+ */
+class PrincipalHidingEveryRow extends Principal
+{
+    protected static function booted(): void
+    {
+        static::addGlobalScope('hide_every_row', static fn ($query) => $query->whereRaw('1 = 0'));
+    }
+}
+
+it('counts principals hidden by a global scope of the configured model', function (): void {
+    config()->set('auth.providers.users.model', ErasableUser::class);
+    migratePrincipals();
+    DB::table('principals')->insert(['id' => (string) Str::uuid7(), 'type' => 'user', 'user_id' => 1, 'name' => 'Member']);
+    config()->set('access.principals.model', PrincipalHidingEveryRow::class);
+
+    expect(fn () => (new UserDeletionGuard)('eloquent.deleting: x', [ErasableUser::query()->findOrFail(1)]))
+        ->toThrow(UserHasPrincipalsException::class);
+});

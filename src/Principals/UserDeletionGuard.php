@@ -38,7 +38,8 @@ final class UserDeletionGuard
         }
 
         $principalModel = $this->principalModel();
-        $principals = $principalModel->newQuery();
+        // Every principal counts, whatever global scopes a subclass adds.
+        $principals = $principalModel->newQuery()->withoutGlobalScopes();
 
         if ($principalModel->getConnection()->getSchemaBuilder()->hasTable($principalModel->getTable()) && $principals->where('user_id', $user->getKey())->exists()) {
             $userId = $user->getKey();
