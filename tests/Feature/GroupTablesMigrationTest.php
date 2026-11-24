@@ -200,3 +200,22 @@ it('restores the instance-group rule after a product rebuilds the table (review 
     Schema::dropIfExists('user_groups');
     Schema::dropIfExists('organisations');
 })->group('engines');
+
+it('scopes group names to their organisation, one name per instance level (AC-a)', function (): void {
+    (require dirname(__DIR__, 2).'/database/migrations/groups/2026_11_22_120000_create_user_groups_tables.php')->up();
+    $connection = app('db')->connection();
+    $insertGroup = static fn (string $name, ?string $organisationId): bool => $connection->table('user_groups')->insert([
+        'public_id' => (string) Str::uuid7(), 'name' => $name, 'organisation_id' => $organisationId,
+        'is_instance' => false, 'created_at' => now(), 'updated_at' => now(),
+    ]);
+    $organisationA = (string) Str::uuid();
+    $organisationB = (string) Str::uuid();
+
+    $insertGroup('Editors', $organisationA);
+    $insertGroup('Editors', $organisationB);
+    $insertGroup('Editors', null);
+
+    expect(fn () => $insertGroup('Editors', $organisationA))->toThrow(QueryException::class)
+        ->and(fn () => $insertGroup('Editors', null))->toThrow(QueryException::class)
+        ->and($connection->table('user_groups')->where('name', 'Editors')->count())->toBe(3);
+})->group('engines');

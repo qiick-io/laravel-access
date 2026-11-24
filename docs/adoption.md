@@ -167,6 +167,17 @@ membership FK targets `access.users_table` when set, otherwise the table from
 group uses `is_instance = true` with `organisation_id` NULL; a CHECK forbids
 `is_instance = true` together with a non-null `organisation_id`.
 
+A group name is unique within its organisation, and among the groups without
+an organisation (instance groups and the legacy unscoped ones): two
+organisations can both have an "Editors" group. The migration indexes
+(`organisation_key`, `name`), where `organisation_key` is a stored generated
+column holding the organisation id, or `''` without one, so organisation-less
+duplicates are refused on every engine (a plain NULL would let them through).
+externa 1.x keeps its own tables with a global unique `name`, which
+`AssertsGroupTablesSchema` accepts because it has no organisations; it adds
+`organisation_key` with the unique index when it moves to the package tables
+(additive).
+
 Assert the group schema with `Qiick\Access\Testing\AssertsGroupTablesSchema`
 (AC17 / C75). When Spatie teams are on, set
 `permission.column_names.team_foreign_key` to `organisation_id` and use uuid

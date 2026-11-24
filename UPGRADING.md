@@ -6,7 +6,10 @@ tagged release.
 
 ## Unreleased
 
-Nothing yet.
+- The group migration changed before its first install: `user_groups.name`
+  is no longer globally unique; `organisation_key` (stored, generated) and a
+  unique (`organisation_key`, `name`) replace it. A local database migrated
+  from a development build needs `migrate:fresh`.
 
 ## 0.1.0 (first tagged pre-release)
 

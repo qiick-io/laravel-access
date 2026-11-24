@@ -15,9 +15,10 @@ use RuntimeException;
  * Conformance helper AC17 / C75: the three fixed group tables match standards
  * review §2.4–2.6 (columns, nullability, indexes, FK cascade) plus
  * organisation_id / is_instance with the XOR check (is_instance true only
- * when organisation_id is null). Products that adopt the tables (including
- * externa with access.migrations.load = false) call assertShape() so their
- * schema cannot drift from the package.
+ * when organisation_id is null), and group names unique per organisation
+ * (AC-a). Products that adopt the tables (including externa with
+ * access.migrations.groups = false) call assertShape() so their schema
+ * cannot drift from the package.
  */
 final class AssertsGroupTablesSchema
 {
@@ -60,9 +61,55 @@ final class AssertsGroupTablesSchema
         $this->requireNotNullable('user_groups', 'is_instance');
         $this->requireNullable('user_groups', 'deleted_at');
         $this->requireUniqueCovering('user_groups', 'public_id');
-        $this->requireUniqueCovering('user_groups', 'name');
+        $this->requireGroupNameUniqueness();
         $this->requireIndexCovering('user_groups', 'organisation_id');
         $this->requireInstanceOrganisationXorConstraint();
+    }
+
+    /**
+     * AC-a: a group name is unique within its organisation and among the
+     * groups without one. The package indexes (organisation_key, name), where
+     * organisation_key is the organisation id or ''; a product without
+     * organisations (externa 1.x, its own tables) may keep a global unique
+     * name. Either way a rolled-back insert proves that two organisation-less
+     * groups cannot share a name: a unique (organisation_id, name) would pass
+     * the index check and still accept them, because NULLs are distinct.
+     */
+    private function requireGroupNameUniqueness(): void
+    {
+        $uniqueColumnLists = array_column(array_filter(
+            $this->indexColumnLists('user_groups'),
+            static fn (array $index): bool => $index['unique'],
+        ), 'columns');
+
+        if (! in_array(['organisation_key', 'name'], $uniqueColumnLists, true) && ! in_array(['name'], $uniqueColumnLists, true)) {
+            throw new RuntimeException(
+                'AC-a: expected a unique index on [user_groups.organisation_key,name] (or on [user_groups.name] in a product without organisations).',
+            );
+        }
+
+        $this->connection->beginTransaction();
+
+        try {
+            foreach ([1, 2] as $attempt) {
+                $this->connection->table('user_groups')->insert([
+                    'public_id' => (string) Str::uuid(),
+                    'name' => '__ac_a_duplicate_name__',
+                    'organisation_id' => null,
+                    'is_instance' => false,
+                    'created_at' => now(),
+                    'updated_at' => now(),
+                ]);
+            }
+        } catch (QueryException) {
+            $this->connection->rollBack();
+
+            return;
+        }
+
+        $this->connection->rollBack();
+
+        throw new RuntimeException('AC-a: two groups without an organisation were saved with the same name.');
     }
 
     /**

@@ -20,6 +20,11 @@ use Qiick\Access\Laravel\MigrationSettings;
  * organisation_id (nullable uuid) scopes a group to one organisation;
  * is_instance marks the instance-level super-admin group (organisation_id
  * must be NULL). Externa 1.x leaves both unused (false / null).
+ *
+ * A name is unique within its organisation, and among the groups without one
+ * (AC-a): organisation_key is the organisation id, or '' without one, so the
+ * unique index also refuses two organisation-less groups of the same name,
+ * which a NULL organisation_id would let through on every engine.
  */
 return new class extends Migration
 {
@@ -28,17 +33,26 @@ return new class extends Migration
         $rolesTable = config('permission.table_names.roles', 'roles');
         $rolesTable = is_string($rolesTable) && $rolesTable !== '' ? $rolesTable : 'roles';
         $usersTable = MigrationSettings::usersTable();
+        // Text on every engine, as for principals: MariaDB's uuid type refuses ''.
+        $organisationIdText = match (Schema::getConnection()->getDriverName()) {
+            'pgsql' => 'organisation_id::text',
+            'mysql', 'mariadb' => 'CAST(organisation_id AS CHAR(36))',
+            default => 'organisation_id',
+        };
 
-        Schema::create('user_groups', function (Blueprint $table): void {
+        Schema::create('user_groups', function (Blueprint $table) use ($organisationIdText): void {
             $table->id();
             $table->uuid('public_id')->unique();
-            $table->string('name')->unique();
+            $table->string('name');
             $table->text('description')->nullable();
             $table->json('metadata')->nullable();
             $table->uuid('organisation_id')->nullable()->index();
             $table->boolean('is_instance')->default(false);
             $table->timestamps();
             $table->softDeletes();
+            $table->string('organisation_key', 36)->storedAs("COALESCE({$organisationIdText}, '')");
+
+            $table->unique(['organisation_key', 'name'], 'user_groups_organisation_name_unique');
         });
 
         // is_instance only with a NULL organisation (AC17 / C75).
