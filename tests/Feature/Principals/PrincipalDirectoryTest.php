@@ -228,18 +228,23 @@ it('returns the instance principal another worker created concurrently (P3)', fu
 /**
  * Runs $work in $workers forked processes, each on its own database
  * connection, all released at the same instant, and returns what each one
- * returned (or the exception class and message it threw). Real processes, not
- * a second connection in one process: checklist item 5.
+ * returned (or the exception it threw) with the microtime it started and
+ * finished, so the caller can prove the runs overlapped. Real processes, not a
+ * second connection in one process: checklist item 5.
  *
  * @param  Closure(int): array<string, string>  $work
- * @return list<array<string, string>>
+ * @return list<array<string, mixed>>
  */
 function raceInChildProcesses(int $workers, Closure $work): array
 {
-    $resultDirectory = sys_get_temp_dir().'/qiick-access-principal-race-'.getmypid();
-    @mkdir($resultDirectory, 0777, true);
-    // Far enough ahead for every fork to connect before the start.
-    $startAt = microtime(true) + 0.5;
+    // Unique per run: a stale file of a killed run can never pass as a result.
+    $resultDirectory = sys_get_temp_dir().'/qiick-access-principal-race-'.bin2hex(random_bytes(8));
+    mkdir($resultDirectory, 0777, true);
+    // The children open their own connections; closing ours first means no
+    // child can end the session the parent would reuse.
+    DB::disconnect();
+    // Far enough ahead for every fork to connect on a slow runner.
+    $startAt = microtime(true) + 2.0;
     $childPids = [];
 
     for ($worker = 0; $worker < $workers; $worker++) {
@@ -251,17 +256,20 @@ function raceInChildProcesses(int $workers, Closure $work): array
 
         if ($childPid === 0) {
             try {
-                DB::purge(DB::getDefaultConnection());
-                DB::reconnect();
                 app()->forgetInstance(PrincipalDirectory::class);
                 DB::connection()->getPdo();
-                time_sleep_until($startAt);
-                $result = $work($worker);
+
+                if ($startAt > microtime(true)) {
+                    time_sleep_until($startAt);
+                }
+
+                $startedAt = microtime(true);
+                $result = [...$work($worker), 'started_at' => $startedAt, 'finished_at' => microtime(true)];
             } catch (Throwable $throwable) {
                 $result = ['error' => $throwable::class.': '.$throwable->getMessage()];
             }
 
-            file_put_contents("{$resultDirectory}/{$worker}", json_encode($result));
+            file_put_contents("{$resultDirectory}/{$worker}", json_encode($result, JSON_THROW_ON_ERROR | JSON_INVALID_UTF8_SUBSTITUTE));
             // Skip PHPUnit's shutdown in the child; the parent owns the run.
             posix_kill(getmypid(), SIGKILL);
         }
@@ -269,7 +277,21 @@ function raceInChildProcesses(int $workers, Closure $work): array
         $childPids[] = $childPid;
     }
 
+    // A child stuck on a lock must fail the test, not hang the job.
+    $deadline = microtime(true) + 60;
+
+    while ($childPids !== [] && microtime(true) < $deadline) {
+        foreach ($childPids as $index => $childPid) {
+            if (pcntl_waitpid($childPid, $status, WNOHANG) !== 0) {
+                unset($childPids[$index]);
+            }
+        }
+
+        usleep(10_000);
+    }
+
     foreach ($childPids as $childPid) {
+        posix_kill($childPid, SIGKILL);
         pcntl_waitpid($childPid, $status);
     }
 
@@ -277,13 +299,17 @@ function raceInChildProcesses(int $workers, Closure $work): array
 
     for ($worker = 0; $worker < $workers; $worker++) {
         $resultFile = "{$resultDirectory}/{$worker}";
-        $results[] = is_file($resultFile) ? json_decode((string) file_get_contents($resultFile), true) : ['error' => 'no result'];
+        $result = is_file($resultFile) ? json_decode((string) file_get_contents($resultFile), true) : null;
+        $results[] = is_array($result) ? $result : ['error' => "worker {$worker} left no readable result"];
         @unlink($resultFile);
     }
 
-    @rmdir($resultDirectory);
-    DB::purge(DB::getDefaultConnection());
+    rmdir($resultDirectory);
     DB::reconnect();
+
+    if ($childPids !== []) {
+        throw new RuntimeException(count($childPids).' race workers did not finish within 60 seconds.');
+    }
 
     return $results;
 }
@@ -310,6 +336,9 @@ it('gives concurrent processes one instance principal and one membership princip
     ]);
 
     expect(array_column($results, 'error'))->toBe([])
+        // The runs overlapped: the last worker started before the first one
+        // finished. Sequential runs would pass the other checks too.
+        ->and(max(array_column($results, 'started_at')))->toBeLessThan(min(array_column($results, 'finished_at')))
         ->and(array_unique(array_column($results, 'members')))->toHaveCount(1)
         ->and(Principal::query()->whereNotNull('user_id')->count())->toBe(20);
 
