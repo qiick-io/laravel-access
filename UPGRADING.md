@@ -9,6 +9,11 @@ any follow-on breaks will land in this file.
 
 ## Unreleased
 
+- New config keys `access.use_package_gate` (default `true`),
+  `access.gate_shadow` (default `false`) and `access.gate_shadow_log_channel`
+  for externa's switch to the package `Gate::before` (design §9). Nothing
+  changes with the defaults; a published config does not need them. They are
+  removed in v2.
 - `access.migrations.load` is replaced by `access.migrations.groups` and
   `access.migrations.principals` (both `true` by default). A product that set
   `load` to `false` sets `groups` to `false`; boot fails while `load` is still

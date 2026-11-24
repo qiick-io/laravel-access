@@ -53,6 +53,12 @@ guard (such as a Filament panel guard) goes in `ACCESS_WEB_GUARDS`.
 
 ### Added
 
+- Externa compatibility switches (design §9.2 step 6 / §9.4, removed in v2):
+  `access.use_package_gate` chooses whether `GateBefore` or the product's
+  `LegacyGateBefore` decides, still as the single `Gate::before` (AC1), and
+  `access.gate_shadow` runs the other one too and logs disagreements without
+  user data or secrets (`access.gate_shadow_log_channel`). Boot fails on a
+  non-boolean switch or a missing legacy binding.
 - `principals` table (design §15): package migration
   `create_principals_table` with UUID ids, a restrict user link (erasure is a
   job), owner and creator links that survive deletion, a stored generated

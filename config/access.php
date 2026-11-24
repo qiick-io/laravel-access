@@ -172,4 +172,25 @@ return [
         ],
     ],
 
+    /*
+    |--------------------------------------------------------------------------
+    | Legacy Gate::before and shadow mode (externa only, removed in v2)
+    |--------------------------------------------------------------------------
+    |
+    | Design §9.2 step 6 / §9.4. use_package_gate = false lets the product's
+    | bound Qiick\Access\Contracts\LegacyGateBefore decide instead of
+    | GateBefore; gate_shadow = true runs the other callback too and logs each
+    | disagreement (ability, actor kind, credential UUID, argument types; no
+    | secrets) on gate_shadow_log_channel (null: the default channel). Both
+    | switches must be real booleans: "true" / "false" in .env are, "1" / "0"
+    | are strings and fail at boot. Other products leave the defaults.
+    |
+    */
+
+    'use_package_gate' => env('ACCESS_USE_PACKAGE_GATE', true),
+
+    'gate_shadow' => env('ACCESS_GATE_SHADOW', false),
+
+    'gate_shadow_log_channel' => env('ACCESS_GATE_SHADOW_LOG_CHANNEL'),
+
 ];

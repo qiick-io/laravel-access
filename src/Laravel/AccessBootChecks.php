@@ -8,6 +8,7 @@ use Illuminate\Contracts\Config\Repository as ConfigRepository;
 use Illuminate\Contracts\Foundation\Application;
 use Qiick\Access\Contracts\ActorResolver;
 use Qiick\Access\Contracts\AuthorizationResponder;
+use Qiick\Access\Contracts\LegacyGateBefore;
 use Qiick\Access\Contracts\RoleCatalog;
 use Qiick\Access\Contracts\TwoFactorPolicy;
 use Qiick\Access\Contracts\TwoFactorResponder;
@@ -33,6 +34,7 @@ final class AccessBootChecks
         $this->assertSpatieEventsEnabled($config);
         $this->assertEveryGuardClassified($config);
         $this->assertNoLegacyMigrationsSwitch($config);
+        $this->assertGateSelection($config);
     }
 
     /**
@@ -48,6 +50,31 @@ final class AccessBootChecks
         if ($config->has('access.migrations.load')) {
             throw new RuntimeException(
                 'access.migrations.load was replaced by access.migrations.groups and access.migrations.principals; see UPGRADING.md.',
+            );
+        }
+    }
+
+    /**
+     * The design §9 compatibility switches must be real booleans, as for
+     * register_permission_check_method: an env string such as "false" would
+     * otherwise read as a different gate than the one the product meant. The
+     * legacy callback must be bound whenever it decides or is shadowed.
+     *
+     * @throws RuntimeException naming the non-boolean switch or the missing binding
+     */
+    public function assertGateSelection(ConfigRepository $config): void
+    {
+        foreach (['access.use_package_gate' => true, 'access.gate_shadow' => false] as $key => $default) {
+            if (! is_bool($config->get($key, $default))) {
+                throw new RuntimeException("{$key} must be a boolean (design §9).");
+            }
+        }
+
+        $isLegacyGateUsed = $config->get('access.use_package_gate', true) === false || $config->get('access.gate_shadow', false) === true;
+
+        if ($isLegacyGateUsed && ! $this->app->bound(LegacyGateBefore::class)) {
+            throw new RuntimeException(
+                'access.use_package_gate = false or access.gate_shadow = true requires ['.LegacyGateBefore::class.'] to be bound before boot.',
             );
         }
     }
