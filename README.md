@@ -63,9 +63,9 @@ Products must bind `RoleCatalog`, `TwoFactorPolicy`, `TwoFactorResponder` and
 | 2FA skipped | API actors exempt but get no Gate pass; exempt list minimal; AC10 |
 | Missing binding failing open | Boot check; AC12 |
 | Domain logic leaking into the package | Arch test against `App\`; no domain hook |
-| A deleted user keeping a principal, or erasure leaving a principal behind | `principals.user_id` is `ON DELETE RESTRICT`; `eraseUser()` erases, unlinks and deletes the user in one transaction; `UserDeletionGuard` refuses every other delete of a user with principals |
-| A principal owned across organisations, or a deactivated owner still counting | Owners must be active and in the same organisation; `isActive()` walks the owner chain uncached, with a fixed depth and cycle detection; deactivation cascades in one transaction and `PrincipalDeactivated` fires after commit |
-| Two instance principals of one type, or an organisation-less member | Unique index and CHECK (triggers on SQLite) from the migration; race-safe `instance()`; P1–P3 |
+| A deleted user keeping a principal, or erasure leaving a principal behind | `principals.user_id` is `ON DELETE RESTRICT`, so the database refuses any hard delete of a user with principals; `eraseUser()` erases, unlinks and deletes the user in one transaction; `UserDeletionGuard` turns an Eloquent hard delete into `UserHasPrincipalsException` (a soft delete keeps the row and passes) |
+| A principal owned across organisations, or a deactivated owner still counting | Owners must be active and in the same organisation; `isActive()` walks the owner chain uncached and counts a chain longer than eight (a cycle included) as inactive; deactivation cascades to every owned principal in one transaction and `PrincipalDeactivated` fires after commit |
+| Two principals for one membership, two instance principals of one type, or an organisation-less member | Membership unique index on every engine (P1); with `access.principals.organisation_required`, the instance singleton index and the organisation CHECK (triggers on SQLite, P2, P3); race-safe `forMember()` and `instance()` |
 | Principals config drifting from the schema | `Testing\AssertsPrincipalsSchema` proves the refusals on the product's migrated database; P9 |
 | Supply chain | Pinned Actions, `composer audit`, no lockfile, alerts-only Dependabot |
 

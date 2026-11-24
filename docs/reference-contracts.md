@@ -61,7 +61,7 @@ their meaning are public; renaming or removing one is a breaking change.
 | `access.principals.types` | `user`, `service`, `agent` | Principal types the product uses |
 | `access.principals.organisation_required` | `false` | Organisation CHECK on principals; read when the migration runs |
 | `access.principals.instance_types` | empty | Singleton instance-level types; read when the migration runs |
-| `access.users_table` | null | Users table for the group membership foreign key |
+| `access.users_table` | null (the users model's table) | Users table for the foreign keys of `user_group_user.user_id`, `principals.user_id` and `principals.created_by`, and for the erasure check |
 | `access.group_member_model` | null (`auth.providers.users.model`) | The only model that gets group roles |
 | `access.two_factor.exempt_route_names` | logout, security, two-factor, passkey, password confirmation | Routes `EnsureTwoFactorIsEnabled` skips |
 
@@ -73,8 +73,8 @@ comma-separated) and `ACCESS_PERMISSION_ENUM`.
 | Type | When |
 | --- | --- |
 | `Principals\PrincipalCreated` | A new principal row is created by `forMember`, `createService` or `instance` (not when an existing one is returned) |
-| `Principals\PrincipalDeactivated` | After `deactivate()` or `eraseUser()` commits, once per deactivated principal; `ownedIds` lists every principal the cascade deactivated with it, so a listener revokes their keys too |
-| `Principals\UserHasPrincipalsException` | A user with principals is deleted outside `eraseUser()` |
+| `Principals\PrincipalDeactivated` | After commit: once per `deactivate()` call (also for a principal that was already inactive, whose stored reason is kept) and once per principal `eraseUser()` erases. `ownedIds` lists every principal the cascade deactivated with it; those get no event of their own, so a listener revokes their keys too |
+| `Principals\UserHasPrincipalsException` | An Eloquent hard delete of a user with principals outside `eraseUser()`; other deletes fail on the restrict foreign key |
 
 Other refusals use PHP's own exceptions: `InvalidArgumentException` for a
 wrong argument (an unknown principal type, an owner in another organisation),

@@ -17,9 +17,9 @@ concurrency:
 jobs:
   # Exception to checklist item 17e, recorded 2026-11-24: app-ui (v0.13.0)
   # has no reusable package matrix workflow (PHP x Laravel x lowest/stable,
-  # database engines), only php-quality.yml, conformance.yml and the drift
-  # and PR-title checks. The maintainer is adding one to app-ui for every
-  # package; this local matrix moves to it then.
+  # database engines); its reusable workflows are single gates or app
+  # pipelines. The maintainer is adding one to app-ui for every package;
+  # this local matrix moves to it then.
   tests:
     name: PHP ${{ matrix.php }} Laravel ${{ matrix.laravel }} ${{ matrix.dependency-version }}
     runs-on: ubuntu-latest
