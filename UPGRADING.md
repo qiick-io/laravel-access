@@ -17,6 +17,8 @@ any follow-on breaks will land in this file.
   principal fails. Product migrations that alter `principals` or
   `user_groups` call `AccessSchema::ensureConstraints()` afterwards.
 - Every user deletion flow (Fortify / Jetstream `DeleteUser`, admin actions,
-  console commands) goes through `PrincipalDirectory::eraseUser($user, fn
-  ($user) => $user->delete())`. A direct delete of a user with principals
-  throws `UserHasPrincipalsException`.
+  console commands, `model:prune`) goes through
+  `PrincipalDirectory::eraseUser($user, fn ($user) => $user->forceDelete())`.
+  The callback must hard-delete the row: with `SoftDeletes`, `delete()` keeps
+  it, so `eraseUser()` throws and rolls back. A direct delete of a user with
+  principals throws `UserHasPrincipalsException`.

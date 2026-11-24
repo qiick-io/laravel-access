@@ -66,11 +66,14 @@ interface PrincipalDirectory
      * GDPR erasure of a user, in one transaction: every principal of the user
      * becomes an `erased` tombstone (user unlinked, name anonymised), the
      * principals it owns are deactivated, then $deleteUser deletes the user
-     * row. principals.user_id is ON DELETE RESTRICT, so this is the only way
-     * a user with principals can be deleted. PrincipalDeactivated is
-     * dispatched per erased principal after the commit.
+     * row with a hard delete (forceDelete() on a soft-deleting model).
+     * principals.user_id is ON DELETE RESTRICT, so this is the only way a user
+     * with principals can be deleted. PrincipalDeactivated is dispatched per
+     * erased principal after the commit.
      *
-     * @param  \Closure(Authenticatable): void  $deleteUser  the product's user deletion
+     * @param  \Closure(Authenticatable): void  $deleteUser  the product's hard user deletion
+     *
+     * @throws \LogicException when the user row still exists afterwards (everything is rolled back)
      */
     public function eraseUser(Authenticatable $user, \Closure $deleteUser): void;
 

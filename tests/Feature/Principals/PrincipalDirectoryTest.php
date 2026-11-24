@@ -573,3 +573,61 @@ it('lets soft deletes, other models and principal-less users through the deletio
 
     expect(true)->toBeTrue();
 });
+
+// Re-review of #16.
+
+/**
+ * A soft-deleting users model: delete() keeps the row (review R1).
+ */
+class SoftDeletingUser extends ErasableUser
+{
+    use SoftDeletes;
+}
+
+it('refuses an erasure that leaves the user row in place, and rolls it back (review R1)', function (Closure $deleteUser): void {
+    Schema::table('users', function (Blueprint $table): void {
+        $table->softDeletes();
+    });
+    config()->set('auth.providers.users.model', SoftDeletingUser::class);
+    migratePrincipals();
+    $organisationId = (string) Str::uuid();
+    $principal = directory()->forMember(member(), $organisationId);
+
+    expect(fn () => directory()->eraseUser(SoftDeletingUser::query()->findOrFail(1), $deleteUser))
+        ->toThrow(LogicException::class, 'still exists');
+
+    $row = Principal::query()->findOrFail($principal->id);
+
+    expect($row->user_id)->toBe(1)
+        ->and($row->deactivated_at)->toBeNull()
+        ->and(DB::table('users')->where('id', 1)->value('deleted_at'))->toBeNull()
+        ->and(directory()->forMember(member(), $organisationId)->id)->toBe($principal->id);
+})->with([
+    'soft delete' => [static fn (SoftDeletingUser $user): ?bool => $user->delete()],
+    'no delete at all' => [static fn (): null => null],
+]);
+
+it('erases a soft-deleting user through a hard delete', function (): void {
+    Schema::table('users', function (Blueprint $table): void {
+        $table->softDeletes();
+    });
+    config()->set('auth.providers.users.model', SoftDeletingUser::class);
+    migratePrincipals();
+    $principal = directory()->forMember(member(), null);
+
+    directory()->eraseUser(SoftDeletingUser::query()->findOrFail(1), static fn (SoftDeletingUser $user): ?bool => $user->forceDelete());
+
+    expect(DB::table('users')->where('id', 1)->exists())->toBeFalse()
+        ->and(Principal::query()->findOrFail($principal->id)->deactivation_reason)->toBe(DeactivationReason::Erased);
+});
+
+it('checks the owner organisation stored in the database, not the in-memory model (review N16)', function (): void {
+    migratePrincipals(true);
+    $organisationA = (string) Str::uuid();
+    $organisationB = (string) Str::uuid();
+    $owner = directory()->forMember(member(), $organisationA);
+    $owner->organisation_id = $organisationB;
+
+    expect(fn () => directory()->createService('agent', $organisationB, 'Agent', $owner))
+        ->toThrow(InvalidArgumentException::class, 'same organisation');
+});

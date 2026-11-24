@@ -12,6 +12,9 @@ use Illuminate\Support\Facades\Schema;
  * principals with a clear UserHasPrincipalsException, before the database
  * refuses it with a raw foreign key error. A soft delete is allowed: it
  * keeps the row the principals point at.
+ *
+ * It listens to `eloquent.deleting: *`, so it runs for every model deletion;
+ * for anything but the users model it costs a config read and an instanceof.
  */
 final class UserDeletionGuard
 {

@@ -108,9 +108,11 @@ final class EloquentPrincipalDirectory implements PrincipalDirectory
             throw new LogicException("An instance-level [{$type}] principal has a user; the organisation rule is missing from the schema (review B6).");
         }
 
-        // The singleton index makes this idempotent under concurrency: a
-        // concurrent insert that wins is returned instead of failing.
-        $principal = Principal::unguarded(fn (): Principal => $this->query()->createOrFirst(['type' => $type], ['name' => $name]));
+        // Read first so repeated calls do not hit the unique index (logged
+        // violations on PostgreSQL, review N17); the singleton index makes the
+        // insert idempotent under concurrency, returning a winning insert.
+        $principal = $this->query()->where('type', $type)->whereNull('organisation_id')->first()
+            ?? Principal::unguarded(fn (): Principal => $this->query()->createOrFirst(['type' => $type], ['name' => $name]));
 
         return $this->announceIfCreated($principal);
     }
@@ -147,6 +149,14 @@ final class EloquentPrincipalDirectory implements PrincipalDirectory
             }
 
             $deleteUser($user);
+
+            // A soft delete (or no delete) would leave the person's data in
+            // place behind an "erased" audit trail, and a restore would let
+            // forMember() mint a fresh principal past the tombstone (C17).
+            // The raw query ignores soft-delete scopes.
+            if ($this->database->connection()->table(MigrationSettings::usersTable())->where((new (MigrationSettings::userModel()))->getKeyName(), $user->getAuthIdentifier())->exists()) {
+                throw new LogicException('The user row still exists after the erasure callback; erasure needs a hard delete (forceDelete() on a soft-deleting model).');
+            }
 
             return $erased;
         });
@@ -218,8 +228,9 @@ final class EloquentPrincipalDirectory implements PrincipalDirectory
      */
     private function assertUsableOwner(Principal $owner, ?string $organisationId): void
     {
-        // Ownership never crosses tenants (API1 / BOLA, review B4).
-        if ($owner->organisation_id !== $organisationId) {
+        // Ownership never crosses tenants (API1 / BOLA, review B4). The stored
+        // organisation counts, never the in-memory model (review N16).
+        if ($this->query()->whereKey($owner->id)->value('organisation_id') !== $organisationId) {
             throw new InvalidArgumentException('A principal can only be owned by a principal of the same organisation.');
         }
 

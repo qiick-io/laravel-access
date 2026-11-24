@@ -104,12 +104,16 @@ by writing rows directly; the `Principal` model is fully guarded.
   the owned ids) is dispatched after the surrounding transaction commits.
   **Revoke their API keys in a listener** (qiick/laravel-api-keys reason
   `owner`);
-- `eraseUser($user, fn ($user) => $user->delete())`: GDPR erasure in one
-  transaction. Every principal of the user becomes an `erased` tombstone
+- `eraseUser($user, fn ($user) => $user->forceDelete())`: GDPR erasure in
+  one transaction. Every principal of the user becomes an `erased` tombstone
   (user unlinked, name anonymised), the principals it owns are deactivated,
-  then the closure deletes the user. `principals.user_id` is `ON DELETE
-  RESTRICT`, so deleting a user who still has principals any other way throws
-  `UserHasPrincipalsException` (a soft delete is allowed);
+  then the closure hard-deletes the user. If the user row still exists
+  afterwards (a soft delete, or no delete), `eraseUser()` throws and rolls
+  everything back: an erasure that keeps the person's data, or lets a restore
+  mint a fresh principal past the tombstone, never commits.
+  `principals.user_id` is `ON DELETE RESTRICT`, so deleting a user who still
+  has principals any other way throws `UserHasPrincipalsException` (a soft
+  delete is allowed, since it keeps the row);
 - `isActive($principalId)`: the use-time check behind a key: not deactivated,
   not expired, a `user` principal still has its user, an instance-level row
   is one the organisation rule allows, and every owner up the chain is active.
