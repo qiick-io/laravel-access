@@ -8,7 +8,7 @@
 
 # qiick/laravel-access
 
-> **In development. Not released and not on Packagist yet: do not depend on it.**
+> **Pre-1.0 (`0.x`): public APIs may change in any minor. Not on Packagist yet.**
 
 Shared authorization core for qiick Laravel products: one `Gate::before`, the
 effective-permission resolver (direct ∪ group roles, soft-deleted groups
@@ -24,9 +24,10 @@ Part of the qiick fleet. Binding design:
 
 ## Status
 
-Pre-`0.1.0`. Public APIs may change in any 0.x release; see [UPGRADING.md](./UPGRADING.md).
-Do not require this package from production apps until a tagged release lands on
-Packagist (Packagist publish only after Luca’s go).
+`0.1.0` is the first tagged pre-release, for beta adoption in the qiick
+products. Public APIs may change in any 0.x release; see
+[UPGRADING.md](./UPGRADING.md). Packagist publishing waits for the
+maintainer's go; until then products install it from the tag.
 
 ## Requirements
 
