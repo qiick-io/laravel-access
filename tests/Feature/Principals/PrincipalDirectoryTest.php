@@ -225,6 +225,103 @@ it('returns the instance principal another worker created concurrently (P3)', fu
         ->and(Principal::query()->count())->toBe(1);
 })->group('engines');
 
+/**
+ * Runs $work in $workers forked processes, each on its own database
+ * connection, all released at the same instant, and returns what each one
+ * returned (or the exception class and message it threw). Real processes, not
+ * a second connection in one process: checklist item 5.
+ *
+ * @param  Closure(int): array<string, string>  $work
+ * @return list<array<string, string>>
+ */
+function raceInChildProcesses(int $workers, Closure $work): array
+{
+    $resultDirectory = sys_get_temp_dir().'/qiick-access-principal-race-'.getmypid();
+    @mkdir($resultDirectory, 0777, true);
+    // Far enough ahead for every fork to connect before the start.
+    $startAt = microtime(true) + 0.5;
+    $childPids = [];
+
+    for ($worker = 0; $worker < $workers; $worker++) {
+        $childPid = pcntl_fork();
+
+        if ($childPid === -1) {
+            throw new RuntimeException('pcntl_fork failed');
+        }
+
+        if ($childPid === 0) {
+            try {
+                DB::purge(DB::getDefaultConnection());
+                DB::reconnect();
+                app()->forgetInstance(PrincipalDirectory::class);
+                DB::connection()->getPdo();
+                time_sleep_until($startAt);
+                $result = $work($worker);
+            } catch (Throwable $throwable) {
+                $result = ['error' => $throwable::class.': '.$throwable->getMessage()];
+            }
+
+            file_put_contents("{$resultDirectory}/{$worker}", json_encode($result));
+            // Skip PHPUnit's shutdown in the child; the parent owns the run.
+            posix_kill(getmypid(), SIGKILL);
+        }
+
+        $childPids[] = $childPid;
+    }
+
+    foreach ($childPids as $childPid) {
+        pcntl_waitpid($childPid, $status);
+    }
+
+    $results = [];
+
+    for ($worker = 0; $worker < $workers; $worker++) {
+        $resultFile = "{$resultDirectory}/{$worker}";
+        $results[] = is_file($resultFile) ? json_decode((string) file_get_contents($resultFile), true) : ['error' => 'no result'];
+        @unlink($resultFile);
+    }
+
+    @rmdir($resultDirectory);
+    DB::purge(DB::getDefaultConnection());
+    DB::reconnect();
+
+    return $results;
+}
+
+it('gives concurrent processes one instance principal and one membership principal (P1, P3)', function (bool $isOrganisationRequired, ?string $organisationId): void {
+    if (! function_exists('pcntl_fork') || ! function_exists('posix_kill')) {
+        $this->markTestSkipped('pcntl and posix are required for the process race.');
+    }
+
+    if (DB::connection()->getDriverName() === 'sqlite') {
+        $this->markTestSkipped('An in-memory SQLite database cannot be shared between processes.');
+    }
+
+    migratePrincipals($isOrganisationRequired, $isOrganisationRequired ? ['instance_service'] : []);
+    // Twenty users raced by every worker: one call each would rarely collide.
+    DB::table('users')->insert(array_map(static fn (int $id): array => ['id' => $id], range(3, 20)));
+
+    $results = raceInChildProcesses(6, static fn (int $worker): array => [
+        ...($isOrganisationRequired ? ['instance' => directory()->instance('instance_service', "Worker {$worker}")->id] : []),
+        'members' => implode(',', array_map(
+            static fn (int $userId): string => directory()->forMember(member($userId), $organisationId)->id,
+            range(1, 20),
+        )),
+    ]);
+
+    expect(array_column($results, 'error'))->toBe([])
+        ->and(array_unique(array_column($results, 'members')))->toHaveCount(1)
+        ->and(Principal::query()->whereNotNull('user_id')->count())->toBe(20);
+
+    if ($isOrganisationRequired) {
+        expect(array_unique(array_column($results, 'instance')))->toHaveCount(1)
+            ->and(Principal::query()->where('type', 'instance_service')->count())->toBe(1);
+    }
+})->with([
+    'organisations required' => [true, '0195f7a2-6a3e-7c2d-9b1a-4f2e8d6c5a10'],
+    'instance-level membership' => [false, null],
+])->group('engines');
+
 it('deactivates a principal and everything it owns, in one transaction', function (): void {
     migratePrincipals();
     Event::fake([PrincipalDeactivated::class]);
