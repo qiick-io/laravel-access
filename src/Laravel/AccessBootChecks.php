@@ -32,6 +32,24 @@ final class AccessBootChecks
         $this->assertSpatiePermissionCheckMethodDisabled($config);
         $this->assertSpatieEventsEnabled($config);
         $this->assertEveryGuardClassified($config);
+        $this->assertNoLegacyMigrationsSwitch($config);
+    }
+
+    /**
+     * access.migrations.load was replaced by access.migrations.groups and
+     * access.migrations.principals. A published config that still sets it
+     * would silently load the group migration next to the product's own
+     * tables (mergeConfigFrom merges shallowly), so boot fails instead.
+     *
+     * @throws RuntimeException when access.migrations.load is still set
+     */
+    public function assertNoLegacyMigrationsSwitch(ConfigRepository $config): void
+    {
+        if ($config->has('access.migrations.load')) {
+            throw new RuntimeException(
+                'access.migrations.load was replaced by access.migrations.groups and access.migrations.principals; see UPGRADING.md.',
+            );
+        }
     }
 
     public function assertRequiredBindings(): void

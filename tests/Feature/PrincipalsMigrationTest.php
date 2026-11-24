@@ -8,6 +8,7 @@ use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
+use Qiick\Access\Laravel\AccessSchema;
 
 /*
  * The package create_principals_table migration (design §15.2 / §15.3) on the
@@ -91,7 +92,7 @@ it('stores the generated organisation and instance keys', function (): void {
     expect($rows[$memberId]->organisation_key)->toBe($organisationId)
         ->and($rows[$memberId]->instance_type)->toBeNull()
         ->and($rows[$instanceUserId]->organisation_key)->toBe('')
-        ->and($rows[$instanceUserId]->instance_type)->toBe('user')
+        ->and($rows[$instanceUserId]->instance_type)->toBeNull()
         ->and($rows[$serviceId]->organisation_key)->toBe('')
         ->and($rows[$serviceId]->instance_type)->toBe('service');
 })->group('engines');
@@ -152,23 +153,15 @@ it('enforces the organisation rule and the instance singleton when organisations
         ->and(DB::table('principals')->count())->toBe(3);
 })->group('engines');
 
-it('refuses an instance principal with a user where the engine allows that CHECK', function (): void {
+it('refuses an instance principal with a user on every engine (review B1)', function (): void {
     config()->set('access.principals.organisation_required', true);
     config()->set('access.principals.instance_types', ['instance_service']);
     principalsMigration()->up();
+    $instanceId = insertPrincipal(['type' => 'instance_service', 'name' => 'Instance Admin API']);
 
-    $insert = fn () => insertPrincipal(['type' => 'instance_service', 'user_id' => 2]);
-
-    // MySQL and MariaDB refuse user_id (an ON DELETE SET NULL column) in a CHECK.
-    if (in_array(DB::connection()->getDriverName(), ['mysql', 'mariadb'], true)) {
-        $insert();
-
-        expect(DB::table('principals')->count())->toBe(1);
-
-        return;
-    }
-
-    expect($insert)->toThrow(QueryException::class);
+    expect(fn () => insertPrincipal(['type' => 'instance_service', 'user_id' => 2]))->toThrow(QueryException::class)
+        ->and(fn () => DB::table('principals')->where('id', $instanceId)->update(['user_id' => 2]))->toThrow(QueryException::class)
+        ->and(DB::table('principals')->whereNotNull('user_id')->count())->toBe(0);
 })->group('engines');
 
 it('requires an organisation for every type when no instance type is declared', function (): void {
@@ -180,6 +173,13 @@ it('requires an organisation for every type when no instance type is declared', 
     expect(fn () => insertPrincipal(['type' => 'service']))->toThrow(QueryException::class)
         ->and(fn () => insertPrincipal(['type' => 'instance_service']))->toThrow(QueryException::class);
 })->group('engines');
+
+it('refuses instance types without required organisations (review N4)', function (): void {
+    config()->set('access.principals.instance_types', ['instance_service']);
+
+    expect(fn () => principalsMigration()->up())->toThrow(InvalidArgumentException::class, 'organisation_required')
+        ->and(Schema::hasTable('principals'))->toBeFalse();
+});
 
 it('refuses instance types that are not plain type names', function (mixed $instanceTypes): void {
     config()->set('access.principals.organisation_required', true);
@@ -196,13 +196,16 @@ it('refuses instance types that are not plain type names', function (mixed $inst
     'not a list' => ['instance_service'],
 ]);
 
-it('keeps principals when their user or owner is deleted', function (): void {
+it('refuses to delete a user who still has a principal, and keeps principals when their owner or creator goes', function (): void {
     principalsMigration()->up();
 
     $ownerId = insertPrincipal(['user_id' => 1, 'created_by' => 2]);
-    $agentId = insertPrincipal(['type' => 'agent', 'owner_principal_id' => $ownerId, 'created_by' => 1]);
+    $agentId = insertPrincipal(['type' => 'agent', 'owner_principal_id' => $ownerId, 'created_by' => 2]);
 
-    DB::table('users')->where('id', 1)->delete();
+    // Erasure is a job (core hardening): the user link is restrict, never set null.
+    expect(fn () => DB::table('users')->where('id', 1)->delete())->toThrow(QueryException::class);
+
+    DB::table('users')->where('id', 2)->delete();
     DB::table('principals')->where('id', $ownerId)->delete();
 
     $agent = DB::table('principals')->where('id', $agentId)->first();
@@ -210,5 +213,28 @@ it('keeps principals when their user or owner is deleted', function (): void {
     expect($agent)->not->toBeNull()
         ->and($agent->owner_principal_id)->toBeNull()
         ->and($agent->created_by)->toBeNull()
+        ->and(DB::table('users')->where('id', 1)->exists())->toBeTrue()
         ->and(fn () => insertPrincipal(['user_id' => 99]))->toThrow(QueryException::class);
+})->group('engines');
+
+it('restores the organisation rule after a product rebuilds the table to add its organisation foreign key (review B2)', function (): void {
+    config()->set('access.principals.organisation_required', true);
+    config()->set('access.principals.instance_types', ['instance_service']);
+    principalsMigration()->up();
+    Schema::create('organisations', function (Blueprint $table): void {
+        $table->uuid('id')->primary();
+    });
+
+    // The product migration of design §15.5; SQLite rebuilds the table for it.
+    Schema::table('principals', function (Blueprint $table): void {
+        $table->foreign('organisation_id')->references('id')->on('organisations')->restrictOnDelete();
+    });
+    AccessSchema::ensureConstraints();
+    AccessSchema::ensureConstraints();
+
+    expect(fn () => insertPrincipal(['type' => 'service']))->toThrow(QueryException::class)
+        ->and(fn () => insertPrincipal(['type' => 'instance_service', 'user_id' => 1]))->toThrow(QueryException::class);
+
+    Schema::dropIfExists('principals');
+    Schema::dropIfExists('organisations');
 })->group('engines');

@@ -35,11 +35,19 @@ it('requires organisations only for a boolean true', function (mixed $configured
 ]);
 
 it('returns validated instance types', function (): void {
+    config()->set('access.principals.organisation_required', true);
     config()->set('access.principals.instance_types', ['instance_service', 'a1_b']);
     expect(MigrationSettings::instanceTypes())->toBe(['instance_service', 'a1_b']);
 
     config()->set('access.principals.instance_types', null);
     expect(fn () => MigrationSettings::instanceTypes())->toThrow(InvalidArgumentException::class);
+
+    config()->set('access.principals.instance_types', []);
+    expect(MigrationSettings::instanceTypes())->toBe([]);
+
+    config()->set('access.principals.organisation_required', false);
+    config()->set('access.principals.instance_types', ['instance_service']);
+    expect(fn () => MigrationSettings::instanceTypes())->toThrow(InvalidArgumentException::class, 'organisation_required');
 
     config()->set('access.principals.instance_types', []);
     expect(MigrationSettings::instanceTypes())->toBe([]);

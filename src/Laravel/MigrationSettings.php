@@ -42,8 +42,8 @@ final class MigrationSettings
 
     /**
      * Principal types allowed without an organisation when organisations are
-     * required. They are interpolated into a CHECK constraint, so only plain
-     * lower-case type names are accepted.
+     * required (and only then). They are interpolated into a CHECK constraint,
+     * so only plain lower-case type names are accepted.
      *
      * @return list<string>
      *
@@ -61,6 +61,12 @@ final class MigrationSettings
             if (! is_string($instanceType) || preg_match('/^[a-z][a-z0-9_]{0,31}$/', $instanceType) !== 1) {
                 throw new InvalidArgumentException('access.principals.instance_types entries must be lower-case type names of at most 32 characters.');
             }
+        }
+
+        // Without required organisations there is no singleton index, so an
+        // instance principal could not be kept unique (review N4 / B5).
+        if ($instanceTypes !== [] && ! self::isOrganisationRequired()) {
+            throw new InvalidArgumentException('access.principals.instance_types needs access.principals.organisation_required set to true.');
         }
 
         return $instanceTypes;

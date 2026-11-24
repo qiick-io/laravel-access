@@ -147,3 +147,17 @@ it('fails when an auth guard is neither a web nor an API guard', function (): vo
     $config->set('auth.guards', 'web');
     $checks->assertEveryGuardClassified($config);
 });
+
+it('fails when the replaced access.migrations.load switch is still configured', function (): void {
+    $checks = app(AccessBootChecks::class);
+    $config = app(ConfigRepository::class);
+    $checks->assertNoLegacyMigrationsSwitch($config);
+
+    $config->set('access.migrations', ['load' => false]);
+
+    expect(fn () => $checks->assertNoLegacyMigrationsSwitch($config))
+        ->toThrow(RuntimeException::class, 'access.migrations.load was replaced')
+        ->and(fn () => $checks->assert())->toThrow(RuntimeException::class, 'access.migrations.load was replaced');
+
+    $config->set('access.migrations', ['groups' => true, 'principals' => true]);
+});
