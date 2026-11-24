@@ -8,6 +8,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `Testing\AssertsRolesSchema` (A4): asserts the product-owned columns on
+  Spatie's `roles` table, `public_id` (not null, unique) everywhere and the
+  optional `is_system`, `is_assignable`, `description` and `metadata` where
+  a product has them, with the flag defaults proved by a rolled-back insert.
+
 ## [0.1.0] - 2026-11-24
 
 First tagged pre-release. Public APIs may still change in any 0.x minor.
