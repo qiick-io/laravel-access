@@ -72,6 +72,13 @@ guard (such as a Filament panel guard) goes in `ACCESS_WEB_GUARDS`.
   service and agent accounts within the configured types and an owner chain
   of at most eight, race-safe instance singletons, transactional cascading
   deactivation, and an uncached `isActive()` that walks the owner chain.
+  Owners must be active and in the same organisation; organisation ids are
+  stored in lower case; only `offboarded` principals are reactivated and an
+  `erased` tombstone is never rewritten; `eraseUser()` erases and unlinks a
+  user's principals and deletes the user in one transaction, and
+  `UserDeletionGuard` refuses any other delete of a user with principals
+  (`UserHasPrincipalsException`). The model is fully guarded and
+  `PrincipalDeactivated` is dispatched after commit.
 
 - Test-only conformance helpers (design §2.1 / §13.1): `Testing\ProbeAbility`
   registers the AC2 probe ability (defined as `false`, refuses to register

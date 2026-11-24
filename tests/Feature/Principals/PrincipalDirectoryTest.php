@@ -3,8 +3,11 @@
 declare(strict_types=1);
 
 use Carbon\CarbonInterface;
-use Illuminate\Database\QueryException;
+use Illuminate\Database\Eloquent\MassAssignmentException;
+use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Foundation\Auth\User;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Schema;
@@ -14,12 +17,17 @@ use Qiick\Access\Principals\Principal;
 use Qiick\Access\Principals\PrincipalCreated;
 use Qiick\Access\Principals\PrincipalDeactivated;
 use Qiick\Access\Principals\PrincipalDirectory;
+use Qiick\Access\Principals\UserDeletionGuard;
+use Qiick\Access\Principals\UserHasPrincipalsException;
 use Qiick\Access\Tests\Support\SpatieUser;
 
 /*
  * PrincipalDirectory (design §15.4) on the configured engine, with the
  * security cases of §15.7 (P2–P8).
  */
+
+// Every case runs on PostgreSQL, MySQL and MariaDB in CI.
+pest()->group('engines');
 
 function migratePrincipals(bool $isOrganisationRequired = false, array $instanceTypes = []): void
 {
@@ -49,6 +57,16 @@ afterEach(function (): void {
     config()->set('access.principals.organisation_required', false);
     config()->set('access.principals.instance_types', []);
 });
+
+/**
+ * A users model without Spatie's HasRoles, whose deleting hook needs its tables.
+ */
+class ErasableUser extends User
+{
+    protected $table = 'users';
+
+    public $timestamps = false;
+}
 
 function directory(): PrincipalDirectory
 {
@@ -176,49 +194,35 @@ it('keeps instance principals singletons and only for declared types (P3)', func
     Event::assertDispatchedTimes(PrincipalCreated::class, 1);
 });
 
-it('keeps one instance principal when another worker races to create it (P3)', function (): void {
+it('returns the instance principal another worker created concurrently (P3)', function (): void {
     $defaultConnection = config('database.default');
-    $driver = DB::connection()->getDriverName();
 
-    if ($driver === 'sqlite') {
+    if (DB::connection()->getDriverName() === 'sqlite') {
         $this->markTestSkipped('An in-memory SQLite database cannot be shared with a second connection.');
     }
 
     migratePrincipals(true, ['instance_service']);
     // A second connection to the same database plays the concurrent worker.
     config()->set('database.connections.concurrent_worker', config("database.connections.{$defaultConnection}"));
-    $worker = DB::connection('concurrent_worker');
-    $isWorkerBlocked = false;
+    $isRaceSimulated = false;
 
-    if ($driver !== 'pgsql') {
-        $worker->statement('SET SESSION innodb_lock_wait_timeout = 1');
-    }
-
-    // The other worker tries to commit the singleton between our locked read and our insert.
-    Principal::creating(function () use (&$isWorkerBlocked, $worker): void {
-        try {
-            $worker->table('principals')->insert([
-                'id' => (string) Str::uuid7(), 'type' => 'instance_service', 'name' => 'Winner',
-                'created_at' => now(), 'updated_at' => now(),
-            ]);
-        } catch (QueryException) {
-            $isWorkerBlocked = true;
+    // The other worker commits the singleton between our check and our insert.
+    Principal::creating(function () use (&$isRaceSimulated): void {
+        if ($isRaceSimulated) {
+            return;
         }
+
+        $isRaceSimulated = true;
+        DB::connection('concurrent_worker')->table('principals')->insert([
+            'id' => (string) Str::uuid7(), 'type' => 'instance_service', 'name' => 'Winner',
+            'created_at' => now(), 'updated_at' => now(),
+        ]);
     });
 
     $instance = directory()->instance('instance_service', 'Loser');
 
-    expect(Principal::query()->count())->toBe(1);
-
-    if ($driver === 'pgsql') {
-        // No gap lock: the worker commits first and our insert returns its row.
-        expect($instance->name)->toBe('Winner')->and($isWorkerBlocked)->toBeFalse();
-
-        return;
-    }
-
-    // InnoDB: the locked read's gap lock holds the worker until we commit.
-    expect($instance->name)->toBe('Loser')->and($isWorkerBlocked)->toBeTrue();
+    expect($instance->name)->toBe('Winner')
+        ->and(Principal::query()->count())->toBe(1);
 })->group('engines');
 
 it('deactivates a principal and everything it owns, in one transaction', function (): void {
@@ -264,7 +268,8 @@ it('reports a principal active only when it, and every owner up the chain, is (P
     expect(directory()->isActive($agent->id))->toBeFalse();
 
     DB::table('principals')->where('id', $owner->id)->update(['deactivated_at' => null]);
-    DB::table('users')->where('id', 1)->delete();
+    // A user principal whose user link is gone (erasure unlinks it) is inactive.
+    DB::table('principals')->where('id', $owner->id)->update(['user_id' => null]);
     expect(directory()->isActive($owner->id))->toBeFalse()
         ->and(directory()->isActive($agent->id))->toBeFalse();
 })->group('engines');
@@ -312,20 +317,12 @@ it('accepts an owner chain of seven and refuses one of eight with the exact mess
         ->and(directory()->isActive($ninthId))->toBeFalse();
 });
 
-it('keeps instance principals idempotent without the singleton index and ignores look-alike rows', function (): void {
+it('refuses instance principals unless organisations are required (review B5 / N4)', function (): void {
+    migratePrincipals();
     config()->set('access.principals.instance_types', ['instance_service']);
-    migratePrincipals(false, ['instance_service']);
-    $organisationId = (string) Str::uuid();
-    DB::table('principals')->insert([
-        ['id' => (string) Str::uuid7(), 'type' => 'instance_service', 'name' => 'Scoped', 'organisation_id' => $organisationId, 'user_id' => null, 'created_at' => now(), 'updated_at' => now()],
-        ['id' => (string) Str::uuid7(), 'type' => 'instance_service', 'name' => 'With user', 'organisation_id' => null, 'user_id' => 1, 'created_at' => now(), 'updated_at' => now()],
-    ]);
 
-    $instance = directory()->instance('instance_service', 'Instance');
-
-    expect($instance->name)->toBe('Instance')
-        ->and(directory()->instance('instance_service', 'Again')->id)->toBe($instance->id)
-        ->and(Principal::query()->count())->toBe(3);
+    expect(fn () => directory()->instance('instance_service', 'Instance'))->toThrow(InvalidArgumentException::class, 'organisation_required')
+        ->and(Principal::query()->count())->toBe(0);
 });
 
 it('deactivates owned principals once even when ownership loops back', function (): void {
@@ -370,4 +367,209 @@ it('only creates types the product lists', function (): void {
     expect(fn () => directory()->createService('service', null, 'Any'))->toThrow(InvalidArgumentException::class, 'access.principals.types');
 
     config()->set('access.principals.types', ['user', 'service', 'agent']);
+});
+
+// Review of #16.
+
+it('never overwrites a deactivated principal, so an erased tombstone stays erased (review B3)', function (): void {
+    migratePrincipals();
+    $organisationId = (string) Str::uuid();
+    $principal = directory()->forMember(member(), $organisationId);
+    directory()->deactivate($principal, DeactivationReason::Erased);
+    $erasedAt = Principal::query()->findOrFail($principal->id)->deactivated_at;
+
+    $this->travel(5)->minutes();
+    directory()->deactivate(Principal::query()->findOrFail($principal->id), DeactivationReason::Offboarded);
+    $row = Principal::query()->findOrFail($principal->id);
+
+    expect($row->deactivation_reason)->toBe(DeactivationReason::Erased)
+        ->and($row->deactivated_at->equalTo($erasedAt))->toBeTrue()
+        ->and(fn () => directory()->forMember(member(), $organisationId))->toThrow(LogicException::class, 'erased')
+        ->and(directory()->isActive($principal->id))->toBeFalse();
+});
+
+it('reactivates only offboarded membership principals (review N7)', function (DeactivationReason $reason, bool $isReactivated): void {
+    migratePrincipals();
+    $organisationId = (string) Str::uuid();
+    $principal = directory()->forMember(member(), $organisationId);
+    directory()->deactivate($principal, $reason);
+
+    $returned = directory()->forMember(member(), $organisationId);
+
+    expect($returned->id)->toBe($principal->id)
+        ->and(directory()->isActive($principal->id))->toBe($isReactivated)
+        ->and($returned->deactivation_reason)->toBe($isReactivated ? null : $reason);
+})->with([
+    'offboarded' => [DeactivationReason::Offboarded, true],
+    'admin' => [DeactivationReason::Admin, false],
+    'owner deactivated' => [DeactivationReason::OwnerDeactivated, false],
+    'expired' => [DeactivationReason::Expired, false],
+]);
+
+it('refuses an owner from another organisation or an inactive owner (review B4)', function (): void {
+    migratePrincipals(true, ['instance_service']);
+    $organisationA = (string) Str::uuid();
+    $organisationB = (string) Str::uuid();
+    $ownerInA = directory()->forMember(member(), $organisationA);
+
+    expect(fn () => directory()->createService('agent', $organisationB, 'Agent', $ownerInA))
+        ->toThrow(InvalidArgumentException::class, 'same organisation')
+        ->and(directory()->createService('agent', strtoupper($organisationA), 'Agent', $ownerInA)->organisation_id)->toBe($organisationA);
+
+    directory()->deactivate($ownerInA, DeactivationReason::Admin);
+
+    expect(fn () => directory()->createService('agent', $organisationA, 'Agent', $ownerInA))
+        ->toThrow(InvalidArgumentException::class, 'not active');
+});
+
+it('stores organisation ids in lower case so one membership never splits (review N5)', function (): void {
+    migratePrincipals();
+    $organisationId = (string) Str::uuid();
+
+    $principal = directory()->forMember(member(), strtoupper($organisationId));
+
+    expect($principal->organisation_id)->toBe($organisationId)
+        ->and(directory()->forMember(member(), $organisationId)->id)->toBe($principal->id)
+        ->and(Principal::query()->count())->toBe(1);
+});
+
+it('fails closed on an instance-level row the organisation rule forbids (review B6)', function (): void {
+    // A schema migrated without the rule, then the product turned it on.
+    migratePrincipals();
+    config()->set('access.principals.organisation_required', true);
+    config()->set('access.principals.instance_types', ['instance_service']);
+    $rogueId = (string) Str::uuid7();
+    $strayId = (string) Str::uuid7();
+    DB::table('principals')->insert([
+        ['id' => $rogueId, 'type' => 'instance_service', 'user_id' => 1, 'name' => 'Rogue', 'created_at' => now(), 'updated_at' => now()],
+        ['id' => $strayId, 'type' => 'service', 'user_id' => null, 'name' => 'Stray', 'created_at' => now(), 'updated_at' => now()],
+    ]);
+
+    expect(directory()->isActive($rogueId))->toBeFalse()
+        ->and(directory()->isActive($strayId))->toBeFalse()
+        ->and(fn () => directory()->instance('instance_service', 'Instance'))->toThrow(LogicException::class, 'has a user');
+});
+
+it('keeps the model guarded against mass assignment (review N1)', function (): void {
+    migratePrincipals();
+
+    expect(fn () => Principal::query()->create(['type' => 'service', 'name' => 'Mass assigned']))
+        ->toThrow(MassAssignmentException::class);
+});
+
+it('erases a user: principals erased and unlinked, then the user deleted, in one transaction (decision 2026-11-24)', function (): void {
+    config()->set('auth.providers.users.model', ErasableUser::class);
+    migratePrincipals();
+    Event::fake([PrincipalDeactivated::class]);
+    $organisationId = (string) Str::uuid();
+    $member = directory()->forMember(member(), $organisationId);
+    $instanceLevel = directory()->forMember(member(), null);
+    $agent = directory()->createService('agent', $organisationId, 'Agent', $member);
+    directory()->deactivate($instanceLevel, DeactivationReason::Offboarded);
+    $erasedEarlier = directory()->forMember(member(), (string) Str::uuid());
+    directory()->deactivate($erasedEarlier, DeactivationReason::Erased);
+    $erasedEarlierAt = Principal::query()->findOrFail($erasedEarlier->id)->deactivated_at;
+    $this->travel(5)->minutes();
+    $other = directory()->forMember(member(2), $organisationId);
+
+    directory()->eraseUser(ErasableUser::query()->findOrFail(1), static function (ErasableUser $user): void {
+        $user->delete();
+    });
+
+    $rows = Principal::query()->get()->keyBy('id');
+
+    expect(DB::table('users')->where('id', 1)->exists())->toBeFalse()
+        ->and($rows[$member->id]->user_id)->toBeNull()
+        ->and($rows[$member->id]->deactivation_reason)->toBe(DeactivationReason::Erased)
+        ->and($rows[$member->id]->name)->toBe('Erased user')
+        ->and($rows[$instanceLevel->id]->deactivation_reason)->toBe(DeactivationReason::Erased)
+        ->and($rows[$instanceLevel->id]->user_id)->toBeNull()
+        ->and($rows[$agent->id]->deactivation_reason)->toBe(DeactivationReason::OwnerDeactivated)
+        ->and($rows[$erasedEarlier->id]->deactivated_at->equalTo($erasedEarlierAt))->toBeTrue()
+        ->and($rows[$erasedEarlier->id]->user_id)->toBeNull()
+        ->and($rows[$instanceLevel->id]->deactivated_at->greaterThan($erasedEarlierAt))->toBeTrue()
+        ->and($rows[$other->id]->deactivated_at)->toBeNull()
+        ->and(directory()->isActive($member->id))->toBeFalse();
+
+    Event::assertDispatched(PrincipalDeactivated::class, fn (PrincipalDeactivated $event): bool => $event->principal->is($member)
+        && $event->reason === DeactivationReason::Erased && $event->ownedIds === [$agent->id]);
+})->group('engines');
+
+it('rolls the erasure back when deleting the user fails', function (): void {
+    migratePrincipals();
+    $principal = directory()->forMember(member(), null);
+
+    expect(fn () => directory()->eraseUser(member(), static function (): void {
+        throw new RuntimeException('user deletion failed');
+    }))->toThrow(RuntimeException::class, 'user deletion failed');
+
+    $row = Principal::query()->findOrFail($principal->id);
+
+    expect($row->user_id)->toBe(1)
+        ->and($row->deactivated_at)->toBeNull();
+})->group('engines');
+
+it('explains that a user with principals must be erased, not deleted (decision 2026-11-24)', function (): void {
+    config()->set('auth.providers.users.model', ErasableUser::class);
+    migratePrincipals();
+    directory()->forMember(member(), null);
+
+    expect(fn () => ErasableUser::query()->findOrFail(1)->delete())
+        ->toThrow(UserHasPrincipalsException::class, 'User [1] still has principals; delete it through PrincipalDirectory::eraseUser()')
+        ->and(DB::table('users')->where('id', 1)->exists())->toBeTrue()
+        ->and(ErasableUser::query()->findOrFail(2)->delete())->toBeTrue();
+});
+
+it('dispatches the deactivation event only after the surrounding transaction commits (review N8)', function (): void {
+    migratePrincipals();
+    $principal = directory()->forMember(member(), null);
+    $dispatched = [];
+    Event::listen(PrincipalDeactivated::class, static function (PrincipalDeactivated $event) use (&$dispatched): void {
+        $dispatched[] = $event->principal->id;
+    });
+
+    DB::transaction(function () use ($principal, &$dispatched): void {
+        directory()->deactivate($principal, DeactivationReason::Offboarded);
+
+        expect($dispatched)->toBe([]);
+    });
+
+    expect($dispatched)->toBe([$principal->id]);
+});
+
+it('lets soft deletes, other models and principal-less users through the deletion guard', function (): void {
+    config()->set('auth.providers.users.model', ErasableUser::class);
+    migratePrincipals();
+    directory()->forMember(member(), null);
+    $guard = new UserDeletionGuard;
+    $softDeletingUser = new class extends ErasableUser
+    {
+        use SoftDeletes;
+
+        public function asForceDeleting(): static
+        {
+            $this->forceDeleting = true;
+
+            return $this;
+        }
+    };
+    $softDeletingUser->forceFill(['id' => 1]);
+
+    $guard('eloquent.deleting: x', [$softDeletingUser]);
+    $guard('eloquent.deleting: x', [Principal::query()->firstOrFail()]);
+    $guard('eloquent.deleting: x', ['not a model']);
+    $guard('eloquent.deleting: x', [ErasableUser::query()->findOrFail(2)]);
+    // Another model whose key happens to equal the user's id.
+    $guard('eloquent.deleting: x', [(new class extends Model {})->forceFill(['id' => 1])]);
+
+    expect(fn () => $guard('eloquent.deleting: x', [$softDeletingUser->asForceDeleting()]))->toThrow(UserHasPrincipalsException::class);
+
+    config()->set('auth.providers.users.model', null);
+    $guard('eloquent.deleting: x', [ErasableUser::query()->findOrFail(1)]);
+
+    Schema::dropIfExists('principals');
+    config()->set('auth.providers.users.model', ErasableUser::class);
+    $guard('eloquent.deleting: x', [ErasableUser::query()->findOrFail(1)]);
+
+    expect(true)->toBeTrue();
 });

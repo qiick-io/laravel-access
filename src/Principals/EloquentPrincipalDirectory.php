@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Qiick\Access\Principals;
 
+use Closure;
 use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Contracts\Config\Repository as ConfigRepository;
 use Illuminate\Contracts\Events\Dispatcher;
@@ -35,23 +36,26 @@ final class EloquentPrincipalDirectory implements PrincipalDirectory
 
     public function forMember(Authenticatable $user, ?string $organisationId): Principal
     {
-        $this->assertOrganisationAllowed($organisationId);
+        $organisationId = $this->normalisedOrganisationId($organisationId);
 
         // The membership unique index makes this idempotent under concurrency.
-        $principal = $this->query()->createOrFirst(
+        $principal = Principal::unguarded(fn (): Principal => $this->query()->createOrFirst(
             ['type' => 'user', 'user_id' => $user->getAuthIdentifier(), 'organisation_id' => $organisationId],
             ['name' => $this->displayName($user)],
-        );
+        ));
 
         if ($principal->deactivation_reason === DeactivationReason::Erased) {
             throw new LogicException('The principal was erased and cannot be reactivated; a new principal needs a new decision (C17).');
         }
 
-        if ($principal->deactivated_at !== null) {
-            $principal->forceFill(['deactivated_at' => null, 'deactivation_reason' => null])->save();
-        }
+        // Only an offboarding is undone by a new membership: an admin, owner
+        // or expiry deactivation outlives the next login (review N7). The
+        // conditional update cannot undo an erasure committed meanwhile.
+        $this->query()->whereKey($principal->id)
+            ->where('deactivation_reason', DeactivationReason::Offboarded->value)
+            ->update(['deactivated_at' => null, 'deactivation_reason' => null]);
 
-        return $this->announceIfCreated($principal);
+        return $this->announceIfCreated($principal->refresh());
     }
 
     public function createService(
@@ -74,38 +78,39 @@ final class EloquentPrincipalDirectory implements PrincipalDirectory
             throw new InvalidArgumentException("Principal type [{$type}] is not listed in access.principals.types.");
         }
 
-        $this->assertOrganisationAllowed($organisationId);
+        $organisationId = $this->normalisedOrganisationId($organisationId);
 
-        if ($owner !== null && ! $this->isOwnerChainShort($owner->id)) {
-            throw new InvalidArgumentException('The owner chain is cyclic or deeper than eight principals.');
+        if ($owner !== null) {
+            $this->assertUsableOwner($owner, $organisationId);
         }
 
-        $principal = $this->query()->create([
+        $principal = Principal::unguarded(fn (): Principal => $this->query()->create([
             'type' => $type,
             'organisation_id' => $organisationId,
             'name' => $name,
             'owner_principal_id' => $owner?->id,
             'created_by' => $createdBy?->getAuthIdentifier(),
             'metadata' => $metadata,
-        ]);
+        ]));
 
         return $this->announceIfCreated($principal);
     }
 
     public function instance(string $type, string $name): Principal
     {
+        // Instance types exist only with required organisations, so the
+        // singleton index always backs this (review B5).
         if (! in_array($type, MigrationSettings::instanceTypes(), true)) {
             throw new InvalidArgumentException("Principal type [{$type}] is not listed in access.principals.instance_types.");
         }
 
-        // The locked read keeps calls idempotent where no singleton index
-        // exists (organisations not required); the index covers races elsewhere.
-        $principal = $this->database->connection()->transaction(function () use ($type, $name): Principal {
-            $identity = ['type' => $type, 'organisation_id' => null, 'user_id' => null];
+        if ($this->query()->where('type', $type)->whereNull('organisation_id')->whereNotNull('user_id')->exists()) {
+            throw new LogicException("An instance-level [{$type}] principal has a user; the organisation rule is missing from the schema (review B6).");
+        }
 
-            return $this->query()->where($identity)->lockForUpdate()->first()
-                ?? $this->query()->createOrFirst($identity, ['name' => $name]);
-        });
+        // The singleton index makes this idempotent under concurrency: a
+        // concurrent insert that wins is returned instead of failing.
+        $principal = Principal::unguarded(fn (): Principal => $this->query()->createOrFirst(['type' => $type], ['name' => $name]));
 
         return $this->announceIfCreated($principal);
     }
@@ -113,19 +118,42 @@ final class EloquentPrincipalDirectory implements PrincipalDirectory
     public function deactivate(Principal $principal, DeactivationReason $reason): void
     {
         $ownedIds = $this->database->connection()->transaction(function () use ($principal, $reason): array {
-            $now = now();
-            $principal->forceFill(['deactivated_at' => $now, 'deactivation_reason' => $reason])->save();
-            $ownedIds = $this->ownedIds($principal->id);
+            // An already deactivated principal keeps its reason and time, so an
+            // erased tombstone is never rewritten (review B3).
+            $this->query()->whereKey($principal->id)->whereNull('deactivated_at')
+                ->update(['deactivated_at' => now(), 'deactivation_reason' => $reason->value]);
 
-            $this->query()->whereIn('id', $ownedIds)->whereNull('deactivated_at')->update([
-                'deactivated_at' => $now,
-                'deactivation_reason' => DeactivationReason::OwnerDeactivated->value,
-            ]);
-
-            return $ownedIds;
+            return $this->deactivateOwned($principal->id);
         });
 
-        $this->events->dispatch(new PrincipalDeactivated($principal, $reason, $ownedIds));
+        $this->events->dispatch(new PrincipalDeactivated($principal->refresh(), $reason, $ownedIds));
+    }
+
+    public function eraseUser(Authenticatable $user, Closure $deleteUser): void
+    {
+        $erased = $this->database->connection()->transaction(function () use ($user, $deleteUser): array {
+            $erased = [];
+
+            foreach ($this->query()->where('user_id', $user->getAuthIdentifier())->lockForUpdate()->get() as $principal) {
+                $isErasedAlready = $principal->deactivation_reason === DeactivationReason::Erased;
+                $principal->forceFill([
+                    'user_id' => null,
+                    'name' => 'Erased user',
+                    'deactivated_at' => $isErasedAlready ? $principal->deactivated_at : now(),
+                    'deactivation_reason' => DeactivationReason::Erased,
+                ])->save();
+
+                $erased[] = [$principal, $this->deactivateOwned($principal->id)];
+            }
+
+            $deleteUser($user);
+
+            return $erased;
+        });
+
+        foreach ($erased as [$principal, $ownedIds]) {
+            $this->events->dispatch(new PrincipalDeactivated($principal, DeactivationReason::Erased, $ownedIds));
+        }
     }
 
     public function isActive(string $principalId): bool
@@ -150,7 +178,73 @@ final class EloquentPrincipalDirectory implements PrincipalDirectory
     {
         return $principal->deactivated_at === null
             && ($principal->expires_at === null || $principal->expires_at->isFuture())
-            && ($principal->type !== 'user' || $principal->user_id !== null);
+            && ($principal->type !== 'user' || $principal->user_id !== null)
+            && $this->isAllowedAtItsLevel($principal);
+    }
+
+    /**
+     * Fails closed on an instance-level row the organisation rule forbids,
+     * even if the schema lost the rule (review B6).
+     */
+    private function isAllowedAtItsLevel(Principal $principal): bool
+    {
+        if ($principal->organisation_id !== null || ! MigrationSettings::isOrganisationRequired()) {
+            return true;
+        }
+
+        return $principal->user_id === null && in_array($principal->type, MigrationSettings::instanceTypes(), true);
+    }
+
+    /**
+     * Deactivates every active principal owned directly or transitively.
+     *
+     * @return list<string> every owned principal, active or not
+     */
+    private function deactivateOwned(string $principalId): array
+    {
+        $ownedIds = $this->ownedIds($principalId);
+
+        $this->query()->whereIn('id', $ownedIds)->whereNull('deactivated_at')->update([
+            'deactivated_at' => now(),
+            'deactivation_reason' => DeactivationReason::OwnerDeactivated->value,
+        ]);
+
+        return $ownedIds;
+    }
+
+    /**
+     * @throws InvalidArgumentException when the owner is in another organisation,
+     *                                  inactive, or its chain is too deep or cyclic
+     */
+    private function assertUsableOwner(Principal $owner, ?string $organisationId): void
+    {
+        // Ownership never crosses tenants (API1 / BOLA, review B4).
+        if ($owner->organisation_id !== $organisationId) {
+            throw new InvalidArgumentException('A principal can only be owned by a principal of the same organisation.');
+        }
+
+        if (! $this->isOwnerChainShort($owner->id)) {
+            throw new InvalidArgumentException('The owner chain is cyclic or deeper than eight principals.');
+        }
+
+        if (! $this->isActive($owner->id)) {
+            throw new InvalidArgumentException('The owner principal is not active.');
+        }
+    }
+
+    /**
+     * UUIDs compare case-insensitively on PostgreSQL and MySQL but not on
+     * SQLite, so one membership must never split by letter case (review N5).
+     *
+     * @throws InvalidArgumentException when organisations are required and none is given
+     */
+    private function normalisedOrganisationId(?string $organisationId): ?string
+    {
+        if ($organisationId === null && MigrationSettings::isOrganisationRequired()) {
+            throw new InvalidArgumentException('An organisation is required for this principal (access.principals.organisation_required).');
+        }
+
+        return $organisationId === null ? null : strtolower($organisationId);
     }
 
     /**
@@ -205,16 +299,6 @@ final class EloquentPrincipalDirectory implements PrincipalDirectory
         }
 
         return $principal;
-    }
-
-    /**
-     * @throws InvalidArgumentException when organisations are required and none is given
-     */
-    private function assertOrganisationAllowed(?string $organisationId): void
-    {
-        if ($organisationId === null && MigrationSettings::isOrganisationRequired()) {
-            throw new InvalidArgumentException('An organisation is required for this principal (access.principals.organisation_required).');
-        }
     }
 
     /**

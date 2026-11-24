@@ -82,23 +82,43 @@ Pre-1.0 products delete their own `create_principals_table` (or the
 
 Products create and deactivate principals through
 `Qiick\Access\Principals\PrincipalDirectory` (bound by the provider), never
-by writing rows directly:
+by writing rows directly; the `Principal` model is fully guarded.
 
 - `forMember($user, $organisationId)`: the user's principal in an
-  organisation (`null`: instance level). Idempotent; reactivates an
-  offboarded principal, refuses an `erased` one (GDPR tombstone);
+  organisation (`null`: instance level). Idempotent. A principal deactivated
+  as `offboarded` is reactivated; one deactivated for any other reason
+  (`admin`, `owner_deactivated`, `expired`) is returned as it is, inactive, so
+  an administrator's decision outlives the next login; an `erased` one throws.
+  Organisation ids are stored in lower case;
 - `createService($type, $organisationId, $name, $owner, $createdBy,
   $metadata)`: a service or agent account. The type must be listed in
   `access.principals.types`; `user` and the instance types have their own
-  methods; an owner chain longer than eight or cyclic is refused;
-- `instance($type, $name)`: the singleton of a declared instance type;
-- `deactivate($principal, DeactivationReason)`: deactivates the principal and
-  everything it owns in one transaction, then dispatches
-  `PrincipalDeactivated` with the owned ids. **Revoke their API keys in a
-  listener** (qiick/laravel-api-keys reason `owner`);
+  methods; the owner must be active, in the same organisation, and its chain
+  at most eight principals long and acyclic;
+- `instance($type, $name)`: the singleton of a declared instance type (only
+  with `organisation_required`). It is returned even when deactivated: check
+  `isActive()` before use;
+- `deactivate($principal, DeactivationReason)`: deactivates the principal,
+  unless it already is (an erased tombstone is never rewritten), and every
+  active principal it owns, in one transaction. `PrincipalDeactivated` (with
+  the owned ids) is dispatched after the surrounding transaction commits.
+  **Revoke their API keys in a listener** (qiick/laravel-api-keys reason
+  `owner`);
+- `eraseUser($user, fn ($user) => $user->delete())`: GDPR erasure in one
+  transaction. Every principal of the user becomes an `erased` tombstone
+  (user unlinked, name anonymised), the principals it owns are deactivated,
+  then the closure deletes the user. `principals.user_id` is `ON DELETE
+  RESTRICT`, so deleting a user who still has principals any other way throws
+  `UserHasPrincipalsException` (a soft delete is allowed);
 - `isActive($principalId)`: the use-time check behind a key: not deactivated,
-  not expired, a `user` principal still has its user, and every owner up the
-  chain is active. Never cached.
+  not expired, a `user` principal still has its user, an instance-level row
+  is one the organisation rule allows, and every owner up the chain is active.
+  Never cached; it reads one row per owner, so at most eight queries.
+
+The directory reads `access.principals.organisation_required` and
+`instance_types` at runtime while the database rule was fixed when the
+migration ran: keep them unchanged after migrating, or the database refuses
+what the directory allows with a driver error.
 
 `access.principals.model` may point at a subclass of
 `Qiick\Access\Principals\Principal` for product relations (API keys,

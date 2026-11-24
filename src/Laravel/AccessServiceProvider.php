@@ -30,6 +30,7 @@ use Qiick\Access\GateBefore;
 use Qiick\Access\Http\EnsureTwoFactorIsEnabled;
 use Qiick\Access\Principals\EloquentPrincipalDirectory;
 use Qiick\Access\Principals\PrincipalDirectory;
+use Qiick\Access\Principals\UserDeletionGuard;
 use Qiick\Access\SuperAdminGuard;
 use RuntimeException;
 use Spatie\Permission\Events\PermissionAttachedEvent;
@@ -179,6 +180,11 @@ final class AccessServiceProvider extends ServiceProvider
         $this->registerRequestClears();
         $this->registerQueueActorPropagation();
         $this->registerPermissionEventClears();
+
+        if ($config->get('access.migrations.principals', true) === true) {
+            Event::listen('eloquent.deleting: *', (new UserDeletionGuard)(...));
+        }
+
         $this->registerReservedRoleNameGuard();
     }
 
