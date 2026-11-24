@@ -11,6 +11,7 @@ use Illuminate\Contracts\Config\Repository as ConfigRepository;
 use Illuminate\Contracts\Foundation\Application;
 use Illuminate\Database\DatabaseManager;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Events\MigrationsEnded;
 use Illuminate\Queue\Events\JobFailed;
 use Illuminate\Queue\Events\JobProcessed;
 use Illuminate\Queue\Events\JobProcessing;
@@ -186,6 +187,17 @@ final class AccessServiceProvider extends ServiceProvider
         }
 
         $this->registerReservedRoleNameGuard();
+
+        // SQLite drops a table's triggers whenever a migration rebuilds it, so
+        // the package rules are restored after every migrate run (review R3).
+        // A dry run (--pretend) must not execute DDL (review N20). Only the
+        // default connection is restored, which is the migrated one under
+        // `migrate --database` (review N21).
+        Event::listen(MigrationsEnded::class, static function (MigrationsEnded $event): void {
+            if (($event->options['pretend'] ?? false) !== true) {
+                AccessSchema::ensureConstraints();
+            }
+        });
     }
 
     private function registerGateBefore(): void

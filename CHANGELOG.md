@@ -63,7 +63,7 @@ guard (such as a Filament panel guard) goes in `ACCESS_WEB_GUARDS`.
   have neither organisation nor user, declaratively on all four engines.
   `AccessSchema::ensureConstraints()` recreates those rules (and the
   user_groups instance rule) after a product migration rebuilds the table on
-  SQLite. `access.migrations.load` splits into `access.migrations.groups` and
+  SQLite; the provider calls it after every `migrate` run. `access.migrations.load` splits into `access.migrations.groups` and
   `access.migrations.principals`; boot fails while the old key is set.
 - `PrincipalDirectory` (design §15.4) with `Principal` (UUID v7 model,
   owner/owned/user relations, `active()` and `forOrganisation()` scopes),
@@ -79,6 +79,15 @@ guard (such as a Filament panel guard) goes in `ACCESS_WEB_GUARDS`.
   `UserDeletionGuard` refuses any other delete of a user with principals
   (`UserHasPrincipalsException`). The model is fully guarded and
   `PrincipalDeactivated` is dispatched after commit.
+- `Testing\AssertsPrincipalsSchema` (design §15.6): checks the principals
+  columns and proves with rolled-back writes that the database refuses a
+  second membership principal (including the NULL-organisation case), the
+  deletion of a user who has a principal, the deletion of an organisation that
+  has principals, an organisation-less principal when organisations are
+  required, and for each declared instance type a principal with a user and a
+  second principal, so config and schema cannot drift. It uses the product's
+  user and organisation factories, so it runs with the organisation foreign
+  key in place, and counts only integrity refusals.
 
 - Test-only conformance helpers (design §2.1 / §13.1): `Testing\ProbeAbility`
   registers the AC2 probe ability (defined as `false`, refuses to register

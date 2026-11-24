@@ -13,17 +13,27 @@ use Illuminate\Support\Facades\DB;
  *
  * SQLite has no ALTER TABLE ADD CONSTRAINT, so the rules are triggers there,
  * and SQLite drops every trigger of a table when Laravel rebuilds it (adding
- * a foreign key, changing a column). A product migration that touches
- * user_groups or principals must therefore call ensureConstraints() after
- * its change; on the other engines the rules are CHECK constraints that
- * survive, and the call only confirms them.
+ * a foreign key, changing a column). AccessServiceProvider therefore calls
+ * ensureConstraints() after every migrate run (MigrationsEnded), and product
+ * migrations may call it themselves; on the other engines the rules are
+ * CHECK constraints that survive, and the call only confirms them.
  *
  * - user_groups: is_instance only with a NULL organisation (AC17 / C75);
  * - principals, when access.principals.organisation_required is true: only
  *   the access.principals.instance_types may lack an organisation, and those
  *   must also lack a user (design §15.3, C2).
  *
- * Both rules read the config when they run, as the migrations do.
+ * Both rules read the config when they run, as the migrations do: on SQLite a
+ * config changed after migrating gives recreated triggers the new rule, while
+ * the CHECK on the other engines keeps the rule it was created with. Keep the
+ * config unchanged after migrating.
+ *
+ * Each rule applies only to a table the package owns (access.migrations.groups
+ * / access.migrations.principals true); a product's own user_groups is never
+ * touched. Rules are ensured on the given (default: the default) connection.
+ *
+ * Connections with a table prefix are not supported: the rule SQL and the
+ * catalogue lookups use the bare table names.
  *
  * @api
  */
@@ -37,7 +47,10 @@ final class AccessSchema
         $connection ??= DB::connection();
         $schema = $connection->getSchemaBuilder();
 
-        if ($schema->hasTable('user_groups')) {
+        // Only tables the package owns: a product that keeps its own
+        // user_groups (access.migrations.groups = false) never gets the
+        // package rule added to it (review R6).
+        if (config('access.migrations.groups', true) === true && $schema->hasTable('user_groups')) {
             $isNumericBoolean = $connection->getDriverName() !== 'pgsql';
 
             self::ensureRule(
@@ -50,7 +63,7 @@ final class AccessSchema
             );
         }
 
-        if ($schema->hasTable('principals') && MigrationSettings::isOrganisationRequired()) {
+        if (config('access.migrations.principals', true) === true && $schema->hasTable('principals') && MigrationSettings::isOrganisationRequired()) {
             $instanceTypes = MigrationSettings::instanceTypes();
 
             self::ensureRule(
@@ -88,7 +101,8 @@ final class AccessSchema
     private static function hasCheckConstraint(Connection $connection, string $table, string $name): bool
     {
         if ($connection->getDriverName() === 'pgsql') {
-            return $connection->table('pg_constraint')->where('conname', $name)->exists();
+            // By table too: another schema may hold a constraint of that name (review N13).
+            return $connection->table('pg_constraint')->where('conname', $name)->whereRaw('conrelid = ?::regclass', [$table])->exists();
         }
 
         return $connection->table('information_schema.TABLE_CONSTRAINTS')

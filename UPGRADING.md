@@ -14,8 +14,8 @@ any follow-on breaks will land in this file.
   `load` to `false` sets `groups` to `false`; boot fails while `load` is still
   set.
 - `principals.user_id` is `ON DELETE RESTRICT`: deleting a user who has a
-  principal fails. Product migrations that alter `principals` or
-  `user_groups` call `AccessSchema::ensureConstraints()` afterwards.
+  principal fails. After every `migrate` run the provider restores the table
+  rules SQLite drops on a rebuild (`AccessSchema::ensureConstraints()`).
 - Every user deletion flow (Fortify / Jetstream `DeleteUser`, admin actions,
   console commands, `model:prune`) goes through
   `PrincipalDirectory::eraseUser($user, fn ($user) => $user->forceDelete())`.

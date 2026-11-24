@@ -70,12 +70,17 @@ The package also ships the `principals` table (design §15), loaded while
   and are singletons per type. The config is read when the migration runs:
   changing it later changes nothing in the database.
 
-**After any product migration that alters `principals` or `user_groups`**
-(adding the organisation foreign key, for example), call
-`Qiick\Access\Laravel\AccessSchema::ensureConstraints()` in the same
-migration. SQLite rebuilds the table for such changes and drops its triggers,
-which carry the organisation and instance-group rules there; the call
-recreates them and is a no-op where the rules already exist.
+SQLite rebuilds a table when a migration alters it (adding the organisation
+foreign key, for example) and drops its triggers, which carry the
+organisation and instance-group rules there. The provider calls
+`Qiick\Access\Laravel\AccessSchema::ensureConstraints()` after every
+`migrate` run (`MigrationsEnded`, skipped for `--pretend`), which recreates
+them and is a no-op where the rules already exist. A product migration that
+alters `principals` or `user_groups` should still call it at its end: when a
+later migration of the same batch fails, `MigrationsEnded` never fires. The
+rules apply only to tables the package owns (`access.migrations.groups` /
+`access.migrations.principals`), and only on the migrated connection.
+Connections with a table prefix are not supported.
 
 Pre-1.0 products delete their own `create_principals_table` (or the
 `principals` block of a larger migration) and recreate the database.
@@ -113,7 +118,9 @@ by writing rows directly; the `Principal` model is fully guarded.
   mint a fresh principal past the tombstone, never commits.
   `principals.user_id` is `ON DELETE RESTRICT`, so deleting a user who still
   has principals any other way throws `UserHasPrincipalsException` (a soft
-  delete is allowed, since it keeps the row);
+  delete is allowed, since it keeps the row). The users model and the
+  principal model must use one database connection: `eraseUser()` refuses
+  otherwise, because the user delete would wait on its own locks;
 - `isActive($principalId)`: the use-time check behind a key: not deactivated,
   not expired, a `user` principal still has its user, an instance-level row
   is one the organisation rule allows, and every owner up the chain is active.
@@ -127,6 +134,31 @@ what the directory allows with a driver error.
 `access.principals.model` may point at a subclass of
 `Qiick\Access\Principals\Principal` for product relations (API keys,
 grants).
+
+Prove the schema on the freshly migrated database (design §15.6, P9) with
+`Qiick\Access\Testing\AssertsPrincipalsSchema`:
+
+```php
+$probe = new AssertsPrincipalsSchema(
+    DB::connection(),
+    fn (): int => User::factory()->create()->id,
+    // Products with an organisations table and its foreign key:
+    fn (): string => Organisation::factory()->create()->id,
+    fn (string $organisationId) => DB::table('organisations')->where('id', $organisationId)->delete(),
+);
+$probe->assertShape();
+$probe->assertConstraints();
+```
+
+`assertConstraints()` tries, inside rolled-back transactions, a second
+principal for one membership (and one instance-level user when organisations
+are optional), deleting a user who still has a principal, deleting an
+organisation that still has principals (when the delete closure is given), an
+organisation-less principal when organisations are required, and for each
+declared instance type a principal with a user and a second principal. It
+fails if the database accepts any of them; only integrity refusals count, so
+any other database error propagates. Run it on every engine the product
+supports, SQLite included.
 
 Products generate `user_groups.public_id` as **UUID v7** in their Eloquent
 model / factory (the package migration only declares the column). The
