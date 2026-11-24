@@ -31,7 +31,8 @@ Package defaults exist for `ContainerActorResolver`,
 
 Everything tagged `@api` in `src/` is public and follows semantic versioning
 from `1.0.0`. Everything tagged `@internal` (`AccessBootChecks`,
-`MigrationSettings`, `ReservedRoleNameGuard`, `UserDeletionGuard`) can change
+`GateBeforeSelector`, `MigrationSettings`, `ReservedRoleNameGuard`,
+`UserDeletionGuard`) can change
 in any release: products never call or extend it. Besides the contracts
 above, the public classes are:
 
@@ -65,9 +66,14 @@ their meaning are public; renaming or removing one is a breaking change.
 | `access.users_table` | null (the users model's table) | Users table for the foreign keys of `user_group_user.user_id`, `principals.user_id` and `principals.created_by`, and for the erasure check |
 | `access.group_member_model` | null (`auth.providers.users.model`) | The only model that gets group roles |
 | `access.two_factor.exempt_route_names` | logout, security, two-factor, passkey, password confirmation | Routes `EnsureTwoFactorIsEnabled` skips |
+| `access.use_package_gate` | `ACCESS_USE_PACKAGE_GATE`, `true` | Externa only, removed in v2: `false` lets `LegacyGateBefore` decide |
+| `access.gate_shadow` | `ACCESS_GATE_SHADOW`, `false` | Externa only, removed in v2: also run the other callback and log disagreements |
+| `access.gate_shadow_log_channel` | `ACCESS_GATE_SHADOW_LOG_CHANNEL`, null (default channel) | Externa only, removed in v2: the shadow log channel |
 
 Environment variables: `ACCESS_API_GUARDS`, `ACCESS_WEB_GUARDS` (both
-comma-separated) and `ACCESS_PERMISSION_ENUM`.
+comma-separated), `ACCESS_PERMISSION_ENUM`, and, for externa until v2,
+`ACCESS_USE_PACKAGE_GATE`, `ACCESS_GATE_SHADOW` and
+`ACCESS_GATE_SHADOW_LOG_CHANNEL`.
 
 ## Events and exceptions
 
