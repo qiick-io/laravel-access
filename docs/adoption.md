@@ -327,6 +327,11 @@ switches at their defaults. Both are removed in v2.
   callback and it is not bound.
 
 The §9.4 rule stands: the default flips only after a full minor of shadow
-logs with no mismatch other than the ones the design predicts.
+logs with no mismatch other than the ones the design predicts. A failure of
+the shadow log itself is swallowed silently (its message could carry
+secrets), so an empty log proves nothing on its own: before counting, provoke
+one known mismatch in each environment (for example a legacy callback that
+answers differently for a test-only ability) and check that it reaches the
+channel.
 
 Feature PRs fill the package surface; this page tracks the product-side steps.
