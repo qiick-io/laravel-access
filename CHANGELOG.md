@@ -17,6 +17,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `src/` is now tagged `@api` or `@internal`; `UPGRADING.md` states the
   deprecation policy; the README threat model covers principals.
 
+- Externa compatibility switches (design §9.2 step 6 / §9.4, removed in v2):
+  `access.use_package_gate` chooses whether `GateBefore` or the product's
+  `LegacyGateBefore` decides, still as the single `Gate::before` (AC1), and
+  `access.gate_shadow` runs the other one too and logs disagreements without
+  user data or secrets (`access.gate_shadow_log_channel`). Boot fails on a
+  non-boolean switch or a missing legacy binding.
+
 ## [0.1.0] - 2026-11-24
 
 First tagged pre-release. Public APIs may still change in any 0.x minor.

@@ -68,7 +68,7 @@ Products must bind `RoleCatalog`, `TwoFactorPolicy`, `TwoFactorResponder` and
 | A principal owned across organisations, or a deactivated owner still counting | Owners must be active and in the same organisation; `isActive()` walks the owner chain uncached and counts a chain longer than eight (a cycle included) as inactive; deactivation cascades to every owned principal in one transaction and `PrincipalDeactivated` fires after commit |
 | Two principals for one membership, two instance principals of one type, or an organisation-less member | Membership unique index on every engine (P1); with `access.principals.organisation_required`, the instance singleton index and the organisation CHECK (triggers on SQLite, P2, P3); race-safe `forMember()` and `instance()` |
 | Principals config drifting from the schema | `Testing\AssertsPrincipalsSchema` proves the refusals on the product's migrated database; P9 |
-| Supply chain | Pinned Actions, `composer audit`, no lockfile, alerts-only Dependabot |
+| Supply chain | Pinned Actions, `composer audit`, no lockfile, weekly grouped Dependabot updates into `develop` (Composer and Actions) |
 
 ## Development
 
