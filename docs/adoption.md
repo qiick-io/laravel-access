@@ -316,6 +316,12 @@ switches at their defaults. Both are removed in v2.
   decisions, never user ids or argument values. An exception in the shadowed
   callback is logged as `access.gate_shadow_failed` (exception class only)
   and never changes the decision.
+- With `access.use_package_gate` false the legacy callback decides alone,
+  exactly as before the package: `GateBefore`'s API-actor rules (no
+  super-admin pass for keys, grants and the public door) do not apply until
+  the switch flips. The shadow log shows each place where the package would
+  decide differently. The legacy callback receives the Gate's arguments
+  untouched, named keys included.
 - Both switches must be booleans (`true` / `false` in `.env`; `1` / `0` are
   strings and fail at boot), and boot fails when either needs the legacy
   callback and it is not bound.

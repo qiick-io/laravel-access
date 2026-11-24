@@ -25,7 +25,7 @@ interface LegacyGateBefore
      * Same contract as a Gate::before callback: true grants, false denies,
      * null abstains so the Gate continues to abilities and Policies.
      *
-     * @param  array<int, mixed>  $arguments
+     * @param  array<mixed>  $arguments
      */
     public function decide(?Authenticatable $user, string $ability, array $arguments = []): ?bool;
 }

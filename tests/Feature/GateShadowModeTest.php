@@ -2,18 +2,21 @@
 
 declare(strict_types=1);
 
-use Illuminate\Contracts\Auth\Access\Gate;
+use Illuminate\Contracts\Auth\Access\Gate as GateContract;
 use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Contracts\Config\Repository as ConfigRepository;
+use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\Log;
 use Psr\Log\LoggerInterface;
 use Qiick\Access\Contracts\ActorContext;
 use Qiick\Access\Contracts\ActorKind;
+use Qiick\Access\Contracts\ActorResolver;
 use Qiick\Access\Contracts\GroupRoleSource;
 use Qiick\Access\Contracts\LegacyGateBefore;
 use Qiick\Access\GateBefore;
 use Qiick\Access\Laravel\AccessBootChecks;
 use Qiick\Access\Laravel\AccessContext;
+use Qiick\Access\Laravel\AccessServiceProvider;
 use Qiick\Access\Laravel\GateBeforeSelector;
 use Qiick\Access\Tests\Support\FakePermissionEnum;
 use Qiick\Access\Tests\Support\PermissionedFakeUser;
@@ -47,6 +50,16 @@ final class FixedLegacyGateBefore implements LegacyGateBefore
         }
 
         return $this->decision;
+    }
+}
+
+final class ShadowPost {}
+
+final class ShadowPostPolicy
+{
+    public function update(?Authenticatable $user, ShadowPost $post): bool
+    {
+        return false;
     }
 }
 
@@ -142,7 +155,7 @@ it('never lets the shadowed callback fail the deciding one', function (): void {
     ));
 });
 
-it('hands both callbacks and the log a plain list of arguments', function (bool $isShadow): void {
+it('hands the legacy callback the Gate arguments untouched, and the log a list of their types', function (bool $isShadow): void {
     config()->set('access.use_package_gate', false);
     config()->set('access.gate_shadow', $isShadow);
     app()->instance(LegacyGateBefore::class, $legacy = new FixedLegacyGateBefore(true));
@@ -151,7 +164,7 @@ it('hands both callbacks and the log a plain list of arguments', function (bool 
 
     gateCallback()(new PermissionedFakeUser(2, ['member']), 'update', ['post' => $post]);
 
-    expect($legacy->receivedArguments)->toBe([$post]);
+    expect($legacy->receivedArguments)->toBe(['post' => $post]);
 
     if ($isShadow) {
         Log::shouldHaveReceived('warning')->once()->with('access.gate_shadow_mismatch', Mockery::on(
@@ -159,6 +172,72 @@ it('hands both callbacks and the log a plain list of arguments', function (bool 
         ));
     }
 })->with(['alone' => false, 'in shadow mode' => true]);
+
+it('decides through the Gate exactly as without shadow mode, Policies and named arguments included', function (array $arguments, bool $expected): void {
+    Gate::policy(ShadowPost::class, ShadowPostPolicy::class);
+    app()->instance(LegacyGateBefore::class, new FixedLegacyGateBefore(null));
+    $superAdmin = new PermissionedFakeUser(1, ['super-admin']);
+    AccessContext::enter(new ActorContext(ActorKind::WebSession, $superAdmin));
+    Log::spy();
+    $gate = app(GateContract::class);
+    $register = (new ReflectionMethod(AccessServiceProvider::class, 'registerGateBefore'))->getClosure(new AccessServiceProvider(app()));
+    $beforeCallbacks = (new ReflectionClass($gate))->getProperty('beforeCallbacks');
+    $decisions = [];
+
+    foreach ([false, true] as $isShadow) {
+        config()->set('access.gate_shadow', $isShadow);
+        $beforeCallbacks->setValue($gate, []);
+        $register();
+        $decisions[] = $gate->forUser($superAdmin)->allows('update', $arguments);
+    }
+
+    expect($decisions)->toBe([$expected, $expected]);
+})->with([
+    'named argument: super-admin passes' => [['post' => new ShadowPost], true],
+    'positional argument: the Policy decides' => [[new ShadowPost], false],
+]);
+
+it('keeps the decision when the shadow log or the actor lookup throws', function (string $failingService): void {
+    config()->set('access.gate_shadow', true);
+    app()->instance(LegacyGateBefore::class, new FixedLegacyGateBefore(null));
+
+    if ($failingService === 'log') {
+        Log::shouldReceive('warning')->andThrow(new RuntimeException('disk full'));
+    } else {
+        // GateBefore reads the actor too, so here it is the shadowed one:
+        // its failure and then the log context of that failure both throw.
+        config()->set('access.use_package_gate', false);
+        app()->instance(LegacyGateBefore::class, new FixedLegacyGateBefore(true));
+        $actors = Mockery::mock(ActorResolver::class);
+        $actors->shouldReceive('current')->andThrow(new RuntimeException('no actor'));
+        app()->instance(ActorResolver::class, $actors);
+    }
+
+    expect(gateCallback()(new PermissionedFakeUser(1, ['super-admin']), 'any-ability'))->toBeTrue();
+})->with(['log', 'actor resolver']);
+
+it('compares guest decisions too', function (): void {
+    config()->set('access.use_package_gate', false);
+    config()->set('access.gate_shadow', true);
+    app()->instance(LegacyGateBefore::class, new FixedLegacyGateBefore(true));
+    Log::spy();
+
+    expect(gateCallback()(null, 'any-ability'))->toBeTrue();
+    Log::shouldHaveReceived('warning')->once()->with('access.gate_shadow_mismatch', Mockery::on(
+        static fn (array $context): bool => $context['package_decision'] === null && $context['legacy_decision'] === true,
+    ));
+});
+
+it('registers the legacy callback at boot when the package gate is off', function (): void {
+    config()->set('access.use_package_gate', false);
+    app()->instance(LegacyGateBefore::class, new FixedLegacyGateBefore(true));
+    $gate = app(GateContract::class);
+    (new ReflectionClass($gate))->getProperty('beforeCallbacks')->setValue($gate, []);
+
+    (new ReflectionMethod(AccessServiceProvider::class, 'registerGateBefore'))->invoke(new AccessServiceProvider(app()));
+
+    expect($gate->forUser(new PermissionedFakeUser(2, ['member']))->allows('any-ability'))->toBeTrue();
+});
 
 it('uses the default channel when the shadow channel is empty', function (): void {
     config()->set('access.gate_shadow', true);
@@ -214,7 +293,7 @@ it('fails at boot when the legacy callback is needed but not bound, or a switch 
 });
 
 it('keeps exactly one Gate::before callback (AC1)', function (): void {
-    $gate = app(Gate::class);
+    $gate = app(GateContract::class);
     $callbacks = (new ReflectionClass($gate))->getProperty('beforeCallbacks')->getValue($gate);
 
     expect($callbacks)->toHaveCount(1);

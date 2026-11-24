@@ -39,7 +39,7 @@ final class GateBeforeSelector
     ) {}
 
     /**
-     * @return Closure(?Authenticatable, string, array<int, mixed>=): ?bool
+     * @return Closure(?Authenticatable, string, array<mixed>=): ?bool
      */
     public function callback(): Closure
     {
@@ -49,36 +49,25 @@ final class GateBeforeSelector
         // Resolved per call, as GateBefore resolves its scoped dependencies.
         $legacyGate = fn (?Authenticatable $user, string $ability, array $arguments = []): ?bool => $this->app
             ->make(LegacyGateBefore::class)
-            ->decide($user, $ability, array_values($arguments));
+            ->decide($user, $ability, $arguments);
 
         if ($config->get('access.gate_shadow', false) !== true) {
             return $isPackageGate ? $packageGate : $legacyGate;
         }
 
         return function (?Authenticatable $user, string $ability, array $arguments = []) use ($isPackageGate, $packageGate, $legacyGate): ?bool {
-            // A list for both callbacks and the log, whatever keys the caller used.
-            $arguments = array_values($arguments);
             [$decidingGate, $shadowedGate] = $isPackageGate ? [$packageGate, $legacyGate] : [$legacyGate, $packageGate];
+            // Both callbacks get the Gate's arguments untouched: the Policy
+            // lookup reads $arguments[0], so reindexing named keys would
+            // change the decision (review of PR #20).
             $decision = $decidingGate($user, $ability, $arguments);
 
             try {
-                $shadowDecision = $shadowedGate($user, $ability, $arguments);
-            } catch (Throwable $exception) {
-                // The class only: a message can carry user data or secrets.
-                $this->logger()->warning('access.gate_shadow_failed', [
-                    ...$this->logContext($ability, $arguments),
-                    'exception' => $exception::class,
-                ]);
-
-                return $decision;
-            }
-
-            if ($shadowDecision !== $decision) {
-                $this->logger()->warning('access.gate_shadow_mismatch', [
-                    ...$this->logContext($ability, $arguments),
-                    'package_decision' => $isPackageGate ? $decision : $shadowDecision,
-                    'legacy_decision' => $isPackageGate ? $shadowDecision : $decision,
-                ]);
+                $this->compareInShadow($shadowedGate, $isPackageGate, $decision, $user, $ability, $arguments);
+            } catch (Throwable) {
+                // The comparison failed, its logging included (a broken
+                // channel, a throwing ActorResolver). Nothing safe is left to
+                // report, and the shadow must never change the decision.
             }
 
             return $decision;
@@ -86,10 +75,40 @@ final class GateBeforeSelector
     }
 
     /**
+     * Runs the shadowed callback and logs when it disagrees with $decision.
+     * Its own exception is logged by class only: a message can carry user
+     * data or secrets.
+     *
+     * @param  Closure(?Authenticatable, string, array<mixed>): ?bool  $shadowedGate
+     * @param  array<mixed>  $arguments
+     */
+    private function compareInShadow(Closure $shadowedGate, bool $isPackageGate, ?bool $decision, ?Authenticatable $user, string $ability, array $arguments): void
+    {
+        try {
+            $shadowDecision = $shadowedGate($user, $ability, $arguments);
+        } catch (Throwable $exception) {
+            $this->logger()->warning('access.gate_shadow_failed', [
+                ...$this->logContext($ability, $arguments),
+                'exception' => $exception::class,
+            ]);
+
+            return;
+        }
+
+        if ($shadowDecision !== $decision) {
+            $this->logger()->warning('access.gate_shadow_mismatch', [
+                ...$this->logContext($ability, $arguments),
+                'package_decision' => $isPackageGate ? $decision : $shadowDecision,
+                'legacy_decision' => $isPackageGate ? $shadowDecision : $decision,
+            ]);
+        }
+    }
+
+    /**
      * What design §9.4 allows in a shadow log: no user ids, names, argument
      * values or credential secrets.
      *
-     * @param  list<mixed>  $arguments
+     * @param  array<mixed>  $arguments
      * @return array{ability: string, actor_kind: string, credential_uuid: string|null, argument_types: list<string>}
      */
     private function logContext(string $ability, array $arguments): array
@@ -100,7 +119,7 @@ final class GateBeforeSelector
             'ability' => $ability,
             'actor_kind' => $actor->kind->value,
             'credential_uuid' => $actor->credentialUuid,
-            'argument_types' => array_map(get_debug_type(...), $arguments),
+            'argument_types' => array_values(array_map(get_debug_type(...), $arguments)),
         ];
     }
 
