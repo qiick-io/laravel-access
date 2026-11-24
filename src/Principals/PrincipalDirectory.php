@@ -82,4 +82,12 @@ interface PrincipalDirectory
      * every owner up the chain is active too. Never cached.
      */
     public function isActive(string $principalId): bool;
+
+    /**
+     * The principal followed by its owners up to the root, when isActive()
+     * holds for it; null otherwise. Never cached.
+     *
+     * @return list<Principal>|null
+     */
+    public function activeOwnerChain(string $principalId): ?array;
 }

@@ -8,6 +8,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `PrincipalCeiling::allows($principalId, $permission)` (design §15.4): the
+  owner ceiling behind an API key. The principal and its owner chain must be
+  active, the nearest `user` principal of the chain in the same organisation,
+  and that user must hold the permission there, read fresh and never through
+  super-admin; the team is switched for the check and always restored.
+  Unowned services and instance principals get `false`.
+  `PrincipalDirectory::activeOwnerChain()` returns the active chain.
+
 **Upgrade note:** boot now fails unless every guard in `auth.guards` is listed
 in `access.web_guards` (`ACCESS_WEB_GUARDS`, default `web`) or
 `access.api_guards` (`ACCESS_API_GUARDS`). Apps with Laravel Sanctum must set
