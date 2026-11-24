@@ -79,6 +79,11 @@ guard (such as a Filament panel guard) goes in `ACCESS_WEB_GUARDS`.
   `UserDeletionGuard` refuses any other delete of a user with principals
   (`UserHasPrincipalsException`). The model is fully guarded and
   `PrincipalDeactivated` is dispatched after commit.
+- `Testing\AssertsPrincipalsSchema` (design §15.6): checks the principals
+  columns and proves with rolled-back inserts that the database refuses a
+  second membership principal (including the NULL-organisation case), an
+  organisation-less principal when organisations are required, and a second
+  instance principal of each declared type, so config and schema cannot drift.
 
 - Test-only conformance helpers (design §2.1 / §13.1): `Testing\ProbeAbility`
   registers the AC2 probe ability (defined as `false`, refuses to register

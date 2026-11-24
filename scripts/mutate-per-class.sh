@@ -39,6 +39,7 @@ CLASSES=(
   'Qiick\Access\Principals\EloquentPrincipalDirectory'
   'Qiick\Access\Principals\Principal'
   'Qiick\Access\Principals\UserDeletionGuard'
+  'Qiick\Access\Testing\AssertsPrincipalsSchema'
 )
 
 CLASS_FILES=(
@@ -68,6 +69,7 @@ CLASS_FILES=(
   'src/Principals/EloquentPrincipalDirectory.php'
   'src/Principals/Principal.php'
   'src/Principals/UserDeletionGuard.php'
+  'src/Testing/AssertsPrincipalsSchema.php'
 )
 
 # Other mutation-target siblings ignored while mutating one class.

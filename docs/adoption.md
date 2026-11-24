@@ -128,6 +128,21 @@ what the directory allows with a driver error.
 `Qiick\Access\Principals\Principal` for product relations (API keys,
 grants).
 
+Prove the schema on the freshly migrated database (design §15.6, P9) with
+`Qiick\Access\Testing\AssertsPrincipalsSchema`:
+
+```php
+$probe = new AssertsPrincipalsSchema(DB::connection(), fn (): int => User::factory()->create()->id);
+$probe->assertShape();
+$probe->assertConstraints();
+```
+
+`assertConstraints()` inserts, inside a rolled-back transaction, a second
+principal for one membership (and one instance-level user when organisations
+are optional), an organisation-less principal when organisations are required,
+and a second principal of each declared instance type, and fails if the
+database accepts any of them. Run it on PostgreSQL and MySQL in CI.
+
 Products generate `user_groups.public_id` as **UUID v7** in their Eloquent
 model / factory (the package migration only declares the column). The
 membership FK targets `access.users_table` when set, otherwise the table from
