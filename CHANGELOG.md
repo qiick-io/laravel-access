@@ -8,14 +8,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-**Upgrade note:** boot now fails unless every guard in `auth.guards` is listed
-in `access.web_guards` (`ACCESS_WEB_GUARDS`, default `web`) or
-`access.api_guards` (`ACCESS_API_GUARDS`). Apps with Laravel Sanctum must set
-`ACCESS_API_GUARDS=sanctum` (Sanctum registers its `sanctum` guard), as must
-any app with its own token guard. Every request through `auth:sanctum` then
-resolves as an API actor, including a first-party SPA's cookie requests, so
-those SPA routes must use `auth:web` to stay web sessions. A custom session
-guard (such as a Filament panel guard) goes in `ACCESS_WEB_GUARDS`.
+## [0.1.0] - 2026-11-24
+
+First tagged pre-release. Public APIs may still change in any 0.x minor.
+
+### Upgrade notes
+
+This is the first version, so there is nothing to upgrade from; these are the
+first-install requirements (details in `docs/adoption.md` and `UPGRADING.md`):
+
+- `composer require qiick/laravel-access`, `php artisan vendor:publish
+  --tag=access-config`, then `php artisan migrate` (group tables and
+  `principals`; switch either set off with `access.migrations.groups` /
+  `access.migrations.principals`).
+- Bind `RoleCatalog`, `TwoFactorPolicy`, `TwoFactorResponder` and
+  `AuthorizationResponder`; set `permission.register_permission_check_method`
+  to `false` and `permission.events_enabled` to `true`. Boot fails otherwise.
+- Classify every guard: boot fails unless each guard in `auth.guards` is in
+  `access.web_guards` (`ACCESS_WEB_GUARDS`, default `web`) or
+  `access.api_guards` (`ACCESS_API_GUARDS`). Apps with Laravel Sanctum set
+  `ACCESS_API_GUARDS=sanctum`; every `auth:sanctum` request, a first-party
+  SPA's cookie requests included, is then an API actor, so SPA routes use
+  `auth:web`. A custom session guard (a Filament panel guard, for example)
+  goes in `ACCESS_WEB_GUARDS`.
+- Products with organisations set `access.principals.organisation_required`
+  (and any `instance_types`) **before** migrating, and add their own restrict
+  foreign key from `principals.organisation_id` to their organisations table.
+- `principals.user_id` is `ON DELETE RESTRICT`: route every user deletion
+  through `PrincipalDirectory::eraseUser($user, fn ($user) =>
+  $user->forceDelete())`.
 
 ### Security
 
@@ -184,3 +205,6 @@ guard (such as a Filament panel guard) goes in `ACCESS_WEB_GUARDS`.
   `composer audit`, SHA-pinned Actions, database smoke cells (SQLite / MySQL /
   MariaDB / PostgreSQL), drift-check + PR-title reusable workflows, and README
   header banners.
+
+[Unreleased]: https://github.com/qiick-io/laravel-access/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/qiick-io/laravel-access/releases/tag/v0.1.0
