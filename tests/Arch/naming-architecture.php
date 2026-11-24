@@ -42,6 +42,8 @@ return [
         'Enums' => [
             // Design §2.2: ActorKind (not *Enum); kept for Enums-namespace rule.
             'Qiick\Access\Contracts\ActorKind',
+            // Design §15.4: the public API name is DeactivationReason.
+            'Qiick\Access\Principals\DeactivationReason',
         ],
     ],
 

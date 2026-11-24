@@ -36,6 +36,9 @@ CLASSES=(
   'Qiick\Access\Testing\DirectPermissionCheckScanner'
   'Qiick\Access\Laravel\MigrationSettings'
   'Qiick\Access\Laravel\AccessSchema'
+  'Qiick\Access\Principals\EloquentPrincipalDirectory'
+  'Qiick\Access\Principals\Principal'
+  'Qiick\Access\Principals\UserDeletionGuard'
 )
 
 CLASS_FILES=(
@@ -62,6 +65,9 @@ CLASS_FILES=(
   'src/Testing/DirectPermissionCheckScanner.php'
   'src/Laravel/MigrationSettings.php'
   'src/Laravel/AccessSchema.php'
+  'src/Principals/EloquentPrincipalDirectory.php'
+  'src/Principals/Principal.php'
+  'src/Principals/UserDeletionGuard.php'
 )
 
 # Other mutation-target siblings ignored while mutating one class.
@@ -78,6 +84,11 @@ SIBLING_FILES=(
   'src/Contracts/ActiveUsers.php'
   'src/Contracts/ApiActorScopeCheck.php'
   'src/Laravel/AccessServiceProvider.php'
+  'src/Principals/PrincipalDirectory.php'
+  'src/Principals/DeactivationReason.php'
+  'src/Principals/PrincipalCreated.php'
+  'src/Principals/PrincipalDeactivated.php'
+  'src/Principals/UserHasPrincipalsException.php'
 )
 
 MIN="${MUTATE_MIN:-95}"

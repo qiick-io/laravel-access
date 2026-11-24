@@ -80,6 +80,54 @@ recreates them and is a no-op where the rules already exist.
 Pre-1.0 products delete their own `create_principals_table` (or the
 `principals` block of a larger migration) and recreate the database.
 
+Products create and deactivate principals through
+`Qiick\Access\Principals\PrincipalDirectory` (bound by the provider), never
+by writing rows directly; the `Principal` model is fully guarded.
+
+- `forMember($user, $organisationId)`: the user's principal in an
+  organisation (`null`: instance level). Idempotent. A principal deactivated
+  as `offboarded` is reactivated; one deactivated for any other reason
+  (`admin`, `owner_deactivated`, `expired`) is returned as it is, inactive, so
+  an administrator's decision outlives the next login; an `erased` one throws.
+  Organisation ids are stored in lower case;
+- `createService($type, $organisationId, $name, $owner, $createdBy,
+  $metadata)`: a service or agent account. The type must be listed in
+  `access.principals.types`; `user` and the instance types have their own
+  methods; the owner must be active, in the same organisation, and its chain
+  at most eight principals long and acyclic;
+- `instance($type, $name)`: the singleton of a declared instance type (only
+  with `organisation_required`). It is returned even when deactivated: check
+  `isActive()` before use;
+- `deactivate($principal, DeactivationReason)`: deactivates the principal,
+  unless it already is (an erased tombstone is never rewritten), and every
+  active principal it owns, in one transaction. `PrincipalDeactivated` (with
+  the owned ids) is dispatched after the surrounding transaction commits.
+  **Revoke their API keys in a listener** (qiick/laravel-api-keys reason
+  `owner`);
+- `eraseUser($user, fn ($user) => $user->forceDelete())`: GDPR erasure in
+  one transaction. Every principal of the user becomes an `erased` tombstone
+  (user unlinked, name anonymised), the principals it owns are deactivated,
+  then the closure hard-deletes the user. If the user row still exists
+  afterwards (a soft delete, or no delete), `eraseUser()` throws and rolls
+  everything back: an erasure that keeps the person's data, or lets a restore
+  mint a fresh principal past the tombstone, never commits.
+  `principals.user_id` is `ON DELETE RESTRICT`, so deleting a user who still
+  has principals any other way throws `UserHasPrincipalsException` (a soft
+  delete is allowed, since it keeps the row);
+- `isActive($principalId)`: the use-time check behind a key: not deactivated,
+  not expired, a `user` principal still has its user, an instance-level row
+  is one the organisation rule allows, and every owner up the chain is active.
+  Never cached; it reads one row per owner, so at most eight queries.
+
+The directory reads `access.principals.organisation_required` and
+`instance_types` at runtime while the database rule was fixed when the
+migration ran: keep them unchanged after migrating, or the database refuses
+what the directory allows with a driver error.
+
+`access.principals.model` may point at a subclass of
+`Qiick\Access\Principals\Principal` for product relations (API keys,
+grants).
+
 Products generate `user_groups.public_id` as **UUID v7** in their Eloquent
 model / factory (the package migration only declares the column). The
 membership FK targets `access.users_table` when set, otherwise the table from
