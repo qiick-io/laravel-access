@@ -202,11 +202,10 @@ final class AccessServiceProvider extends ServiceProvider
 
     private function registerGateBefore(): void
     {
-        $gate = $this->app->make(Gate::class);
-        // First-class callable so Laravel's ReflectionFunction accepts it, while
-        // getClosureThis() still identifies GateBefore for AC1.
-        $gateBefore = $this->app->make(GateBefore::class);
-        $gate->before($gateBefore(...));
+        // Exactly one callback (AC1). With the default switches it is the
+        // first-class callable of GateBefore, so getClosureThis() still
+        // identifies it; see GateBeforeSelector for the externa switches (§9).
+        $this->app->make(Gate::class)->before($this->app->make(GateBeforeSelector::class)->callback());
     }
 
     private function registerOctaneClears(): void
