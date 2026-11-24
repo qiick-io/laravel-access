@@ -41,6 +41,12 @@ guard (such as a Filament panel guard) goes in `ACCESS_WEB_GUARDS`.
 
 ### Changed
 
+- With `access.principals.model` set to a subclass on its own connection,
+  `PrincipalDirectory::deactivate()` runs its cascade in a transaction on
+  that connection (it used the default one), and `UserDeletionGuard` checks
+  that model's table on that connection (it checked `principals` on the
+  default one). The guard now refuses an invalid `access.principals.model`
+  with a `LogicException`, as the directory does, instead of skipping it.
 - The resolver reads role ids through the role model's own key (qualified in
   joins), not a hard-coded `id`. `access.web_guards` reads
   `ACCESS_WEB_GUARDS` (comma-separated, default `web`).

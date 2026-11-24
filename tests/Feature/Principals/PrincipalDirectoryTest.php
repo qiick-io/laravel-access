@@ -6,6 +6,7 @@ use Carbon\CarbonInterface;
 use Illuminate\Database\Eloquent\MassAssignmentException;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\SoftDeletes;
+use Illuminate\Database\Events\QueryExecuted;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Foundation\Auth\User;
 use Illuminate\Support\Facades\DB;
@@ -650,3 +651,79 @@ class UsersOnAnotherConnection extends ErasableUser
 {
     protected $connection = 'users_connection';
 }
+
+/**
+ * A principal model on its own connection, as access.principals.model allows.
+ */
+class PrincipalOnSideConnection extends Principal
+{
+    protected $connection = 'principals_side';
+}
+
+/**
+ * Builds the principals table (with its users table) on a separate in-memory
+ * SQLite connection and points access.principals.model at it.
+ */
+function migratePrincipalsOnSideConnection(): void
+{
+    config()->set('database.connections.principals_side', ['driver' => 'sqlite', 'database' => ':memory:', 'prefix' => '', 'foreign_key_constraints' => true]);
+    $defaultConnection = config('database.default');
+    config()->set('database.default', 'principals_side');
+
+    try {
+        Schema::create('users', function (Blueprint $table): void {
+            $table->id();
+            $table->string('email')->nullable();
+        });
+        DB::table('users')->insert([['id' => 1, 'email' => 'a@example.com']]);
+        migratePrincipals();
+    } finally {
+        config()->set('database.default', $defaultConnection);
+    }
+
+    config()->set('access.principals.model', PrincipalOnSideConnection::class);
+    app()->forgetInstance(PrincipalDirectory::class);
+}
+
+it('fails closed on an invalid principal model and ignores a non-Eloquent users model', function (): void {
+    config()->set('auth.providers.users.model', ErasableUser::class);
+    migratePrincipals();
+    $guard = new UserDeletionGuard;
+
+    foreach ([stdClass::class, 42] as $invalidModel) {
+        config()->set('access.principals.model', $invalidModel);
+
+        expect(fn () => $guard('eloquent.deleting: x', [ErasableUser::query()->findOrFail(2)]))
+            ->toThrow(LogicException::class, 'access.principals.model must be');
+    }
+
+    config()->set('auth.providers.users.model', stdClass::class);
+    $guard('eloquent.deleting: x', [new stdClass]);
+});
+
+it('deactivates inside a transaction on the principal model connection', function (): void {
+    migratePrincipalsOnSideConnection();
+    $owner = directory()->forMember(member(), null);
+    directory()->createService('agent', null, 'Agent', $owner);
+    $transactionLevels = [];
+    DB::connection('principals_side')->listen(static function (QueryExecuted $query) use (&$transactionLevels): void {
+        if (str_starts_with(strtolower($query->sql), 'update')) {
+            $transactionLevels[] = $query->connection->transactionLevel();
+        }
+    });
+
+    directory()->deactivate($owner, DeactivationReason::Offboarded);
+
+    expect($transactionLevels)->not->toBeEmpty()
+        ->and(array_unique($transactionLevels))->toBe([1]);
+});
+
+it('refuses deleting a user who has principals on the principal model connection', function (): void {
+    config()->set('auth.providers.users.model', ErasableUser::class);
+    migratePrincipalsOnSideConnection();
+    directory()->forMember(ErasableUser::query()->findOrFail(1), null);
+
+    // The default connection has no principals table: only the model's counts.
+    expect(fn () => ErasableUser::query()->findOrFail(1)->delete())->toThrow(UserHasPrincipalsException::class)
+        ->and(DB::table('users')->where('id', 1)->exists())->toBeTrue();
+});

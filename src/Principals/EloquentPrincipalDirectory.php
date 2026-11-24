@@ -119,7 +119,9 @@ final class EloquentPrincipalDirectory implements PrincipalDirectory
 
     public function deactivate(Principal $principal, DeactivationReason $reason): void
     {
-        $ownedIds = $this->database->connection()->transaction(function () use ($principal, $reason): array {
+        // On the principal model's connection, so the cascade is atomic where
+        // the rows live, not on the default connection.
+        $ownedIds = $this->query()->getConnection()->transaction(function () use ($principal, $reason): array {
             // An already deactivated principal keeps its reason and time, so an
             // erased tombstone is never rewritten (review B3).
             $this->query()->whereKey($principal->id)->whereNull('deactivated_at')
