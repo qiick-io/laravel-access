@@ -225,6 +225,132 @@ it('returns the instance principal another worker created concurrently (P3)', fu
         ->and(Principal::query()->count())->toBe(1);
 })->group('engines');
 
+/**
+ * Runs $work in $workers forked processes, each on its own database
+ * connection, all released at the same instant, and returns what each one
+ * returned (or the exception it threw) with the microtime it started and
+ * finished, so the caller can prove the runs overlapped. Real processes, not a
+ * second connection in one process: checklist item 5.
+ *
+ * @param  Closure(int): array<string, string>  $work
+ * @return list<array<string, mixed>>
+ */
+function raceInChildProcesses(int $workers, Closure $work): array
+{
+    // Unique per run: a stale file of a killed run can never pass as a result.
+    $resultDirectory = sys_get_temp_dir().'/qiick-access-principal-race-'.bin2hex(random_bytes(8));
+    mkdir($resultDirectory, 0777, true);
+    // The children open their own connections; closing ours first means no
+    // child can end the session the parent would reuse.
+    DB::disconnect();
+    // Far enough ahead for every fork to connect on a slow runner.
+    $startAt = microtime(true) + 2.0;
+    $childPids = [];
+
+    for ($worker = 0; $worker < $workers; $worker++) {
+        $childPid = pcntl_fork();
+
+        if ($childPid === -1) {
+            throw new RuntimeException('pcntl_fork failed');
+        }
+
+        if ($childPid === 0) {
+            try {
+                app()->forgetInstance(PrincipalDirectory::class);
+                DB::connection()->getPdo();
+
+                if ($startAt > microtime(true)) {
+                    time_sleep_until($startAt);
+                }
+
+                $startedAt = microtime(true);
+                $result = [...$work($worker), 'started_at' => $startedAt, 'finished_at' => microtime(true)];
+            } catch (Throwable $throwable) {
+                $result = ['error' => $throwable::class.': '.$throwable->getMessage()];
+            }
+
+            file_put_contents("{$resultDirectory}/{$worker}", json_encode($result, JSON_THROW_ON_ERROR | JSON_INVALID_UTF8_SUBSTITUTE));
+            // Skip PHPUnit's shutdown in the child; the parent owns the run.
+            posix_kill(getmypid(), SIGKILL);
+        }
+
+        $childPids[] = $childPid;
+    }
+
+    // A child stuck on a lock must fail the test, not hang the job.
+    $deadline = microtime(true) + 60;
+
+    while ($childPids !== [] && microtime(true) < $deadline) {
+        foreach ($childPids as $index => $childPid) {
+            if (pcntl_waitpid($childPid, $status, WNOHANG) !== 0) {
+                unset($childPids[$index]);
+            }
+        }
+
+        usleep(10_000);
+    }
+
+    foreach ($childPids as $childPid) {
+        posix_kill($childPid, SIGKILL);
+        pcntl_waitpid($childPid, $status);
+    }
+
+    $results = [];
+
+    for ($worker = 0; $worker < $workers; $worker++) {
+        $resultFile = "{$resultDirectory}/{$worker}";
+        $result = is_file($resultFile) ? json_decode((string) file_get_contents($resultFile), true) : null;
+        $results[] = is_array($result) ? $result : ['error' => "worker {$worker} left no readable result"];
+        @unlink($resultFile);
+    }
+
+    rmdir($resultDirectory);
+    DB::reconnect();
+
+    if ($childPids !== []) {
+        throw new RuntimeException(count($childPids).' race workers did not finish within 60 seconds.');
+    }
+
+    return $results;
+}
+
+it('gives concurrent processes one instance principal and one membership principal (P1, P3)', function (bool $isOrganisationRequired, ?string $organisationId): void {
+    if (! function_exists('pcntl_fork') || ! function_exists('posix_kill')) {
+        $this->markTestSkipped('pcntl and posix are required for the process race.');
+    }
+
+    if (DB::connection()->getDriverName() === 'sqlite') {
+        $this->markTestSkipped('An in-memory SQLite database cannot be shared between processes.');
+    }
+
+    migratePrincipals($isOrganisationRequired, $isOrganisationRequired ? ['instance_service'] : []);
+    // Twenty users raced by every worker: one call each would rarely collide.
+    DB::table('users')->insert(array_map(static fn (int $id): array => ['id' => $id], range(3, 20)));
+
+    $results = raceInChildProcesses(6, static fn (int $worker): array => [
+        ...($isOrganisationRequired ? ['instance' => directory()->instance('instance_service', "Worker {$worker}")->id] : []),
+        'members' => implode(',', array_map(
+            static fn (int $userId): string => directory()->forMember(member($userId), $organisationId)->id,
+            range(1, 20),
+        )),
+    ]);
+
+    expect(array_column($results, 'error'))->toBe([])
+        // The runs overlapped: the last worker started before the first one
+        // finished. Sequential runs would pass the other checks too.
+        ->and(max(array_column($results, 'started_at')))->toBeLessThan(min(array_column($results, 'finished_at')))
+        ->and(array_unique(array_column($results, 'members')))->toHaveCount(1)
+        ->and(Principal::query()->whereNotNull('user_id')->count())->toBe(20);
+
+    if ($isOrganisationRequired) {
+        expect(array_unique(array_column($results, 'instance')))->toHaveCount(1)
+            ->and(Principal::query()->where('type', 'instance_service')->count())->toBe(1);
+    }
+})->with([
+    'organisations required' => [true, '0195f7a2-6a3e-7c2d-9b1a-4f2e8d6c5a10'],
+    'instance-level membership' => [false, null],
+])->group('engines');
+
 it('deactivates a principal and everything it owns, in one transaction', function (): void {
     migratePrincipals();
     Event::fake([PrincipalDeactivated::class]);

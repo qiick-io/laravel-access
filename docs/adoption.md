@@ -304,7 +304,40 @@ strings such as `return 'can';` are not flagged.
 SQLite does not honour those locks; production deployments must use MySQL,
 MariaDB or PostgreSQL.
 
-`externa-core` keeps a compatibility flag and shadow comparison before the
-package `Gate::before` becomes the default (design §9).
+## Legacy `Gate::before` and shadow mode (externa only)
+
+`externa-core` switches to the package `Gate::before` behind a flag, after a
+shadow comparison (design §9.2 step 6 and §9.4). Other products leave both
+switches at their defaults. Both are removed in v2.
+
+- Bind `Qiick\Access\Contracts\LegacyGateBefore` to the product's old
+  `Gate::before` logic.
+- `access.use_package_gate` (`ACCESS_USE_PACKAGE_GATE`, default `true`)
+  chooses which callback decides. The package still registers exactly one
+  `Gate::before` (AC1).
+- `access.gate_shadow` (`ACCESS_GATE_SHADOW`, default `false`) also runs the
+  other callback and logs each disagreement as `access.gate_shadow_mismatch`
+  on `access.gate_shadow_log_channel` (default channel when null). The log
+  holds the ability, actor kind, credential UUID, argument types and both
+  decisions, never user ids or argument values. An exception in the shadowed
+  callback is logged as `access.gate_shadow_failed` (exception class only)
+  and never changes the decision.
+- With `access.use_package_gate` false the legacy callback decides alone,
+  exactly as before the package: `GateBefore`'s API-actor rules (no
+  super-admin pass for keys, grants and the public door) do not apply until
+  the switch flips. The shadow log shows each place where the package would
+  decide differently. The legacy callback receives the Gate's arguments
+  untouched, named keys included.
+- Both switches must be booleans (`true` / `false` in `.env`; `1` / `0` are
+  strings and fail at boot), and boot fails when either needs the legacy
+  callback and it is not bound.
+
+The §9.4 rule stands: the default flips only after a full minor of shadow
+logs with no mismatch other than the ones the design predicts. A failure of
+the shadow log itself is swallowed silently (its message could carry
+secrets), so an empty log proves nothing on its own: before counting, provoke
+one known mismatch in each environment (for example a legacy callback that
+answers differently for a test-only ability) and check that it reaches the
+channel.
 
 Feature PRs fill the package surface; this page tracks the product-side steps.
