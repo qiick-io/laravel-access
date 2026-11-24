@@ -8,6 +8,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- `PrincipalCreated` is dispatched after the surrounding transaction commits
+  (`ShouldDispatchAfterCommit`), as `PrincipalDeactivated` already was, so a
+  rolled-back creation never reaches a listener (AC-c).
+
 ## [0.1.0] - 2026-11-24
 
 First tagged pre-release. Public APIs may still change in any 0.x minor.
