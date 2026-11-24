@@ -1,6 +1,7 @@
 <?php
 
 declare(strict_types=1);
+use Qiick\Access\Principals\Principal;
 
 /*
  * Package defaults for qiick/laravel-access. Products publish this file and bind
@@ -100,8 +101,13 @@ return [
     | Principals
     |--------------------------------------------------------------------------
     |
-    | Read when the principals migration runs; changing them later changes
-    | nothing in the database (design §15.3).
+    | - model: the principal model; products may extend it and point here.
+    | - types: every principal type the product uses; products append their
+    |   own (and any instance types).
+    |
+    | organisation_required and instance_types are read when the principals
+    | migration runs; changing them later changes nothing in the database
+    | (design §15.3).
     | - organisation_required: true in products with organisations. Adds a
     |   CHECK: every principal needs an organisation, except the
     |   instance_types, which must have none (and no user where the engine
@@ -112,6 +118,8 @@ return [
     */
 
     'principals' => [
+        'model' => Principal::class,
+        'types' => ['user', 'service', 'agent'],
         'organisation_required' => false,
         'instance_types' => [],
     ],

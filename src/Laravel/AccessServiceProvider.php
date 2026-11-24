@@ -28,6 +28,8 @@ use Qiick\Access\Contracts\TwoFactorResponder;
 use Qiick\Access\EffectivePermissionResolver;
 use Qiick\Access\GateBefore;
 use Qiick\Access\Http\EnsureTwoFactorIsEnabled;
+use Qiick\Access\Principals\EloquentPrincipalDirectory;
+use Qiick\Access\Principals\PrincipalDirectory;
 use Qiick\Access\SuperAdminGuard;
 use RuntimeException;
 use Spatie\Permission\Events\PermissionAttachedEvent;
@@ -121,6 +123,14 @@ final class AccessServiceProvider extends ServiceProvider
         // would pin a warm resolver across requests.
         $this->app->singleton(GateBefore::class, function (Application $app): GateBefore {
             return new GateBefore($app);
+        });
+
+        $this->app->singleton(PrincipalDirectory::class, function (Application $app): PrincipalDirectory {
+            return new EloquentPrincipalDirectory(
+                $app->make(DatabaseManager::class),
+                $app->make('events'),
+                $app->make(ConfigRepository::class),
+            );
         });
 
         $this->app->singleton(AccessBootChecks::class, function (Application $app): AccessBootChecks {

@@ -52,3 +52,13 @@ it('returns validated instance types', function (): void {
     config()->set('access.principals.instance_types', []);
     expect(MigrationSettings::instanceTypes())->toBe([]);
 });
+
+it('returns the Eloquent users model and refuses anything else', function (): void {
+    config()->set('auth.providers.users.model', SpatieUser::class);
+    expect(MigrationSettings::userModel())->toBe(SpatieUser::class);
+
+    foreach ([stdClass::class, null] as $configured) {
+        config()->set('auth.providers.users.model', $configured);
+        expect(fn () => MigrationSettings::userModel())->toThrow(LogicException::class, 'Eloquent model');
+    }
+});

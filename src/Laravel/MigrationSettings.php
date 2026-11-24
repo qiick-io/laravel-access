@@ -6,6 +6,7 @@ namespace Qiick\Access\Laravel;
 
 use Illuminate\Database\Eloquent\Model;
 use InvalidArgumentException;
+use LogicException;
 
 /**
  * Config the package migrations read when they run (design §15.3: changing it
@@ -33,6 +34,25 @@ final class MigrationSettings
         }
 
         return 'users';
+    }
+
+    /**
+     * The Eloquent users model (auth.providers.users.model) that principals
+     * and group memberships belong to.
+     *
+     * @return class-string<Model>
+     *
+     * @throws LogicException when the configured users model is not an Eloquent model
+     */
+    public static function userModel(): string
+    {
+        $modelClass = config('auth.providers.users.model');
+
+        if (! is_string($modelClass) || ! is_a($modelClass, Model::class, true)) {
+            throw new LogicException('auth.providers.users.model must be an Eloquent model for principals.');
+        }
+
+        return $modelClass;
     }
 
     public static function isOrganisationRequired(): bool

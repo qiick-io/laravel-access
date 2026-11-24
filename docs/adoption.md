@@ -80,6 +80,30 @@ recreates them and is a no-op where the rules already exist.
 Pre-1.0 products delete their own `create_principals_table` (or the
 `principals` block of a larger migration) and recreate the database.
 
+Products create and deactivate principals through
+`Qiick\Access\Principals\PrincipalDirectory` (bound by the provider), never
+by writing rows directly:
+
+- `forMember($user, $organisationId)`: the user's principal in an
+  organisation (`null`: instance level). Idempotent; reactivates an
+  offboarded principal, refuses an `erased` one (GDPR tombstone);
+- `createService($type, $organisationId, $name, $owner, $createdBy,
+  $metadata)`: a service or agent account. The type must be listed in
+  `access.principals.types`; `user` and the instance types have their own
+  methods; an owner chain longer than eight or cyclic is refused;
+- `instance($type, $name)`: the singleton of a declared instance type;
+- `deactivate($principal, DeactivationReason)`: deactivates the principal and
+  everything it owns in one transaction, then dispatches
+  `PrincipalDeactivated` with the owned ids. **Revoke their API keys in a
+  listener** (qiick/laravel-api-keys reason `owner`);
+- `isActive($principalId)`: the use-time check behind a key: not deactivated,
+  not expired, a `user` principal still has its user, and every owner up the
+  chain is active. Never cached.
+
+`access.principals.model` may point at a subclass of
+`Qiick\Access\Principals\Principal` for product relations (API keys,
+grants).
+
 Products generate `user_groups.public_id` as **UUID v7** in their Eloquent
 model / factory (the package migration only declares the column). The
 membership FK targets `access.users_table` when set, otherwise the table from
