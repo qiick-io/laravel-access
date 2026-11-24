@@ -26,7 +26,7 @@ final class GateBefore
     ) {}
 
     /**
-     * @param  array<int, mixed>  $arguments
+     * @param  array<mixed>  $arguments
      */
     public function __invoke(?Authenticatable $user, string $ability, array $arguments = []): ?bool
     {
