@@ -137,11 +137,12 @@ $probe->assertShape();
 $probe->assertConstraints();
 ```
 
-`assertConstraints()` inserts, inside a rolled-back transaction, a second
+`assertConstraints()` tries, inside rolled-back transactions, a second
 principal for one membership (and one instance-level user when organisations
-are optional), an organisation-less principal when organisations are required,
-and a second principal of each declared instance type, and fails if the
-database accepts any of them. Run it on PostgreSQL and MySQL in CI.
+are optional), deleting a user who still has a principal, an
+organisation-less principal when organisations are required, and for each
+declared instance type a principal with a user and a second principal, and
+fails if the database accepts any of them. Run it on PostgreSQL and MySQL in CI.
 
 Products generate `user_groups.public_id` as **UUID v7** in their Eloquent
 model / factory (the package migration only declares the column). The

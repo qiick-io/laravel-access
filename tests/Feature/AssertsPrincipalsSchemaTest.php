@@ -113,3 +113,40 @@ it('fails when a declared instance type is not a singleton (P3, P9)', function (
 
     expect(fn () => principalsProbe()->assertConstraints())->toThrow(RuntimeException::class, 'second [instance_service]');
 })->group('engines');
+
+it('fails when a user with a principal can be deleted', function (): void {
+    Schema::create('principals', function (Blueprint $table): void {
+        $table->uuid('id')->primary();
+        $table->string('type', 32);
+        $table->foreignId('user_id')->nullable()->constrained('users')->nullOnDelete();
+        $table->uuid('organisation_id')->nullable();
+        $table->string('name');
+        $table->unique(['organisation_id', 'user_id']);
+    });
+
+    expect(fn () => principalsProbe()->assertConstraints())->toThrow(RuntimeException::class, 'must be ON DELETE RESTRICT');
+})->group('engines');
+
+it('fails when an instance type may have a user (review B1)', function (): void {
+    config()->set('access.principals.organisation_required', true);
+    config()->set('access.principals.instance_types', ['instance_service']);
+    Schema::create('principals', function (Blueprint $table): void {
+        $table->uuid('id')->primary();
+        $table->string('type', 32);
+        $table->foreignId('user_id')->nullable()->constrained('users')->restrictOnDelete();
+        $table->uuid('organisation_id')->nullable();
+        $table->string('name');
+        $table->unique(['organisation_id', 'user_id']);
+    });
+    // The organisation rule without its user clause.
+    $ruleWithoutUser = "(type IN ('instance_service') AND organisation_id IS NULL) OR (type NOT IN ('instance_service') AND organisation_id IS NOT NULL)";
+
+    if (DB::connection()->getDriverName() === 'sqlite') {
+        $triggerRule = (string) preg_replace('/\\b(type|organisation_id)\\b/', 'NEW.$1', $ruleWithoutUser);
+        DB::statement("CREATE TRIGGER rule_without_user BEFORE INSERT ON principals FOR EACH ROW WHEN NOT ({$triggerRule}) BEGIN SELECT RAISE(ABORT, 'rule'); END");
+    } else {
+        DB::statement("ALTER TABLE principals ADD CONSTRAINT rule_without_user CHECK ({$ruleWithoutUser})");
+    }
+
+    expect(fn () => principalsProbe()->assertConstraints())->toThrow(RuntimeException::class, 'instance principal with a user');
+})->group('engines');

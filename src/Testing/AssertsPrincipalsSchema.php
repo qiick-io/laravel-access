@@ -22,7 +22,9 @@ use RuntimeException;
  *   user at instance level when organisations are optional (P1);
  * - an organisation-less principal of a non-instance type when
  *   access.principals.organisation_required is true (P2);
- * - a second principal of each declared instance type (P3).
+ * - a principal of a declared instance type with a user, and a second
+ *   principal of each declared instance type (P2, P3);
+ * - deleting a user who still has a principal (user_id is restrict).
  *
  * The user rows the probes need come from $createUserId (a product factory),
  * inside the same rolled-back transaction.
@@ -74,6 +76,8 @@ final class AssertsPrincipalsSchema
             static fn (array $first): array => $first,
         );
 
+        $this->expectUserDeletionRefused($organisationId);
+
         if (! $isOrganisationRequired) {
             $this->expectRefused(
                 'P1: the database accepted a second instance-level principal for the same user.',
@@ -92,10 +96,40 @@ final class AssertsPrincipalsSchema
 
         foreach (MigrationSettings::instanceTypes() as $instanceType) {
             $this->expectRefused(
+                "P2: the database accepted a [{$instanceType}] instance principal with a user.",
+                null,
+                fn (): array => ['type' => $instanceType, 'user_id' => ($this->createUserId)()],
+            );
+
+            $this->expectRefused(
                 "P3: the database accepted a second [{$instanceType}] instance principal.",
                 static fn () => ['type' => $instanceType],
                 static fn (array $first): array => $first,
             );
+        }
+    }
+
+    /**
+     * principals.user_id is ON DELETE RESTRICT: deleting a user who still has
+     * a principal must fail (erasure is a job, decision 2026-11-24).
+     */
+    private function expectUserDeletionRefused(string $organisationId): void
+    {
+        $this->connection->beginTransaction();
+
+        try {
+            $userId = ($this->createUserId)();
+            $this->insertPrincipal(['user_id' => $userId, 'organisation_id' => $organisationId]);
+
+            try {
+                $this->connection->table(MigrationSettings::usersTable())->where('id', $userId)->delete();
+            } catch (QueryException) {
+                return;
+            }
+
+            throw new RuntimeException('§15.6 erasure: the database deleted a user who still has a principal; principals.user_id must be ON DELETE RESTRICT.');
+        } finally {
+            $this->connection->rollBack();
         }
     }
 
