@@ -40,6 +40,11 @@ function recordingConnection(string $driver, array $existingConstraints = [], ar
 
             return $query;
         });
+        $query->shouldReceive('whereRaw')->andReturnUsing(static function (string $sql, array $bindings) use (&$wheres, $query): Builder {
+            $wheres[$sql] = $bindings[0];
+
+            return $query;
+        });
         $query->shouldReceive('exists')->andReturnUsing(static function () use (&$wheres, $existingConstraints, $statements, $table): bool {
             $statements[] = "lookup {$table} ".json_encode($wheres);
 
@@ -65,9 +70,9 @@ it('adds missing CHECK constraints with the engine boolean and the principal rul
     AccessSchema::ensureConstraints($connection);
 
     expect($statements->getArrayCopy())->toBe([
-        'lookup pg_constraint {"conname":"user_groups_instance_org_xor"}',
+        'lookup pg_constraint {"conname":"user_groups_instance_org_xor","conrelid = ?::regclass":"user_groups"}',
         'ALTER TABLE user_groups ADD CONSTRAINT user_groups_instance_org_xor CHECK (is_instance = false OR organisation_id IS NULL)',
-        'lookup pg_constraint {"conname":"principals_organisation_rule"}',
+        'lookup pg_constraint {"conname":"principals_organisation_rule","conrelid = ?::regclass":"principals"}',
         "ALTER TABLE principals ADD CONSTRAINT principals_organisation_rule CHECK ((type IN ('instance_service', 'robot') AND organisation_id IS NULL AND user_id IS NULL) OR (type NOT IN ('instance_service', 'robot') AND organisation_id IS NOT NULL))",
     ]);
 });

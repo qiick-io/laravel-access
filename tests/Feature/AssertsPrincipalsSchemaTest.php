@@ -2,9 +2,14 @@
 
 declare(strict_types=1);
 
+use Illuminate\Database\Connection;
+use Illuminate\Database\Events\MigrationsEnded;
+use Illuminate\Database\QueryException;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
+use Illuminate\Support\Str;
+use Qiick\Access\Laravel\AccessSchema;
 use Qiick\Access\Testing\AssertsPrincipalsSchema;
 
 /*
@@ -149,4 +154,158 @@ it('fails when an instance type may have a user (review B1)', function (): void 
     }
 
     expect(fn () => principalsProbe()->assertConstraints())->toThrow(RuntimeException::class, 'instance principal with a user');
+})->group('engines');
+
+// Re-review of #17.
+
+/**
+ * The product's organisations table with the restrict foreign key the design
+ * requires (§15.5), and a probe that creates and deletes real organisations.
+ */
+function principalsWithOrganisationForeignKey(bool $isRestrict = true): AssertsPrincipalsSchema
+{
+    Schema::create('organisations', function (Blueprint $table): void {
+        $table->uuid('id')->primary();
+    });
+    migratePrincipalsTable(true, ['instance_service']);
+    Schema::table('principals', function (Blueprint $table) use ($isRestrict): void {
+        $foreign = $table->foreign('organisation_id')->references('id')->on('organisations');
+        $isRestrict ? $foreign->restrictOnDelete() : $foreign->cascadeOnDelete();
+    });
+    AccessSchema::ensureConstraints();
+
+    return new AssertsPrincipalsSchema(
+        DB::connection(),
+        static fn (): int => DB::table('users')->insertGetId(['email' => uniqid('probe', true)]),
+        static function (): string {
+            $organisationId = (string) Str::uuid();
+            DB::table('organisations')->insert(['id' => $organisationId]);
+
+            return $organisationId;
+        },
+        static function (string $organisationId): void {
+            DB::table('organisations')->where('id', $organisationId)->delete();
+        },
+    );
+}
+
+it('runs with the product organisation foreign key, using real organisations (review R2)', function (): void {
+    $probe = principalsWithOrganisationForeignKey();
+
+    $probe->assertShape();
+    $probe->assertConstraints();
+
+    expect(DB::table('principals')->count())->toBe(0)
+        ->and(DB::table('organisations')->count())->toBe(0);
+
+    Schema::dropIfExists('principals');
+    Schema::dropIfExists('organisations');
+})->group('engines');
+
+it('fails when an organisation with principals can be deleted (§15.6, P6)', function (): void {
+    if (in_array(DB::connection()->getDriverName(), ['mysql', 'mariadb'], true)) {
+        // MySQL and MariaDB refuse a cascade on a base column of organisation_key.
+        $this->markTestSkipped('MySQL and MariaDB refuse this misconfiguration themselves.');
+    }
+
+    $probe = principalsWithOrganisationForeignKey(false);
+
+    expect(fn () => $probe->assertConstraints())->toThrow(RuntimeException::class, 'deleted an organisation that still has principals');
+
+    Schema::dropIfExists('principals');
+    Schema::dropIfExists('organisations');
+})->group('engines');
+
+/**
+ * A connection that refuses the probe's forbidden writes with the given
+ * driver error: a principal row repeating an earlier one (ids aside), and
+ * deleting a user. Every other write goes through.
+ *
+ * @param  array{0: string, 1: int, 2: string}  $errorInfo
+ */
+function connectionRefusingWith(array $errorInfo): Connection
+{
+    $failure = static function () use ($errorInfo): never {
+        $driverError = new PDOException($errorInfo[2], $errorInfo[1]);
+        $driverError->errorInfo = $errorInfo;
+
+        throw new QueryException('testing', 'write', [], $driverError);
+    };
+    $insertedRows = [];
+    $connection = Mockery::mock(DB::connection())->makePartial();
+    $connection->shouldReceive('table')->with('principals')->andReturnUsing(static function () use ($failure, &$insertedRows): object {
+        return new class($failure, $insertedRows)
+        {
+            /**
+             * @param  list<array<string, mixed>>  $insertedRows
+             */
+            public function __construct(private Closure $failure, private array &$insertedRows) {}
+
+            /**
+             * @param  array<string, mixed>  $row
+             */
+            public function insert(array $row): bool
+            {
+                unset($row['id']);
+
+                if (in_array($row, $this->insertedRows, true)) {
+                    ($this->failure)();
+                }
+
+                $this->insertedRows[] = $row;
+
+                return true;
+            }
+        };
+    });
+    $connection->shouldReceive('table')->with('users')->andReturnUsing(static fn (): object => new class($failure)
+    {
+        public function __construct(private Closure $failure) {}
+
+        public function where(mixed ...$arguments): static
+        {
+            return $this;
+        }
+
+        public function delete(): never
+        {
+            ($this->failure)();
+        }
+    });
+
+    return $connection;
+}
+
+it('does not count a failure unrelated to integrity as a refusal (review N12)', function (): void {
+    migratePrincipalsTable(false);
+    $probe = new AssertsPrincipalsSchema(connectionRefusingWith(['HY000', 2006, 'server has gone away']), static fn (): int => DB::table('users')->insertGetId(['email' => uniqid('probe', true)]));
+
+    expect(fn () => $probe->assertConstraints())->toThrow(QueryException::class, 'server has gone away');
+});
+
+it('counts a MySQL CHECK violation as a refusal although its SQLSTATE is HY000', function (): void {
+    migratePrincipalsTable(false);
+    $probe = new AssertsPrincipalsSchema(connectionRefusingWith(['HY000', 3819, 'Check constraint is violated']), static fn (): int => DB::table('users')->insertGetId(['email' => uniqid('probe', true)]));
+
+    $probe->assertConstraints();
+
+    expect(DB::table('principals')->count())->toBe(0);
+});
+
+it('restores the table rules after every migrate run (review R3)', function (): void {
+    migratePrincipalsTable(true, ['instance_service']);
+    Schema::create('organisations', function (Blueprint $table): void {
+        $table->uuid('id')->primary();
+    });
+    Schema::table('principals', function (Blueprint $table): void {
+        $table->foreign('organisation_id')->references('id')->on('organisations')->restrictOnDelete();
+    });
+
+    event(new MigrationsEnded('up'));
+
+    expect(fn () => DB::table('principals')->insert(['id' => (string) Str::uuid7(), 'type' => 'service', 'name' => 'No organisation']))
+        ->toThrow(QueryException::class);
+
+    Schema::dropIfExists('principals');
+    Schema::dropIfExists('organisations');
 })->group('engines');

@@ -11,6 +11,7 @@ use Illuminate\Contracts\Config\Repository as ConfigRepository;
 use Illuminate\Contracts\Foundation\Application;
 use Illuminate\Database\DatabaseManager;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Events\MigrationsEnded;
 use Illuminate\Queue\Events\JobFailed;
 use Illuminate\Queue\Events\JobProcessed;
 use Illuminate\Queue\Events\JobProcessing;
@@ -186,6 +187,12 @@ final class AccessServiceProvider extends ServiceProvider
         }
 
         $this->registerReservedRoleNameGuard();
+
+        // SQLite drops a table's triggers whenever a migration rebuilds it, so
+        // the package rules are restored after every migrate run (review R3).
+        Event::listen(MigrationsEnded::class, static function (): void {
+            AccessSchema::ensureConstraints();
+        });
     }
 
     private function registerGateBefore(): void

@@ -70,12 +70,13 @@ The package also ships the `principals` table (design §15), loaded while
   and are singletons per type. The config is read when the migration runs:
   changing it later changes nothing in the database.
 
-**After any product migration that alters `principals` or `user_groups`**
-(adding the organisation foreign key, for example), call
-`Qiick\Access\Laravel\AccessSchema::ensureConstraints()` in the same
-migration. SQLite rebuilds the table for such changes and drops its triggers,
-which carry the organisation and instance-group rules there; the call
-recreates them and is a no-op where the rules already exist.
+SQLite rebuilds a table when a migration alters it (adding the organisation
+foreign key, for example) and drops its triggers, which carry the
+organisation and instance-group rules there. The provider calls
+`Qiick\Access\Laravel\AccessSchema::ensureConstraints()` after every
+`migrate` run (`MigrationsEnded`), which recreates them and is a no-op where
+the rules already exist; a migration may also call it directly. Connections
+with a table prefix are not supported.
 
 Pre-1.0 products delete their own `create_principals_table` (or the
 `principals` block of a larger migration) and recreate the database.
@@ -132,17 +133,26 @@ Prove the schema on the freshly migrated database (design §15.6, P9) with
 `Qiick\Access\Testing\AssertsPrincipalsSchema`:
 
 ```php
-$probe = new AssertsPrincipalsSchema(DB::connection(), fn (): int => User::factory()->create()->id);
+$probe = new AssertsPrincipalsSchema(
+    DB::connection(),
+    fn (): int => User::factory()->create()->id,
+    // Products with an organisations table and its foreign key:
+    fn (): string => Organisation::factory()->create()->id,
+    fn (string $organisationId) => DB::table('organisations')->where('id', $organisationId)->delete(),
+);
 $probe->assertShape();
 $probe->assertConstraints();
 ```
 
 `assertConstraints()` tries, inside rolled-back transactions, a second
 principal for one membership (and one instance-level user when organisations
-are optional), deleting a user who still has a principal, an
+are optional), deleting a user who still has a principal, deleting an
+organisation that still has principals (when the delete closure is given), an
 organisation-less principal when organisations are required, and for each
-declared instance type a principal with a user and a second principal, and
-fails if the database accepts any of them. Run it on PostgreSQL and MySQL in CI.
+declared instance type a principal with a user and a second principal. It
+fails if the database accepts any of them; only integrity refusals count, so
+any other database error propagates. Run it on every engine the product
+supports, SQLite included.
 
 Products generate `user_groups.public_id` as **UUID v7** in their Eloquent
 model / factory (the package migration only declares the column). The
