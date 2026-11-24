@@ -34,6 +34,8 @@ CLASSES=(
   'Qiick\Access\Http\Concerns\AuthorizesWithPermission'
   'Qiick\Access\Testing\ProbeAbility'
   'Qiick\Access\Testing\DirectPermissionCheckScanner'
+  'Qiick\Access\Laravel\MigrationSettings'
+  'Qiick\Access\Laravel\AccessSchema'
 )
 
 CLASS_FILES=(
@@ -58,6 +60,8 @@ CLASS_FILES=(
   'src/Http/Concerns/AuthorizesWithPermission.php'
   'src/Testing/ProbeAbility.php'
   'src/Testing/DirectPermissionCheckScanner.php'
+  'src/Laravel/MigrationSettings.php'
+  'src/Laravel/AccessSchema.php'
 )
 
 # Other mutation-target siblings ignored while mutating one class.

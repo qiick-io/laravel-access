@@ -7,6 +7,7 @@ use Illuminate\Database\QueryException;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
+use Qiick\Access\Laravel\AccessSchema;
 use Qiick\Access\Testing\AssertsGroupTablesSchema;
 
 /**
@@ -48,7 +49,7 @@ it('creates the package group tables with expires_at public_id and metadata', fu
         ->all();
 
     /** @var Migration $migration */
-    $migration = require dirname(__DIR__, 2).'/database/migrations/2026_11_22_120000_create_user_groups_tables.php';
+    $migration = require dirname(__DIR__, 2).'/database/migrations/groups/2026_11_22_120000_create_user_groups_tables.php';
     $migration->up();
 
     expect(Schema::hasTable('user_groups'))->toBeTrue()
@@ -124,7 +125,7 @@ it('points the membership user_id foreign key at access.users_table when set', f
     config()->set('access.users_table', 'accounts');
 
     /** @var Migration $migration */
-    $migration = require dirname(__DIR__, 2).'/database/migrations/2026_11_22_120000_create_user_groups_tables.php';
+    $migration = require dirname(__DIR__, 2).'/database/migrations/groups/2026_11_22_120000_create_user_groups_tables.php';
     $migration->up();
 
     $connection = app('db')->connection();
@@ -166,4 +167,36 @@ it('points the membership user_id foreign key at access.users_table when set', f
     Schema::dropIfExists('user_groups');
     Schema::dropIfExists('accounts');
     config()->set('access.users_table', null);
+})->group('engines');
+
+it('restores the instance-group rule after a product rebuilds the table (review B2)', function (): void {
+    /** @var Migration $migration */
+    $migration = require dirname(__DIR__, 2).'/database/migrations/groups/2026_11_22_120000_create_user_groups_tables.php';
+    $migration->up();
+    Schema::create('organisations', function (Blueprint $table): void {
+        $table->uuid('id')->primary();
+    });
+
+    Schema::table('user_groups', function (Blueprint $table): void {
+        $table->foreign('organisation_id')->references('id')->on('organisations')->restrictOnDelete();
+    });
+    AccessSchema::ensureConstraints();
+    AccessSchema::ensureConstraints();
+
+    $organisationId = (string) Str::uuid();
+    app('db')->connection()->table('organisations')->insert(['id' => $organisationId]);
+
+    expect(fn () => app('db')->connection()->table('user_groups')->insert([
+        'public_id' => (string) Str::uuid(),
+        'name' => 'bad-instance',
+        'organisation_id' => $organisationId,
+        'is_instance' => true,
+        'created_at' => now(),
+        'updated_at' => now(),
+    ]))->toThrow(QueryException::class);
+
+    Schema::dropIfExists('user_group_role');
+    Schema::dropIfExists('user_group_user');
+    Schema::dropIfExists('user_groups');
+    Schema::dropIfExists('organisations');
 })->group('engines');

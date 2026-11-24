@@ -47,7 +47,8 @@ use Spatie\Permission\PermissionRegistrar;
  * config, binds AccessContext / ContainerActorResolver, stamps API actors onto
  * queued jobs, clears context and resolver caches on Octane / request / job
  * boundaries, isolates Spatie team ids via SpatieTeamQueueBoundary, and loads
- * package group migrations when access.migrations.load is true.
+ * package group and principal migrations per access.migrations.groups /
+ * access.migrations.principals.
  *
  * @api
  */
@@ -151,8 +152,10 @@ final class AccessServiceProvider extends ServiceProvider
 
         $this->app->make(AccessBootChecks::class)->assert();
 
-        if ($config->get('access.migrations.load', true) === true) {
-            $this->loadMigrationsFrom(__DIR__.'/../../database/migrations');
+        foreach (['groups', 'principals'] as $migrationSet) {
+            if ($config->get("access.migrations.{$migrationSet}", true) === true) {
+                $this->loadMigrationsFrom(__DIR__."/../../database/migrations/{$migrationSet}");
+            }
         }
 
         if ($this->app->runningInConsole()) {
