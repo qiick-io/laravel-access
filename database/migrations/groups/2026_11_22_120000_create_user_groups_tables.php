@@ -2,11 +2,11 @@
 
 declare(strict_types=1);
 
-use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
+use Qiick\Access\Laravel\MigrationSettings;
 
 /*
  * Package-owned group tables (standards A12 / decision 2026-11-22, Q5).
@@ -27,7 +27,7 @@ return new class extends Migration
     {
         $rolesTable = config('permission.table_names.roles', 'roles');
         $rolesTable = is_string($rolesTable) && $rolesTable !== '' ? $rolesTable : 'roles';
-        $usersTable = $this->usersTable();
+        $usersTable = MigrationSettings::usersTable();
 
         Schema::create('user_groups', function (Blueprint $table): void {
             $table->id();
@@ -114,23 +114,5 @@ return new class extends Migration
         DB::statement(
             "ALTER TABLE user_groups ADD CONSTRAINT user_groups_instance_org_xor CHECK {$expression}",
         );
-    }
-
-    private function usersTable(): string
-    {
-        $configured = config('access.users_table');
-        if (is_string($configured) && $configured !== '') {
-            return $configured;
-        }
-
-        $modelClass = config('auth.providers.users.model');
-        if (is_string($modelClass) && class_exists($modelClass)) {
-            $model = new $modelClass;
-            if ($model instanceof Model) {
-                return $model->getTable();
-            }
-        }
-
-        return 'users';
     }
 };

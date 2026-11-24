@@ -53,6 +53,15 @@ guard (such as a Filament panel guard) goes in `ACCESS_WEB_GUARDS`.
 
 ### Added
 
+- `principals` table (design §15): package migration
+  `create_principals_table` with UUID ids, user / owner / creator links that
+  survive deletion, a stored generated `organisation_key` behind UNIQUE
+  (`organisation_key`, `user_id`) so one principal per user and organisation
+  holds on every engine, and, when `access.principals.organisation_required`
+  is true, an organisation CHECK (triggers on SQLite) with singleton
+  `access.principals.instance_types`. `access.migrations.load` splits into
+  `access.migrations.groups` and `access.migrations.principals`.
+
 - Test-only conformance helpers (design §2.1 / §13.1): `Testing\ProbeAbility`
   registers the AC2 probe ability (defined as `false`, refuses to register
   outside a unit-test run), and `Testing\DirectPermissionCheckScanner` is the

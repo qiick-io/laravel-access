@@ -34,7 +34,7 @@ afterEach(function (): void {
 });
 
 it('passes AC17 when the package migration shape is present', function (): void {
-    $migration = require dirname(__DIR__, 2).'/database/migrations/2026_11_22_120000_create_user_groups_tables.php';
+    $migration = require dirname(__DIR__, 2).'/database/migrations/groups/2026_11_22_120000_create_user_groups_tables.php';
     $migration->up();
 
     (new AssertsGroupTablesSchema(app('db')->connection()))->assertShape();

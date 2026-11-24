@@ -6,3 +6,9 @@ tagged release.
 
 There are no published versions yet. When `0.1.0` ships, first-install steps and
 any follow-on breaks will land in this file.
+
+## Unreleased
+
+- `access.migrations.load` is replaced by `access.migrations.groups` and
+  `access.migrations.principals` (both `true` by default). A product that set
+  `load` to `false` sets `groups` to `false`.

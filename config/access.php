@@ -82,15 +82,38 @@ return [
     | Package migrations
     |--------------------------------------------------------------------------
     |
-    | When true (default), AccessServiceProvider loads the fixed group tables
-    | (user_groups / user_group_user / user_group_role). externa 1.x sets this
-    | to false and adopts the same table shape through its own additive
-    | migration so the released tables keep the standard names until v2 (Q5).
+    | Each switch loads one set of package migrations (default true):
+    | - groups: the fixed group tables (user_groups / user_group_user /
+    |   user_group_role). externa 1.x sets it to false and adopts the same
+    |   table shape through its own additive migration (Q5);
+    | - principals: the principals table (design §15).
     |
     */
 
     'migrations' => [
-        'load' => true,
+        'groups' => true,
+        'principals' => true,
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Principals
+    |--------------------------------------------------------------------------
+    |
+    | Read when the principals migration runs; changing them later changes
+    | nothing in the database (design §15.3).
+    | - organisation_required: true in products with organisations. Adds a
+    |   CHECK: every principal needs an organisation, except the
+    |   instance_types, which must have none (and no user where the engine
+    |   allows that CHECK), and are singletons per type.
+    | - instance_types: lower-case type names allowed at instance level, such
+    |   as an instance service account. Each one needs a decision note.
+    |
+    */
+
+    'principals' => [
+        'organisation_required' => false,
+        'instance_types' => [],
     ],
 
     /*

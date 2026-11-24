@@ -10,22 +10,28 @@ it('merges the package defaults into the access config', function (): void {
     expect(config('access.api_guards'))->toBe([]);
     expect(config('access.trust_api_guard_in_console'))->toBeFalse();
     expect(config('access.permission_enum'))->toBe(FakePermissionEnum::class);
-    expect(config('access.migrations.load'))->toBeTrue();
+    expect(config('access.migrations.groups'))->toBeTrue()
+        ->and(config('access.migrations.principals'))->toBeTrue()
+        ->and(config('access.principals.organisation_required'))->toBeFalse()
+        ->and(config('access.principals.instance_types'))->toBe([]);
     expect(config('access.users_table'))->toBeNull();
     expect(config('access.table_names'))->toBeNull();
     expect(config('access.two_factor.exempt_route_names'))->toContain('logout')
         ->and(config('access.two_factor.exempt_route_names'))->toContain('security.*');
 });
 
-it('loads the package group migrations by default', function (): void {
-    $packageMigrations = realpath(dirname(__DIR__, 1).'/../database/migrations');
+it('loads the package group and principal migrations by default', function (): void {
     $loaded = collect(app('migrator')->paths())
         ->map(static fn (string $path): string => (string) realpath($path))
         ->filter(static fn (string $path): bool => $path !== '')
         ->all();
 
-    expect($packageMigrations)->not->toBeFalse()
-        ->and($loaded)->toContain($packageMigrations);
+    foreach (['groups', 'principals'] as $migrationSet) {
+        $packageMigrations = realpath(dirname(__DIR__, 1)."/../database/migrations/{$migrationSet}");
+
+        expect($packageMigrations)->not->toBeFalse()
+            ->and($loaded)->toContain($packageMigrations);
+    }
 });
 
 it('publishes the config source into a temporary directory outside vendor', function (): void {

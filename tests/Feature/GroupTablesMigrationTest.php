@@ -48,7 +48,7 @@ it('creates the package group tables with expires_at public_id and metadata', fu
         ->all();
 
     /** @var Migration $migration */
-    $migration = require dirname(__DIR__, 2).'/database/migrations/2026_11_22_120000_create_user_groups_tables.php';
+    $migration = require dirname(__DIR__, 2).'/database/migrations/groups/2026_11_22_120000_create_user_groups_tables.php';
     $migration->up();
 
     expect(Schema::hasTable('user_groups'))->toBeTrue()
@@ -124,7 +124,7 @@ it('points the membership user_id foreign key at access.users_table when set', f
     config()->set('access.users_table', 'accounts');
 
     /** @var Migration $migration */
-    $migration = require dirname(__DIR__, 2).'/database/migrations/2026_11_22_120000_create_user_groups_tables.php';
+    $migration = require dirname(__DIR__, 2).'/database/migrations/groups/2026_11_22_120000_create_user_groups_tables.php';
     $migration->up();
 
     $connection = app('db')->connection();
