@@ -46,6 +46,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   user data or secrets (`access.gate_shadow_log_channel`). Boot fails on a
   non-boolean switch or a missing legacy binding.
 
+### Documentation
+
+- Dependency register `docs/dependencies.md`: one row per runtime
+  `composer.json` `require` entry with constraint rationale, usage,
+  maintainer, license, known risk and an in-package exit plan.
+
 ## [0.1.0] - 2026-11-24
 
 First tagged pre-release. Public APIs may still change in any 0.x minor.
