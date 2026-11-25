@@ -142,6 +142,15 @@ super-admin). The team context is switched for the check and always restored.
 A service or agent with no user owner, and any instance principal, gets
 `false`: its powers come from the product's scopes alone.
 
+Instance principals are refused by their type, as listed in
+`access.principals.instance_types`. Keep every instance type in that list for
+as long as rows of it exist: a type dropped from the config is no longer
+recognised, and a row of it that a missing organisation rule let gain an
+organisation and an owner would get that owner's ceiling. `isActive()` is
+not a permission check: it says whether a principal may act at all, and
+only `PrincipalCeiling::allows()` bounds what a key may do, so a key
+authorizer calls both.
+
 `access.principals.model` may point at a subclass of
 `Qiick\Access\Principals\Principal` for product relations (API keys,
 grants).
@@ -187,7 +196,13 @@ duplicates are refused on every engine (a plain NULL would let them through).
 externa 1.x keeps its own tables with a global unique `name`, which
 `AssertsGroupTablesSchema` accepts because it has no organisations; it adds
 `organisation_key` with the unique index when it moves to the package tables
-(additive).
+(additive). When externa adds organisations it also drops the global unique
+on `name`: `AssertsGroupTablesSchema` accepts either index, but keeping both
+would still forbid the same name in two organisations.
+
+A soft-deleted group keeps its name taken, as it did under the global
+unique; recreating a group with the same name needs the old row
+force-deleted (or renamed) first.
 
 Assert the group schema with `Qiick\Access\Testing\AssertsGroupTablesSchema`
 (AC17 / C75). When Spatie teams are on, set
@@ -200,7 +215,10 @@ Assert the product-owned columns on Spatie's `roles` table with
 `Qiick\Access\Testing\AssertsRolesSchema` (A4): `public_id` not null with a
 unique index everywhere, and, where the product has them, `is_system` and
 `is_assignable` not null defaulting to `false` and `true`, `description` and
-`metadata` nullable.
+`metadata` nullable. Its probe insert sets only `name`, `guard_name` and
+`public_id`, so any other column the product adds to `roles` must be nullable
+or have a default; Spatie's own team column (`organisation_id`, null for a
+global role) already is.
 
 `EffectivePermissionResolver` applies group role ids from instance groups,
 legacy unscoped groups, and organisation groups matching the current
