@@ -21,6 +21,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `PrincipalCeiling::allows($principalId, $permission)` (design §15.4): the
+  owner ceiling behind an API key. The principal and its owner chain must be
+  active, the nearest `user` principal of the chain in the same organisation,
+  and that user must hold the permission there, read fresh and never through
+  super-admin; the team is switched for the check and always restored.
+  Unowned services get `false`, and so does any declared instance type,
+  refused by its type anywhere in the chain whatever its row says.
+  `PrincipalDirectory::activeOwnerChain()` returns the active chain.
+
 - Externa compatibility switches (design §9.2 step 6 / §9.4, removed in v2):
   `access.use_package_gate` chooses whether `GateBefore` or the product's
   `LegacyGateBefore` decides, still as the single `Gate::before` (AC1), and

@@ -131,6 +131,17 @@ The directory reads `access.principals.organisation_required` and
 migration ran: keep them unchanged after migrating, or the database refuses
 what the directory allows with a driver error.
 
+**The owner ceiling behind a key** (design §15.4): the product's key
+authorizer checks the credential's own scopes, then
+`Qiick\Access\Principals\PrincipalCeiling::allows($ownerPrincipalId,
+$permission)`. It is true only when the principal and every owner up its chain
+are active, the nearest `user` principal up that chain (the principal itself
+for a membership) is in the same organisation, and that user holds the
+permission in that organisation right now (read fresh, never through
+super-admin). The team context is switched for the check and always restored.
+A service or agent with no user owner, and any instance principal, gets
+`false`: its powers come from the product's scopes alone.
+
 `access.principals.model` may point at a subclass of
 `Qiick\Access\Principals\Principal` for product relations (API keys,
 grants).
