@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace Qiick\Access\Principals;
 
 use Illuminate\Database\Eloquent\Model;
-use Illuminate\Support\Facades\Schema;
+use LogicException;
 
 /**
  * Listens to Eloquent `deleting` and refuses to delete a user who still has
@@ -24,6 +24,7 @@ final class UserDeletionGuard
      * @param  array<int, mixed>  $payload  the event payload: the model being deleted
      *
      * @throws UserHasPrincipalsException
+     * @throws LogicException when access.principals.model is invalid
      */
     public function __invoke(string $eventName, array $payload): void
     {
@@ -38,10 +39,32 @@ final class UserDeletionGuard
             return;
         }
 
-        if (Schema::hasTable('principals') && Principal::query()->where('user_id', $user->getKey())->exists()) {
+        $principalModel = $this->principalModel();
+        // Every principal counts, whatever global scopes a subclass adds.
+        $principals = $principalModel->newQuery()->withoutGlobalScopes();
+
+        if ($principalModel->getConnection()->getSchemaBuilder()->hasTable($principalModel->getTable()) && $principals->where('user_id', $user->getKey())->exists()) {
             $userId = $user->getKey();
 
             throw UserHasPrincipalsException::forUser(is_int($userId) || is_string($userId) ? $userId : '?');
         }
+    }
+
+    /**
+     * The configured principal model, so a subclass on its own connection is
+     * checked where its rows live.
+     *
+     * @throws LogicException when access.principals.model is not Principal or a
+     *                        subclass: the guard fails closed, as PrincipalDirectory does
+     */
+    private function principalModel(): Principal
+    {
+        $modelClass = config('access.principals.model', Principal::class);
+
+        if (! is_string($modelClass) || ! is_a($modelClass, Principal::class, true)) {
+            throw new LogicException('access.principals.model must be Qiick\Access\Principals\Principal or a subclass.');
+        }
+
+        return new $modelClass;
     }
 }

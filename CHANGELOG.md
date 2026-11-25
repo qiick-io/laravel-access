@@ -23,6 +23,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`ShouldDispatchAfterCommit`), as `PrincipalDeactivated` already was, so a
   rolled-back creation never reaches a listener (AC-c).
 
+- With `access.principals.model` set to a subclass on its own connection,
+  `PrincipalDirectory::deactivate()` runs its cascade in a transaction on
+  that connection (it used the default one), and `UserDeletionGuard` checks
+  that model's table on that connection, ignoring its global scopes (it
+  checked `principals` on the default one). The guard now refuses an
+  invalid `access.principals.model` with a `LogicException`, as the
+  directory does, instead of skipping it.
+
 ### Added
 
 - `PrincipalCeiling::allows($principalId, $permission)` (design §15.4): the

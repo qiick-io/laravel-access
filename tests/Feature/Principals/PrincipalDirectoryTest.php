@@ -6,6 +6,7 @@ use Carbon\CarbonInterface;
 use Illuminate\Database\Eloquent\MassAssignmentException;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\SoftDeletes;
+use Illuminate\Database\Events\QueryExecuted;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Foundation\Auth\User;
 use Illuminate\Support\Facades\DB;
@@ -796,4 +797,101 @@ it('announces a new principal only once the surrounding transaction commits (AC-
     $committed = DB::transaction(static fn (): Principal => directory()->forMember(member(2), null));
 
     expect($announcedPrincipalIds)->toBe([$committed->id]);
+});
+
+/**
+ * A principal model on its own connection, as access.principals.model allows.
+ */
+class PrincipalOnSideConnection extends Principal
+{
+    protected $connection = 'principals_side';
+}
+
+/**
+ * Builds the principals table (with its users table) on a separate in-memory
+ * SQLite connection and points access.principals.model at it.
+ */
+function migratePrincipalsOnSideConnection(): void
+{
+    config()->set('database.connections.principals_side', ['driver' => 'sqlite', 'database' => ':memory:', 'prefix' => '', 'foreign_key_constraints' => true]);
+    $defaultConnection = config('database.default');
+    config()->set('database.default', 'principals_side');
+
+    try {
+        Schema::create('users', function (Blueprint $table): void {
+            $table->id();
+            $table->string('email')->nullable();
+        });
+        DB::table('users')->insert([['id' => 1, 'email' => 'a@example.com']]);
+        migratePrincipals();
+    } finally {
+        config()->set('database.default', $defaultConnection);
+    }
+
+    config()->set('access.principals.model', PrincipalOnSideConnection::class);
+    app()->forgetInstance(PrincipalDirectory::class);
+}
+
+it('fails closed on an invalid principal model and ignores a non-Eloquent users model', function (): void {
+    config()->set('auth.providers.users.model', ErasableUser::class);
+    migratePrincipals();
+    $guard = new UserDeletionGuard;
+
+    foreach ([stdClass::class, 42] as $invalidModel) {
+        config()->set('access.principals.model', $invalidModel);
+
+        expect(fn () => $guard('eloquent.deleting: x', [ErasableUser::query()->findOrFail(2)]))
+            ->toThrow(LogicException::class, 'access.principals.model must be');
+    }
+
+    config()->set('auth.providers.users.model', stdClass::class);
+    $guard('eloquent.deleting: x', [new stdClass]);
+});
+
+it('deactivates inside a transaction on the principal model connection', function (): void {
+    migratePrincipalsOnSideConnection();
+    $owner = directory()->forMember(member(), null);
+    directory()->createService('agent', null, 'Agent', $owner);
+    $transactionLevels = [];
+    DB::connection('principals_side')->listen(static function (QueryExecuted $query) use (&$transactionLevels): void {
+        if (str_starts_with(strtolower($query->sql), 'update')) {
+            $transactionLevels[] = $query->connection->transactionLevel();
+        }
+    });
+
+    directory()->deactivate($owner, DeactivationReason::Offboarded);
+
+    expect($transactionLevels)->not->toBeEmpty()
+        ->and(array_unique($transactionLevels))->toBe([1]);
+});
+
+it('refuses deleting a user who has principals on the principal model connection', function (): void {
+    config()->set('auth.providers.users.model', ErasableUser::class);
+    migratePrincipalsOnSideConnection();
+    directory()->forMember(ErasableUser::query()->findOrFail(1), null);
+
+    // The default connection has no principals table: only the model's counts.
+    expect(fn () => ErasableUser::query()->findOrFail(1)->delete())->toThrow(UserHasPrincipalsException::class)
+        ->and(DB::table('users')->where('id', 1)->exists())->toBeTrue();
+});
+
+/**
+ * A principal subclass whose global scope hides every row.
+ */
+class PrincipalHidingEveryRow extends Principal
+{
+    protected static function booted(): void
+    {
+        static::addGlobalScope('hide_every_row', static fn ($query) => $query->whereRaw('1 = 0'));
+    }
+}
+
+it('counts principals hidden by a global scope of the configured model', function (): void {
+    config()->set('auth.providers.users.model', ErasableUser::class);
+    migratePrincipals();
+    DB::table('principals')->insert(['id' => (string) Str::uuid7(), 'type' => 'user', 'user_id' => 1, 'name' => 'Member']);
+    config()->set('access.principals.model', PrincipalHidingEveryRow::class);
+
+    expect(fn () => (new UserDeletionGuard)('eloquent.deleting: x', [ErasableUser::query()->findOrFail(1)]))
+        ->toThrow(UserHasPrincipalsException::class);
 });
