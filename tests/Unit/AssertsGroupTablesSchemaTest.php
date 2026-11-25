@@ -5,6 +5,7 @@ declare(strict_types=1);
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
+use Qiick\Access\Laravel\AccessSchema;
 use Qiick\Access\Testing\AssertsGroupTablesSchema;
 
 beforeEach(function (): void {
@@ -132,3 +133,67 @@ it('fails AC17 when a surrogate id appears on a pivot', function (): void {
     expect(fn () => (new AssertsGroupTablesSchema(app('db')->connection()))->assertShape())
         ->toThrow(RuntimeException::class, 'surrogate');
 })->group('engines');
+
+/**
+ * Group tables in every way valid except, possibly, the name uniqueness:
+ * 'global' is externa 1.x's own table, 'per organisation id' lets NULL
+ * duplicates through on every engine.
+ */
+function createGroupTablesWithNameUniqueness(string $nameUniqueness): void
+{
+    Schema::create('user_groups', function (Blueprint $table) use ($nameUniqueness): void {
+        $table->id();
+        $table->uuid('public_id')->unique();
+        $table->string('name');
+        $table->text('description')->nullable();
+        $table->json('metadata')->nullable();
+        $table->uuid('organisation_id')->nullable()->index();
+        $table->boolean('is_instance')->default(false);
+        $table->timestamps();
+        $table->softDeletes();
+
+        if ($nameUniqueness === 'global') {
+            $table->unique('name');
+        } elseif ($nameUniqueness === 'per organisation id') {
+            $table->unique(['organisation_id', 'name']);
+        } else {
+            // The package's index, on a key that keeps NULL instead of ''.
+            $table->string('organisation_key', 36)->nullable()->storedAs('organisation_id');
+            $table->unique(['organisation_key', 'name']);
+        }
+    });
+    AccessSchema::ensureConstraints();
+    Schema::create('user_group_user', function (Blueprint $table): void {
+        $table->foreignId('user_group_id')->constrained('user_groups')->cascadeOnDelete();
+        $table->foreignId('user_id')->constrained('users')->cascadeOnDelete();
+        $table->dateTime('expires_at')->nullable()->index();
+        $table->timestamps();
+        $table->unique(['user_group_id', 'user_id']);
+        $table->index('user_id');
+    });
+    Schema::create('user_group_role', function (Blueprint $table): void {
+        $table->foreignId('user_group_id')->constrained('user_groups')->cascadeOnDelete();
+        $table->unsignedBigInteger('role_id');
+        $table->timestamps();
+        $table->unique(['user_group_id', 'role_id']);
+        $table->index('role_id');
+        $table->foreign('role_id')->references('id')->on('roles')->cascadeOnDelete();
+    });
+}
+
+it('accepts globally unique group names, for products without organisations (externa 1.x)', function (): void {
+    createGroupTablesWithNameUniqueness('global');
+
+    (new AssertsGroupTablesSchema(app('db')->connection()))->assertShape();
+    expect(true)->toBeTrue();
+})->group('engines');
+
+it('fails AC-a when two organisation-less groups may share a name', function (string $nameUniqueness, string $failure): void {
+    createGroupTablesWithNameUniqueness($nameUniqueness);
+
+    expect(fn () => (new AssertsGroupTablesSchema(app('db')->connection()))->assertShape())
+        ->toThrow(RuntimeException::class, $failure);
+})->with([
+    'unique per organisation id' => ['per organisation id', 'AC-a: expected a unique index'],
+    'unique per a key that keeps NULL' => ['per nullable key', 'AC-a: two groups without an organisation were saved with the same name.'],
+])->group('engines');

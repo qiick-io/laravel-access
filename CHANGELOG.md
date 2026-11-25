@@ -8,7 +8,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Group names are unique per organisation instead of globally (AC-a): the
+  group migration adds a stored generated `user_groups.organisation_key`
+  (the organisation id, or `''` without one) with a unique index on
+  (`organisation_key`, `name`), so two organisations can share a name while
+  two organisation-less groups still cannot. `AssertsGroupTablesSchema`
+  checks that index, or a global unique `name` in products without
+  organisations, and proves the organisation-less refusal with a rolled-back
+  insert.
+
 ### Added
+
+- `PrincipalCeiling::allows($principalId, $permission)` (design §15.4): the
+  owner ceiling behind an API key. The principal and its owner chain must be
+  active, the nearest `user` principal of the chain in the same organisation,
+  and that user must hold the permission there, read fresh and never through
+  super-admin; the team is switched for the check and always restored.
+  Unowned services get `false`, and so does any declared instance type,
+  refused by its type anywhere in the chain whatever its row says.
+  `PrincipalDirectory::activeOwnerChain()` returns the active chain.
 
 - `Testing\AssertsRolesSchema` (A4): asserts the product-owned columns on
   Spatie's `roles` table, `public_id` (not null, unique) everywhere and the
