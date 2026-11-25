@@ -8,66 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Fixed
-
-- Group names are unique per organisation instead of globally (AC-a): the
-  group migration adds a stored generated `user_groups.organisation_key`
-  (the organisation id, or `''` without one) with a unique index on
-  (`organisation_key`, `name`), so two organisations can share a name while
-  two organisation-less groups still cannot. `AssertsGroupTablesSchema`
-  checks that index, or a global unique `name` in products without
-  organisations, and proves the organisation-less refusal with a rolled-back
-  insert.
-
-- `PrincipalCreated` is dispatched after the surrounding transaction commits
-  (`ShouldDispatchAfterCommit`), as `PrincipalDeactivated` already was, so a
-  rolled-back creation never reaches a listener (AC-c).
-
-- With `access.principals.model` set to a subclass on its own connection,
-  `PrincipalDirectory::deactivate()` runs its cascade in a transaction on
-  that connection (it used the default one), and `UserDeletionGuard` checks
-  that model's table on that connection, ignoring its global scopes (it
-  checked `principals` on the default one). The guard now refuses an
-  invalid `access.principals.model` with a `LogicException`, as the
-  directory does, instead of skipping it.
-
-### Added
-
-- `PrincipalCeiling::allows($principalId, $permission)` (design §15.4): the
-  owner ceiling behind an API key. The principal and its owner chain must be
-  active, the nearest `user` principal of the chain in the same organisation,
-  and that user must hold the permission there, read fresh and never through
-  super-admin; the team is switched for the check and always restored.
-  Unowned services get `false`, and so does any declared instance type,
-  refused by its type anywhere in the chain whatever its row says.
-  `PrincipalDirectory::activeOwnerChain()` returns the active chain.
-
-- `Testing\AssertsRolesSchema` (A4): asserts the product-owned columns on
-  Spatie's `roles` table, `public_id` (not null, unique) everywhere and the
-  optional `is_system`, `is_assignable`, `description` and `metadata` where
-  a product has them, with the flag defaults proved by a rolled-back insert.
-
-- Reference docs for 1.0: `docs/reference-schema.md` (the Spatie columns
-  products own, A4, and the audit property shape, A5) and, in
-  `docs/reference-contracts.md`, the public classes, config keys,
-  environment variables, events, exceptions and migrations. Every class in
-  `src/` is now tagged `@api` or `@internal`; `UPGRADING.md` states the
-  deprecation policy; the README threat model covers principals.
-
-- Externa compatibility switches (design §9.2 step 6 / §9.4, removed in v2):
-  `access.use_package_gate` chooses whether `GateBefore` or the product's
-  `LegacyGateBefore` decides, still as the single `Gate::before` (AC1), and
-  `access.gate_shadow` runs the other one too and logs disagreements without
-  user data or secrets (`access.gate_shadow_log_channel`). Boot fails on a
-  non-boolean switch or a missing legacy binding.
-
-### Documentation
-
-- Dependency register `docs/dependencies.md`: one row per runtime
-  `composer.json` `require` entry with constraint rationale, usage,
-  maintainer, license, known risk and an in-package exit plan.
-
-## [0.1.0] - 2026-11-24
+## [0.1.0-beta.1] - 2026-11-25
 
 First tagged pre-release. Public APIs may still change in any 0.x minor.
 
@@ -96,6 +37,29 @@ first-install requirements (details in `docs/adoption.md` and `UPGRADING.md`):
 - `principals.user_id` is `ON DELETE RESTRICT`: route every user deletion
   through `PrincipalDirectory::eraseUser($user, fn ($user) =>
   $user->forceDelete())`.
+
+### Fixed
+
+- Group names are unique per organisation instead of globally (AC-a): the
+  group migration adds a stored generated `user_groups.organisation_key`
+  (the organisation id, or `''` without one) with a unique index on
+  (`organisation_key`, `name`), so two organisations can share a name while
+  two organisation-less groups still cannot. `AssertsGroupTablesSchema`
+  checks that index, or a global unique `name` in products without
+  organisations, and proves the organisation-less refusal with a rolled-back
+  insert.
+
+- `PrincipalCreated` is dispatched after the surrounding transaction commits
+  (`ShouldDispatchAfterCommit`), as `PrincipalDeactivated` already was, so a
+  rolled-back creation never reaches a listener (AC-c).
+
+- With `access.principals.model` set to a subclass on its own connection,
+  `PrincipalDirectory::deactivate()` runs its cascade in a transaction on
+  that connection (it used the default one), and `UserDeletionGuard` checks
+  that model's table on that connection, ignoring its global scopes (it
+  checked `principals` on the default one). The guard now refuses an
+  invalid `access.principals.model` with a `LogicException`, as the
+  directory does, instead of skipping it.
 
 ### Security
 
@@ -132,6 +96,34 @@ first-install requirements (details in `docs/adoption.md` and `UPGRADING.md`):
 - The `register_permission_check_method` boot error names the type it got.
 
 ### Added
+
+- `PrincipalCeiling::allows($principalId, $permission)` (design §15.4): the
+  owner ceiling behind an API key. The principal and its owner chain must be
+  active, the nearest `user` principal of the chain in the same organisation,
+  and that user must hold the permission there, read fresh and never through
+  super-admin; the team is switched for the check and always restored.
+  Unowned services get `false`, and so does any declared instance type,
+  refused by its type anywhere in the chain whatever its row says.
+  `PrincipalDirectory::activeOwnerChain()` returns the active chain.
+
+- `Testing\AssertsRolesSchema` (A4): asserts the product-owned columns on
+  Spatie's `roles` table, `public_id` (not null, unique) everywhere and the
+  optional `is_system`, `is_assignable`, `description` and `metadata` where
+  a product has them, with the flag defaults proved by a rolled-back insert.
+
+- Reference docs for 1.0: `docs/reference-schema.md` (the Spatie columns
+  products own, A4, and the audit property shape, A5) and, in
+  `docs/reference-contracts.md`, the public classes, config keys,
+  environment variables, events, exceptions and migrations. Every class in
+  `src/` is now tagged `@api` or `@internal`; `UPGRADING.md` states the
+  deprecation policy; the README threat model covers principals.
+
+- Externa compatibility switches (design §9.2 step 6 / §9.4, removed in v2):
+  `access.use_package_gate` chooses whether `GateBefore` or the product's
+  `LegacyGateBefore` decides, still as the single `Gate::before` (AC1), and
+  `access.gate_shadow` runs the other one too and logs disagreements without
+  user data or secrets (`access.gate_shadow_log_channel`). Boot fails on a
+  non-boolean switch or a missing legacy binding.
 
 - `principals` table (design §15): package migration
   `create_principals_table` with UUID ids, a restrict user link (erasure is a
@@ -265,5 +257,11 @@ first-install requirements (details in `docs/adoption.md` and `UPGRADING.md`):
   MariaDB / PostgreSQL), drift-check + PR-title reusable workflows, and README
   header banners.
 
-[Unreleased]: https://github.com/qiick-io/laravel-access/compare/v0.1.0...HEAD
-[0.1.0]: https://github.com/qiick-io/laravel-access/releases/tag/v0.1.0
+### Documentation
+
+- Dependency register `docs/dependencies.md`: one row per runtime
+  `composer.json` `require` entry with constraint rationale, usage,
+  maintainer, license, known risk and an in-package exit plan.
+
+[Unreleased]: https://github.com/qiick-io/laravel-access/compare/v0.1.0-beta.1...HEAD
+[0.1.0-beta.1]: https://github.com/qiick-io/laravel-access/releases/tag/v0.1.0-beta.1

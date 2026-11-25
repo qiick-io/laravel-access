@@ -25,19 +25,11 @@ events, and the migrations (see `docs/reference-contracts.md`). Code tagged
 
 ## Unreleased
 
-- New config keys `access.use_package_gate` (default `true`),
-  `access.gate_shadow` (default `false`) and `access.gate_shadow_log_channel`
-  for externa's switch to the package `Gate::before` (design §9). Nothing
-  changes with the defaults; a published config does not need them. They are
-  removed in v2.
-- The group migration changed before its first install: `user_groups.name`
-  is no longer globally unique; `organisation_key` (stored, generated) and a
-  unique (`organisation_key`, `name`) replace it. A local database migrated
-  from a development build needs `migrate:fresh`.
+Nothing yet.
 
-## 0.1.0 (first tagged pre-release)
+## 0.1.0-beta.1 (first tagged pre-release)
 
-There is no earlier version. A product adopting 0.1.0 follows
+There is no earlier version. A product adopting 0.1.0-beta.1 follows
 `docs/adoption.md`; the points that change existing product code:
 
 - Migrations are switched per set with `access.migrations.groups` and
@@ -59,3 +51,12 @@ There is no earlier version. A product adopting 0.1.0 follows
   The callback must hard-delete the row: with `SoftDeletes`, `delete()` keeps
   it, so `eraseUser()` throws and rolls back. A direct delete of a user with
   principals throws `UserHasPrincipalsException`.
+- New config keys `access.use_package_gate` (default `true`),
+  `access.gate_shadow` (default `false`) and `access.gate_shadow_log_channel`
+  for externa's switch to the package `Gate::before` (design §9). Nothing
+  changes with the defaults; a published config does not need them. They are
+  removed in v2.
+- The group migration changed before its first install: `user_groups.name`
+  is no longer globally unique; `organisation_key` (stored, generated) and a
+  unique (`organisation_key`, `name`) replace it. A local database migrated
+  from a development build needs `migrate:fresh`.
