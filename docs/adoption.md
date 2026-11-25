@@ -196,6 +196,12 @@ team columns; products assert that with
 `Qiick\Access\Testing\AssertsSpatieTeamSchema` (A3) — run the uuid check on
 PostgreSQL.
 
+Assert the product-owned columns on Spatie's `roles` table with
+`Qiick\Access\Testing\AssertsRolesSchema` (A4): `public_id` not null with a
+unique index everywhere, and, where the product has them, `is_system` and
+`is_assignable` not null defaulting to `false` and `true`, `description` and
+`metadata` nullable.
+
 `EffectivePermissionResolver` applies group role ids from instance groups,
 legacy unscoped groups, and organisation groups matching the current
 `TeamContext`. Super-admin via groups counts **only** `is_instance` groups

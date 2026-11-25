@@ -34,6 +34,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   refused by its type anywhere in the chain whatever its row says.
   `PrincipalDirectory::activeOwnerChain()` returns the active chain.
 
+- `Testing\AssertsRolesSchema` (A4): asserts the product-owned columns on
+  Spatie's `roles` table, `public_id` (not null, unique) everywhere and the
+  optional `is_system`, `is_assignable`, `description` and `metadata` where
+  a product has them, with the flag defaults proved by a rolled-back insert.
+
 - Externa compatibility switches (design §9.2 step 6 / §9.4, removed in v2):
   `access.use_package_gate` chooses whether `GateBefore` or the product's
   `LegacyGateBefore` decides, still as the single `Gate::before` (AC1), and
