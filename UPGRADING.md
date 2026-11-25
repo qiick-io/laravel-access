@@ -25,7 +25,9 @@ events, and the migrations (see `docs/reference-contracts.md`). Code tagged
 
 ## Unreleased
 
-Nothing yet.
+- Boot fails when a database connection in `database.connections` sets a
+  `name` other than its key. Remove that `name` (the key is the connection's
+  identity).
 
 ## 0.1.0-beta.1 (first tagged pre-release)
 

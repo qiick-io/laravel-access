@@ -8,15 +8,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+
+- Boot fails when a database connection has a `name` other than its key
+  (`AccessBootChecks::assertConnectionNamesMatchTheirKeys()`): Laravel
+  reports that name and Eloquent re-resolves loaded models by it, so two
+  databases could share one identity in the group member check.
+
 ### Fixed
 
 - `EloquentGroupRoleSource` gave no group roles to a user loaded from the
   database: it compared the user's connection name (set on a loaded model)
   with a new member model's (null for the default connection), so every real
   user failed the member check and group roles, permissions and the
-  super-admin group counted for nobody. It now compares the resolved
-  connection names. Fail-closed, but it broke group permissions in
-  `0.1.0-beta.1`.
+  super-admin group counted for nobody in `0.1.0-beta.1` (fail-closed). It
+  now compares resolved connection names, and admits only users of the
+  connection the group tables are read from: a user of another database
+  with a matching id no longer gets that database's memberships.
+- The resolver's principal identity and cache key include the resolved
+  connection name, so users of two databases with the same class and id are
+  different principals (`isSamePrincipal()`, cached roles and super-admin
+  verdicts).
 
 ## [0.1.0-beta.1] - 2026-11-25
 

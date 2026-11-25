@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use Qiick\Access\Contracts\GroupRoleSource;
 use Qiick\Access\Contracts\PermissionVocabulary;
@@ -293,3 +294,49 @@ it('grants no group permissions when the Spatie permission or role class is not 
     'permission class not a model' => [stdClass::class, Role::class],
     'role class not a model' => [Permission::class, stdClass::class],
 ]);
+
+it('keeps principals of two databases apart, in identity and in the cache', function (): void {
+    Role::create(['name' => 'super-admin', 'guard_name' => 'web']);
+    $admin = SpatieUser::query()->create(['email' => 'admin@example.com']);
+    $admin->assignRole('super-admin');
+
+    // A second real database with the same tables and a plain user 1.
+    $tenantDatabase = tempnam(sys_get_temp_dir(), 'access-tenant-');
+    config()->set('database.connections.tenant', ['driver' => 'sqlite', 'database' => $tenantDatabase, 'prefix' => '']);
+    $defaultConnection = config('database.default');
+    config()->set('database.default', 'tenant');
+
+    try {
+        Schema::create('users', function (Blueprint $table): void {
+            $table->id();
+            $table->string('email')->nullable();
+        });
+        (require dirname(__DIR__, 2).'/vendor/spatie/laravel-permission/database/migrations/create_permission_tables.php.stub')->up();
+        DB::table('users')->insert(['id' => $admin->id, 'email' => 'tenant@example.com']);
+    } finally {
+        config()->set('database.default', $defaultConnection);
+    }
+
+    $roleCatalog = Mockery::mock(RoleCatalog::class);
+    $roleCatalog->shouldReceive('superAdminRoleName')->andReturn('super-admin');
+    $groupRoles = Mockery::mock(GroupRoleSource::class);
+    $groupRoles->shouldReceive('instanceRoleIdsFor')->andReturn([]);
+    $groupRoles->shouldReceive('roleIdsFor')->andReturn([]);
+    $this->app->forgetInstance(EffectivePermissionResolver::class);
+    $this->app->instance(RoleCatalog::class, $roleCatalog);
+    $this->app->instance(GroupRoleSource::class, $groupRoles);
+    $resolver = app(EffectivePermissionResolver::class);
+
+    $tenantUser = SpatieUser::on('tenant')->findOrFail($admin->id);
+
+    expect($resolver->isSuperAdmin($admin))->toBeTrue()
+        ->and($resolver->isSamePrincipal($admin, $tenantUser))->toBeFalse()
+        ->and($resolver->isSamePrincipal($admin, SpatieUser::query()->findOrFail($admin->id)))->toBeTrue()
+        // Same connection and id, another morph class: another principal.
+        ->and($resolver->isSamePrincipal($admin, (new class extends SpatieUser {})->forceFill(['id' => $admin->id])))->toBeFalse()
+        ->and($resolver->isSuperAdmin($tenantUser))->toBeFalse()
+        ->and($resolver->permissionsFor($tenantUser))->toBe([]);
+
+    DB::purge('tenant');
+    unlink($tenantDatabase);
+});

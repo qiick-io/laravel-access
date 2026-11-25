@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use Qiick\Access\Contracts\GroupRoleSource;
 use Qiick\Access\Contracts\TeamContext;
@@ -371,4 +372,42 @@ it('gives group roles to a user loaded from the database (beta.1 regression)', f
         ->and($source->roleIdsFor($loadedUser))->toBe([1, 2]);
 
     Schema::drop('users');
+})->group('engines');
+
+/**
+ * The member model on its own database: a tenant user whose id happens to
+ * match a member of the groups on the default connection.
+ */
+final class TenantUser extends SpatieUser
+{
+    protected $connection = 'tenant';
+}
+
+it('never reads the default connection memberships for a user of another database', function (): void {
+    // A second real database next to the engine under test.
+    $tenantDatabase = tempnam(sys_get_temp_dir(), 'access-tenant-');
+    config()->set('database.connections.tenant', ['driver' => 'sqlite', 'database' => $tenantDatabase, 'prefix' => '']);
+    Schema::connection('tenant')->create('users', function (Blueprint $table): void {
+        $table->id();
+        $table->string('email')->nullable();
+    });
+    DB::connection('tenant')->table('users')->insert(['id' => 1, 'email' => 'tenant@example.com']);
+
+    $connection = app('db')->connection();
+    $connection->table('user_groups')->insert(['id' => 1, 'public_id' => '11111111-1111-7111-8111-111111111111', 'name' => 'instance-admins', 'organisation_id' => null, 'is_instance' => true, 'deleted_at' => null]);
+    $connection->table('user_group_user')->insert(['user_id' => 1, 'user_group_id' => 1, 'expires_at' => null]);
+    $connection->table('user_group_role')->insert(['user_group_id' => 1, 'role_id' => 1]);
+
+    // Member model and user agree on the tenant connection; the group tables
+    // live on the default one, so user 1 there is somebody else.
+    config()->set('access.group_member_model', TenantUser::class);
+    $tenantUser = TenantUser::query()->findOrFail(1);
+    $source = app(GroupRoleSource::class);
+
+    expect($source->instanceRoleIdsFor($tenantUser))->toBe([])
+        ->and($source->roleIdsFor($tenantUser))->toBe([]);
+
+    DB::purge('tenant');
+    unlink($tenantDatabase);
+    config()->set('access.group_member_model', null);
 })->group('engines');

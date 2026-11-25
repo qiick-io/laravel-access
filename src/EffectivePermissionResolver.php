@@ -296,12 +296,13 @@ final class EffectivePermissionResolver
     /**
      * Spatie's identity for a model is its morph class (model_type), so a
      * sibling class sharing it is the same principal: a role event on one
-     * clears the other's entry.
+     * clears the other's entry. The resolved connection name keeps users of
+     * two databases with the same id apart, in identity and in the cache.
      */
     private function principalType(Authenticatable $user): string
     {
         if ($user instanceof Model) {
-            return $user->getMorphClass();
+            return $user->getConnection()->getName().'|'.$user->getMorphClass();
         }
 
         return $user::class;

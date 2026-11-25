@@ -178,6 +178,13 @@ membership FK targets `access.users_table` when set, otherwise the table from
 group uses `is_instance = true` with `organisation_id` NULL; a CHECK forbids
 `is_instance = true` together with a non-null `organisation_id`.
 
+Group memberships are read from the default database connection, so the
+group member model (`access.group_member_model`, else the auth users model)
+lives there too; a user of another connection gets no group roles. Each
+configured connection's identity is its key: boot fails when a connection
+sets a `name` other than its key, since Laravel would report that name and
+two databases could then pass for one.
+
 A group name is unique within its organisation, and among the groups without
 an organisation (instance groups and the legacy unscoped ones): two
 organisations can both have an "Editors" group. The migration indexes

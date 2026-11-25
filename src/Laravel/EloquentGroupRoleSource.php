@@ -81,13 +81,15 @@ final class EloquentGroupRoleSource implements GroupRoleSource
      */
     private function pluckRoleIds(Authenticatable $user, Closure $constrainGroups): array
     {
-        if (! $this->isGroupMember($user)) {
+        $groupConnection = $this->database->connection();
+
+        if (! $this->isGroupMember($user, $groupConnection->getName())) {
             return [];
         }
 
         $now = now();
 
-        $query = $this->database->connection()
+        $query = $groupConnection
             ->table('user_group_user')
             ->join(
                 'user_groups',
@@ -126,7 +128,10 @@ final class EloquentGroupRoleSource implements GroupRoleSource
         return $normalized;
     }
 
-    private function isGroupMember(Authenticatable $user): bool
+    /**
+     * @param  string|null  $groupConnectionName  the connection the group tables are read from
+     */
+    private function isGroupMember(Authenticatable $user, ?string $groupConnectionName): bool
     {
         $memberModel = $this->config->get('access.group_member_model')
             ?? $this->config->get('auth.providers.users.model');
@@ -139,15 +144,19 @@ final class EloquentGroupRoleSource implements GroupRoleSource
             return $user instanceof $memberModel;
         }
 
-        // user_group_user.user_id holds ids of the member model's table: any
-        // model on that table and connection is the same principal (STI and
-        // same-table subclasses), a subclass with its own table is not.
-        // Resolved names: a loaded model carries its connection name, a new
-        // one has null for the default (beta.1 regression).
+        // user_group_user.user_id holds ids of the member model's table on the
+        // group tables' connection: any model on that table and connection is
+        // the same principal (STI and same-table subclasses); a subclass with
+        // its own table, or a user of another database, is not. Resolved
+        // names, since a loaded model carries its connection name and a new
+        // one has null for the default (beta.1 regression); AccessBootChecks
+        // makes a resolved name the connection's own key, so two databases
+        // cannot share one.
         $member = new $memberModel;
 
         return $user instanceof Model
             && $user->getTable() === $member->getTable()
-            && $user->getConnection()->getName() === $member->getConnection()->getName();
+            && $user->getConnection()->getName() === $groupConnectionName
+            && $member->getConnection()->getName() === $groupConnectionName;
     }
 }
