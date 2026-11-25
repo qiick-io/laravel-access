@@ -15,6 +15,8 @@ use Illuminate\Support\Facades\Schema;
  *
  * It listens to `eloquent.deleting: *`, so it runs for every model deletion;
  * for anything but the users model it costs a config read and an instanceof.
+ *
+ * @internal
  */
 final class UserDeletionGuard
 {

@@ -4,6 +4,25 @@ This package is **pre-release** (`0.x`). Breaking changes are allowed between
 minor versions while the major is `0`, and each break is recorded here before a
 tagged release.
 
+## Deprecation policy
+
+From `1.0.0` the public API is everything tagged `@api` in `src/`, the
+`access.*` config keys and their `ACCESS_*` environment variables, the
+events, and the migrations (see `docs/reference-contracts.md`). Code tagged
+`@internal` carries no promise.
+
+- A public name or behaviour is removed only in a major release.
+- It is first deprecated in a minor: `@deprecated` with the major that
+  removes it and the replacement, a `Deprecated` entry in the CHANGELOG and
+  a note here. It keeps working for at least one minor release before the
+  major that removes it.
+- A security fix may tighten behaviour in a patch or minor (a boot check
+  that now fails, a check that now denies). It is listed under `Security` in
+  the CHANGELOG with the steps to adopt it here.
+- Migrations are forward-only after `1.0.0`: a schema change is a new
+  migration, never an edit.
+- Before `1.0.0` (`0.x`), a minor may break; each break is recorded here.
+
 ## Unreleased
 
 - New config keys `access.use_package_gate` (default `true`),

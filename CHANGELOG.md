@@ -39,6 +39,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   optional `is_system`, `is_assignable`, `description` and `metadata` where
   a product has them, with the flag defaults proved by a rolled-back insert.
 
+- Reference docs for 1.0: `docs/reference-schema.md` (the Spatie columns
+  products own, A4, and the audit property shape, A5) and, in
+  `docs/reference-contracts.md`, the public classes, config keys,
+  environment variables, events, exceptions and migrations. Every class in
+  `src/` is now tagged `@api` or `@internal`; `UPGRADING.md` states the
+  deprecation policy; the README threat model covers principals.
+
 - Externa compatibility switches (design §9.2 step 6 / §9.4, removed in v2):
   `access.use_package_gate` chooses whether `GateBefore` or the product's
   `LegacyGateBefore` decides, still as the single `Gate::before` (AC1), and

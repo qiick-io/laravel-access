@@ -16,6 +16,8 @@ use Spatie\Permission\PermissionRegistrar;
  * admin who may create roles in their organisation gets a loud error instead
  * of a role that looks like super-admin. AccessServiceProvider runs it on the
  * Spatie role model's `saving` event.
+ *
+ * @internal
  */
 final class ReservedRoleNameGuard
 {

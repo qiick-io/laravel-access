@@ -19,6 +19,8 @@ use RuntimeException;
  * (AC-a). Products that adopt the tables (including externa with
  * access.migrations.groups = false) call assertShape() so their schema
  * cannot drift from the package.
+ *
+ * @api
  */
 final class AssertsGroupTablesSchema
 {

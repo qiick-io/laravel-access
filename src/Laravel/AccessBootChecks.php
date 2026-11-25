@@ -18,6 +18,8 @@ use RuntimeException;
  * Fail-closed boot assertions for the package (AC12, R4, A1). Extracted from
  * AccessServiceProvider so mutation targets cover the checks without mutating
  * the whole provider (design §11 / N4).
+ *
+ * @internal
  */
 final class AccessBootChecks
 {

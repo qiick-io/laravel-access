@@ -15,6 +15,8 @@ use stdClass;
  * organisation_id and the three team columns must be uuid (fleet core schema).
  * Products call assertWhenTeamsEnabled() from their conformance suite; run it
  * on PostgreSQL so a wrong column type fails closed.
+ *
+ * @api
  */
 final class AssertsSpatieTeamSchema
 {

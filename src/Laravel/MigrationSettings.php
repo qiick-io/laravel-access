@@ -12,6 +12,8 @@ use LogicException;
  * Config the package migrations read when they run (design §15.3: changing it
  * later changes nothing in the database). Shared by the group and principal
  * migrations so both point their user foreign keys at the same table.
+ *
+ * @internal
  */
 final class MigrationSettings
 {
