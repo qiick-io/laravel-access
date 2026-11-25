@@ -322,6 +322,8 @@ it('gives no group roles to a subclass of the member model that has its own tabl
     $connection->table('user_group_user')->insert(['user_id' => 1, 'user_group_id' => 1, 'expires_at' => null]);
     $connection->table('user_group_role')->insert(['user_group_id' => 1, 'role_id' => 1]);
 
+    // Another connection name, even to the same database, is another principal.
+    config()->set('database.connections.replica', config('database.connections.'.config('database.default')));
     $user = (new SpatieUser)->forceFill(['id' => 1]);
     $sameTableSubclass = (new class extends SpatieUser {})->forceFill(['id' => 1]);
     $ownTableAdmin = (new OwnTableAdmin)->forceFill(['id' => 1]);
@@ -337,4 +339,36 @@ it('gives no group roles to a subclass of the member model that has its own tabl
         ->and($source->roleIdsFor($ownTableAdmin))->toBe([])
         ->and($source->instanceRoleIdsFor($otherConnectionUser))->toBe([])
         ->and($source->instanceRoleIdsFor(new FakeAuthenticatable(1)))->toBe([]);
+})->group('engines');
+
+it('gives group roles to a user loaded from the database (beta.1 regression)', function (): void {
+    config()->set('auth.providers.users.model', SpatieUser::class);
+    Schema::dropIfExists('users');
+    Schema::create('users', function (Blueprint $table): void {
+        $table->id();
+        $table->string('email')->nullable();
+    });
+
+    $connection = app('db')->connection();
+    $connection->table('users')->insert(['id' => 1, 'email' => 'member@example.com']);
+    $connection->table('user_groups')->insert([
+        ['id' => 1, 'public_id' => '11111111-1111-7111-8111-111111111111', 'name' => 'instance-admins', 'organisation_id' => null, 'is_instance' => true, 'deleted_at' => null],
+        ['id' => 2, 'public_id' => '22222222-2222-7222-8222-222222222222', 'name' => 'editors', 'organisation_id' => null, 'is_instance' => false, 'deleted_at' => null],
+    ]);
+    $connection->table('user_group_user')->insert([
+        ['user_id' => 1, 'user_group_id' => 1, 'expires_at' => null],
+        ['user_id' => 1, 'user_group_id' => 2, 'expires_at' => null],
+    ]);
+    $connection->table('user_group_role')->insert([['user_group_id' => 1, 'role_id' => 1], ['user_group_id' => 2, 'role_id' => 2]]);
+
+    // Loaded models carry their connection name; a new instance of the member
+    // model has none. Both mean the same connection.
+    $loadedUser = SpatieUser::query()->findOrFail(1);
+    $source = app(GroupRoleSource::class);
+
+    expect($loadedUser->getConnectionName())->not->toBeNull()
+        ->and($source->instanceRoleIdsFor($loadedUser))->toBe([1])
+        ->and($source->roleIdsFor($loadedUser))->toBe([1, 2]);
+
+    Schema::drop('users');
 })->group('engines');

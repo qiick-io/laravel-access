@@ -8,6 +8,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- `EloquentGroupRoleSource` gave no group roles to a user loaded from the
+  database: it compared the user's connection name (set on a loaded model)
+  with a new member model's (null for the default connection), so every real
+  user failed the member check and group roles, permissions and the
+  super-admin group counted for nobody. It now compares the resolved
+  connection names. Fail-closed, but it broke group permissions in
+  `0.1.0-beta.1`.
+
 ## [0.1.0-beta.1] - 2026-11-25
 
 First tagged pre-release. Public APIs may still change in any 0.x minor.

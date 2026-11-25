@@ -142,10 +142,12 @@ final class EloquentGroupRoleSource implements GroupRoleSource
         // user_group_user.user_id holds ids of the member model's table: any
         // model on that table and connection is the same principal (STI and
         // same-table subclasses), a subclass with its own table is not.
+        // Resolved names: a loaded model carries its connection name, a new
+        // one has null for the default (beta.1 regression).
         $member = new $memberModel;
 
         return $user instanceof Model
             && $user->getTable() === $member->getTable()
-            && $user->getConnectionName() === $member->getConnectionName();
+            && $user->getConnection()->getName() === $member->getConnection()->getName();
     }
 }
