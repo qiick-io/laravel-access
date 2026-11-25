@@ -11,6 +11,10 @@ tagged release.
   for externa's switch to the package `Gate::before` (design §9). Nothing
   changes with the defaults; a published config does not need them. They are
   removed in v2.
+- The group migration changed before its first install: `user_groups.name`
+  is no longer globally unique; `organisation_key` (stored, generated) and a
+  unique (`organisation_key`, `name`) replace it. A local database migrated
+  from a development build needs `migrate:fresh`.
 
 ## 0.1.0 (first tagged pre-release)
 
