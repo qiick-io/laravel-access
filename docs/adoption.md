@@ -131,6 +131,17 @@ The directory reads `access.principals.organisation_required` and
 migration ran: keep them unchanged after migrating, or the database refuses
 what the directory allows with a driver error.
 
+**The owner ceiling behind a key** (design §15.4): the product's key
+authorizer checks the credential's own scopes, then
+`Qiick\Access\Principals\PrincipalCeiling::allows($ownerPrincipalId,
+$permission)`. It is true only when the principal and every owner up its chain
+are active, the nearest `user` principal up that chain (the principal itself
+for a membership) is in the same organisation, and that user holds the
+permission in that organisation right now (read fresh, never through
+super-admin). The team context is switched for the check and always restored.
+A service or agent with no user owner, and any instance principal, gets
+`false`: its powers come from the product's scopes alone.
+
 `access.principals.model` may point at a subclass of
 `Qiick\Access\Principals\Principal` for product relations (API keys,
 grants).
@@ -166,6 +177,17 @@ membership FK targets `access.users_table` when set, otherwise the table from
 `auth.providers.users.model`, otherwise `users`. The instance super-admin
 group uses `is_instance = true` with `organisation_id` NULL; a CHECK forbids
 `is_instance = true` together with a non-null `organisation_id`.
+
+A group name is unique within its organisation, and among the groups without
+an organisation (instance groups and the legacy unscoped ones): two
+organisations can both have an "Editors" group. The migration indexes
+(`organisation_key`, `name`), where `organisation_key` is a stored generated
+column holding the organisation id, or `''` without one, so organisation-less
+duplicates are refused on every engine (a plain NULL would let them through).
+externa 1.x keeps its own tables with a global unique `name`, which
+`AssertsGroupTablesSchema` accepts because it has no organisations; it adds
+`organisation_key` with the unique index when it moves to the package tables
+(additive).
 
 Assert the group schema with `Qiick\Access\Testing\AssertsGroupTablesSchema`
 (AC17 / C75). When Spatie teams are on, set
