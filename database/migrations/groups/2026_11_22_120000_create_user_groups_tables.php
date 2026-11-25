@@ -1,0 +1,92 @@
+<?php
+
+declare(strict_types=1);
+
+use Illuminate\Database\Migrations\Migration;
+use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Support\Facades\Schema;
+use Qiick\Access\Laravel\AccessSchema;
+use Qiick\Access\Laravel\MigrationSettings;
+
+/*
+ * Package-owned group tables (standards A12 / decision 2026-11-22, Q5).
+ * Names are fixed: user_groups, user_group_user, user_group_role — never
+ * configurable. Spatie's tables stay Spatie's; this migration never creates
+ * or alters them. role_id references permission.table_names.roles
+ * (default "roles"). user_id references access.users_table or the auth
+ * users provider model table (default "users"). Products generate
+ * user_groups.public_id as UUID v7 in their model / factory.
+ *
+ * organisation_id (nullable uuid) scopes a group to one organisation;
+ * is_instance marks the instance-level super-admin group (organisation_id
+ * must be NULL). Externa 1.x leaves both unused (false / null).
+ *
+ * A name is unique within its organisation, and among the groups without one
+ * (AC-a): organisation_key is the organisation id, or '' without one, so the
+ * unique index also refuses two organisation-less groups of the same name,
+ * which a NULL organisation_id would let through on every engine.
+ */
+return new class extends Migration
+{
+    public function up(): void
+    {
+        $rolesTable = config('permission.table_names.roles', 'roles');
+        $rolesTable = is_string($rolesTable) && $rolesTable !== '' ? $rolesTable : 'roles';
+        $usersTable = MigrationSettings::usersTable();
+        // Text on every engine, as for principals: MariaDB's uuid type refuses ''.
+        $organisationIdText = match (Schema::getConnection()->getDriverName()) {
+            'pgsql' => 'organisation_id::text',
+            'mysql', 'mariadb' => 'CAST(organisation_id AS CHAR(36))',
+            default => 'organisation_id',
+        };
+
+        Schema::create('user_groups', function (Blueprint $table) use ($organisationIdText): void {
+            $table->id();
+            $table->uuid('public_id')->unique();
+            $table->string('name');
+            $table->text('description')->nullable();
+            $table->json('metadata')->nullable();
+            $table->uuid('organisation_id')->nullable()->index();
+            $table->boolean('is_instance')->default(false);
+            $table->timestamps();
+            $table->softDeletes();
+            $table->string('organisation_key', 36)->storedAs("COALESCE({$organisationIdText}, '')");
+
+            $table->unique(['organisation_key', 'name'], 'user_groups_organisation_name_unique');
+        });
+
+        // is_instance only with a NULL organisation (AC17 / C75).
+        AccessSchema::ensureConstraints();
+
+        Schema::create('user_group_user', function (Blueprint $table) use ($usersTable): void {
+            $table->foreignId('user_group_id')->constrained('user_groups')->cascadeOnDelete();
+            $table->foreignId('user_id')->constrained($usersTable)->cascadeOnDelete();
+            $table->dateTime('expires_at')->nullable()->index();
+            $table->timestamps();
+
+            $table->unique(['user_group_id', 'user_id']);
+            $table->index('user_id');
+        });
+
+        Schema::create('user_group_role', function (Blueprint $table) use ($rolesTable): void {
+            $table->foreignId('user_group_id')->constrained('user_groups')->cascadeOnDelete();
+            $table->unsignedBigInteger('role_id');
+            $table->timestamps();
+
+            $table->unique(['user_group_id', 'role_id']);
+            $table->index('role_id');
+
+            $table->foreign('role_id')
+                ->references('id')
+                ->on($rolesTable)
+                ->cascadeOnDelete();
+        });
+    }
+
+    public function down(): void
+    {
+        Schema::dropIfExists('user_group_role');
+        Schema::dropIfExists('user_group_user');
+        Schema::dropIfExists('user_groups');
+    }
+};

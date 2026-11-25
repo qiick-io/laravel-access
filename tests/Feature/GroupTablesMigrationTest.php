@@ -1,0 +1,221 @@
+<?php
+
+declare(strict_types=1);
+
+use Illuminate\Database\Migrations\Migration;
+use Illuminate\Database\QueryException;
+use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Support\Facades\Schema;
+use Illuminate\Support\Str;
+use Qiick\Access\Laravel\AccessSchema;
+use Qiick\Access\Testing\AssertsGroupTablesSchema;
+
+/**
+ * Runs the package create_user_groups_tables migration on the configured engine.
+ */
+beforeEach(function (): void {
+    Schema::dropIfExists('user_group_role');
+    Schema::dropIfExists('user_group_user');
+    Schema::dropIfExists('user_groups');
+    Schema::dropIfExists('roles');
+    Schema::dropIfExists('users');
+
+    Schema::create('users', function (Blueprint $table): void {
+        $table->id();
+        $table->string('email')->nullable();
+        $table->timestamps();
+    });
+    Schema::create('roles', function (Blueprint $table): void {
+        $table->id();
+        $table->string('name');
+        $table->string('guard_name')->nullable();
+        $table->timestamps();
+    });
+});
+
+afterEach(function (): void {
+    Schema::dropIfExists('user_group_role');
+    Schema::dropIfExists('user_group_user');
+    Schema::dropIfExists('user_groups');
+    Schema::dropIfExists('roles');
+    Schema::dropIfExists('users');
+});
+
+it('creates the package group tables with expires_at public_id and metadata', function (): void {
+    $rolesColumnsBefore = collect(app('db')->connection()->getSchemaBuilder()->getColumns('roles'))
+        ->pluck('name')
+        ->sort()
+        ->values()
+        ->all();
+
+    /** @var Migration $migration */
+    $migration = require dirname(__DIR__, 2).'/database/migrations/groups/2026_11_22_120000_create_user_groups_tables.php';
+    $migration->up();
+
+    expect(Schema::hasTable('user_groups'))->toBeTrue()
+        ->and(Schema::hasColumns('user_groups', [
+            'public_id',
+            'name',
+            'metadata',
+            'organisation_id',
+            'is_instance',
+            'deleted_at',
+        ]))->toBeTrue()
+        ->and(Schema::hasColumns('user_group_user', ['user_id', 'user_group_id', 'expires_at']))->toBeTrue()
+        ->and(Schema::hasColumns('user_group_role', ['user_group_id', 'role_id']))->toBeTrue();
+
+    $rolesColumnsAfter = collect(app('db')->connection()->getSchemaBuilder()->getColumns('roles'))
+        ->pluck('name')
+        ->sort()
+        ->values()
+        ->all();
+
+    expect($rolesColumnsAfter)->toBe($rolesColumnsBefore);
+
+    (new AssertsGroupTablesSchema(app('db')->connection()))->assertShape();
+
+    $connection = app('db')->connection();
+    $connection->table('users')->insert(['id' => 1, 'email' => 'a@example.com']);
+    $connection->table('roles')->insert(['id' => 9, 'name' => 'reader', 'guard_name' => 'web']);
+    $connection->table('user_groups')->insert([
+        'public_id' => (string) Str::uuid(),
+        'name' => 'ops',
+        'metadata' => null,
+        'organisation_id' => null,
+        'is_instance' => false,
+        'created_at' => now(),
+        'updated_at' => now(),
+    ]);
+    $groupId = (int) $connection->table('user_groups')->value('id');
+    $connection->table('user_group_user')->insert([
+        'user_group_id' => $groupId,
+        'user_id' => 1,
+        'expires_at' => null,
+        'created_at' => now(),
+        'updated_at' => now(),
+    ]);
+    $connection->table('user_group_role')->insert([
+        'user_group_id' => $groupId,
+        'role_id' => 9,
+        'created_at' => now(),
+        'updated_at' => now(),
+    ]);
+
+    expect($connection->table('user_group_role')->count())->toBe(1);
+
+    // Instance group with organisation_id set must violate the XOR CHECK (AC17/C75).
+    expect(fn () => $connection->table('user_groups')->insert([
+        'public_id' => (string) Str::uuid(),
+        'name' => 'bad-instance',
+        'metadata' => null,
+        'organisation_id' => (string) Str::uuid(),
+        'is_instance' => true,
+        'created_at' => now(),
+        'updated_at' => now(),
+    ]))->toThrow(QueryException::class);
+})->group('engines');
+
+it('points the membership user_id foreign key at access.users_table when set', function (): void {
+    Schema::dropIfExists('accounts');
+    Schema::create('accounts', function (Blueprint $table): void {
+        $table->id();
+        $table->timestamps();
+    });
+
+    config()->set('access.users_table', 'accounts');
+
+    /** @var Migration $migration */
+    $migration = require dirname(__DIR__, 2).'/database/migrations/groups/2026_11_22_120000_create_user_groups_tables.php';
+    $migration->up();
+
+    $connection = app('db')->connection();
+    $connection->table('accounts')->insert(['id' => 1]);
+    $connection->table('user_groups')->insert([
+        'public_id' => (string) Str::uuid(),
+        'name' => 'finance',
+        'metadata' => null,
+        'organisation_id' => null,
+        'is_instance' => false,
+        'created_at' => now(),
+        'updated_at' => now(),
+    ]);
+    $groupId = (int) $connection->table('user_groups')->value('id');
+
+    $connection->table('user_group_user')->insert([
+        'user_group_id' => $groupId,
+        'user_id' => 1,
+        'expires_at' => null,
+        'created_at' => now(),
+        'updated_at' => now(),
+    ]);
+
+    expect($connection->table('user_group_user')->count())->toBe(1);
+
+    // Inserting a user_id that exists only on users (not accounts) must fail the FK.
+    $connection->table('users')->insert(['id' => 99, 'email' => 'orphan@example.com']);
+
+    expect(fn () => $connection->table('user_group_user')->insert([
+        'user_group_id' => $groupId,
+        'user_id' => 99,
+        'expires_at' => null,
+        'created_at' => now(),
+        'updated_at' => now(),
+    ]))->toThrow(QueryException::class);
+
+    Schema::dropIfExists('user_group_role');
+    Schema::dropIfExists('user_group_user');
+    Schema::dropIfExists('user_groups');
+    Schema::dropIfExists('accounts');
+    config()->set('access.users_table', null);
+})->group('engines');
+
+it('restores the instance-group rule after a product rebuilds the table (review B2)', function (): void {
+    /** @var Migration $migration */
+    $migration = require dirname(__DIR__, 2).'/database/migrations/groups/2026_11_22_120000_create_user_groups_tables.php';
+    $migration->up();
+    Schema::create('organisations', function (Blueprint $table): void {
+        $table->uuid('id')->primary();
+    });
+
+    Schema::table('user_groups', function (Blueprint $table): void {
+        $table->foreign('organisation_id')->references('id')->on('organisations')->restrictOnDelete();
+    });
+    AccessSchema::ensureConstraints();
+    AccessSchema::ensureConstraints();
+
+    $organisationId = (string) Str::uuid();
+    app('db')->connection()->table('organisations')->insert(['id' => $organisationId]);
+
+    expect(fn () => app('db')->connection()->table('user_groups')->insert([
+        'public_id' => (string) Str::uuid(),
+        'name' => 'bad-instance',
+        'organisation_id' => $organisationId,
+        'is_instance' => true,
+        'created_at' => now(),
+        'updated_at' => now(),
+    ]))->toThrow(QueryException::class);
+
+    Schema::dropIfExists('user_group_role');
+    Schema::dropIfExists('user_group_user');
+    Schema::dropIfExists('user_groups');
+    Schema::dropIfExists('organisations');
+})->group('engines');
+
+it('scopes group names to their organisation, one name per instance level (AC-a)', function (): void {
+    (require dirname(__DIR__, 2).'/database/migrations/groups/2026_11_22_120000_create_user_groups_tables.php')->up();
+    $connection = app('db')->connection();
+    $insertGroup = static fn (string $name, ?string $organisationId): bool => $connection->table('user_groups')->insert([
+        'public_id' => (string) Str::uuid7(), 'name' => $name, 'organisation_id' => $organisationId,
+        'is_instance' => false, 'created_at' => now(), 'updated_at' => now(),
+    ]);
+    $organisationA = (string) Str::uuid();
+    $organisationB = (string) Str::uuid();
+
+    $insertGroup('Editors', $organisationA);
+    $insertGroup('Editors', $organisationB);
+    $insertGroup('Editors', null);
+
+    expect(fn () => $insertGroup('Editors', $organisationA))->toThrow(QueryException::class)
+        ->and(fn () => $insertGroup('Editors', null))->toThrow(QueryException::class)
+        ->and($connection->table('user_groups')->where('name', 'Editors')->count())->toBe(3);
+})->group('engines');

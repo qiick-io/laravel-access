@@ -1,0 +1,16 @@
+includes:
+    - vendor/larastan/larastan/extension.neon
+
+parameters:
+    level: max
+    paths:
+        - src
+        - config
+        # Uses AuthorizesWithPermission, so PHPStan analyses the trait.
+        - tests/Support/PermissionGatedRequest.php
+    tmpDir: build/phpstan
+    treatPhpDocTypesAsCertain: false
+    bootstrapFiles:
+        - phpstan-bootstrap.php
+    configDirectories:
+        - config
