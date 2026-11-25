@@ -43,7 +43,7 @@ above, the public classes are:
 | Actor runtime | `Laravel\AccessContext`, `Laravel\ContainerActorResolver`, `Laravel\CarriesActorContext`, `Laravel\ActorPayloadStamper`, `Laravel\SpatieTeamQueueBoundary` |
 | Adapters | `Laravel\NoTeamContext`, `Laravel\SpatieTeamContext`, `Laravel\EloquentGroupRoleSource`, `Laravel\SpatiePermissionVocabulary` |
 | Schema | `Laravel\AccessSchema`, `Laravel\AccessServiceProvider` |
-| Principals | `Principals\PrincipalDirectory`, `Principals\EloquentPrincipalDirectory`, `Principals\Principal`, `Principals\DeactivationReason` |
+| Principals | `Principals\PrincipalDirectory`, `Principals\EloquentPrincipalDirectory`, `Principals\Principal`, `Principals\DeactivationReason`, `Principals\PrincipalCeiling` |
 | Test helpers | `Testing\ProbeAbility`, `Testing\DirectPermissionCheckScanner`, `Testing\TrustApiGuardInConsole`, `Testing\AssertsGroupTablesSchema`, `Testing\AssertsSpatieTeamSchema`, `Testing\AssertsPrincipalsSchema` |
 
 ## Config keys
