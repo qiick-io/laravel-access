@@ -8,6 +8,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Group names are unique per organisation instead of globally (AC-a): the
+  group migration adds a stored generated `user_groups.organisation_key`
+  (the organisation id, or `''` without one) with a unique index on
+  (`organisation_key`, `name`), so two organisations can share a name while
+  two organisation-less groups still cannot. `AssertsGroupTablesSchema`
+  checks that index, or a global unique `name` in products without
+  organisations, and proves the organisation-less refusal with a rolled-back
+  insert.
+
 ### Added
 
 - Externa compatibility switches (design §9.2 step 6 / §9.4, removed in v2):
