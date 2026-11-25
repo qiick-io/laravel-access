@@ -19,6 +19,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   organisations, and proves the organisation-less refusal with a rolled-back
   insert.
 
+- `PrincipalCreated` is dispatched after the surrounding transaction commits
+  (`ShouldDispatchAfterCommit`), as `PrincipalDeactivated` already was, so a
+  rolled-back creation never reaches a listener (AC-c).
+
 ### Added
 
 - `PrincipalCeiling::allows($principalId, $permission)` (design §15.4): the
