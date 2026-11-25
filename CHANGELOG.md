@@ -19,6 +19,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   organisations, and proves the organisation-less refusal with a rolled-back
   insert.
 
+- `PrincipalCreated` is dispatched after the surrounding transaction commits
+  (`ShouldDispatchAfterCommit`), as `PrincipalDeactivated` already was, so a
+  rolled-back creation never reaches a listener (AC-c).
+
 - With `access.principals.model` set to a subclass on its own connection,
   `PrincipalDirectory::deactivate()` runs its cascade in a transaction on
   that connection (it used the default one), and `UserDeletionGuard` checks

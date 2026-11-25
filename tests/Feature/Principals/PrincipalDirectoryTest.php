@@ -778,6 +778,27 @@ class UsersOnAnotherConnection extends ErasableUser
     protected $connection = 'users_connection';
 }
 
+it('announces a new principal only once the surrounding transaction commits (AC-c)', function (): void {
+    migratePrincipals();
+    $announcedPrincipalIds = [];
+    Event::listen(PrincipalCreated::class, static function (PrincipalCreated $event) use (&$announcedPrincipalIds): void {
+        $announcedPrincipalIds[] = $event->principal->id;
+    });
+
+    DB::beginTransaction();
+    directory()->forMember(member(1), null);
+    $announcedInsideTransaction = $announcedPrincipalIds;
+    DB::rollBack();
+
+    expect($announcedInsideTransaction)->toBe([])
+        ->and($announcedPrincipalIds)->toBe([])
+        ->and(Principal::query()->count())->toBe(0);
+
+    $committed = DB::transaction(static fn (): Principal => directory()->forMember(member(2), null));
+
+    expect($announcedPrincipalIds)->toBe([$committed->id]);
+});
+
 /**
  * A principal model on its own connection, as access.principals.model allows.
  */
