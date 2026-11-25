@@ -25,6 +25,11 @@ events, and the migrations (see `docs/reference-contracts.md`). Code tagged
 
 ## Unreleased
 
+- The `create_principals_table` migration adds an index on
+  `principals.created_by` (pre-1.0, so the create migration changed). A
+  database migrated with `0.1.0-beta.1` either runs `migrate:fresh` or adds
+  the index once: `CREATE INDEX principals_created_by_index ON principals
+  (created_by)` (MySQL and MariaDB already have one from the foreign key).
 - Boot fails when a database connection in `database.connections` sets a
   `name` other than its key. Remove that `name` (the key is the connection's
   identity).

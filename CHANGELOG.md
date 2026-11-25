@@ -17,6 +17,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `principals.created_by` has an index: PostgreSQL and SQLite do not create
+  one for a foreign key, so a user deletion scanned `principals`. A new test
+  requires an index on every foreign key of the package tables, on all four
+  engines.
 - `EloquentGroupRoleSource` gave no group roles to a user loaded from the
   database: it compared the user's connection name (set on a loaded model)
   with a new member model's (null for the default connection), so every real
