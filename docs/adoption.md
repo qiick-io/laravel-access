@@ -196,6 +196,12 @@ team columns; products assert that with
 `Qiick\Access\Testing\AssertsSpatieTeamSchema` (A3) — run the uuid check on
 PostgreSQL.
 
+Assert the product-owned columns on Spatie's `roles` table with
+`Qiick\Access\Testing\AssertsRolesSchema` (A4): `public_id` not null with a
+unique index everywhere, and, where the product has them, `is_system` and
+`is_assignable` not null defaulting to `false` and `true`, `description` and
+`metadata` nullable.
+
 `EffectivePermissionResolver` applies group role ids from instance groups,
 legacy unscoped groups, and organisation groups matching the current
 `TeamContext`. Super-admin via groups counts **only** `is_instance` groups
@@ -344,6 +350,15 @@ switches at their defaults. Both are removed in v2.
   the switch flips. The shadow log shows each place where the package would
   decide differently. The legacy callback receives the Gate's arguments
   untouched, named keys included.
+- Shadow mode runs the other callback for real, so it must be a pure
+  decision: no team switch, cache flush, write or log of its own, and no
+  call back into the Gate (`Gate::allows()`, `$user->can()`), which would
+  run the shadow again and recurse. The package fences its answer and its
+  exceptions off from the decision, not its side effects.
+- Delete the product's own `Gate::before` registration when binding
+  `LegacyGateBefore`. The package registers exactly one callback (AC1) but
+  cannot see or remove one the product still registers by hand; two would
+  both run, and the shadow comparison would no longer describe production.
 - Both switches must be booleans (`true` / `false` in `.env`; `1` / `0` are
   strings and fail at boot), and boot fails when either needs the legacy
   callback and it is not bound.

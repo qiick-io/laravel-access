@@ -41,6 +41,7 @@ CLASSES=(
   'Qiick\Access\Principals\Principal'
   'Qiick\Access\Principals\UserDeletionGuard'
   'Qiick\Access\Testing\AssertsPrincipalsSchema'
+  'Qiick\Access\Testing\AssertsRolesSchema'
   'Qiick\Access\Principals\PrincipalCeiling'
 )
 
@@ -73,6 +74,7 @@ CLASS_FILES=(
   'src/Principals/Principal.php'
   'src/Principals/UserDeletionGuard.php'
   'src/Testing/AssertsPrincipalsSchema.php'
+  'src/Testing/AssertsRolesSchema.php'
   'src/Principals/PrincipalCeiling.php'
 )
 

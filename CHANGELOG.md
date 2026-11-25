@@ -19,6 +19,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   organisations, and proves the organisation-less refusal with a rolled-back
   insert.
 
+- `PrincipalCreated` is dispatched after the surrounding transaction commits
+  (`ShouldDispatchAfterCommit`), as `PrincipalDeactivated` already was, so a
+  rolled-back creation never reaches a listener (AC-c).
+
 ### Added
 
 - `PrincipalCeiling::allows($principalId, $permission)` (design §15.4): the
@@ -29,6 +33,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Unowned services get `false`, and so does any declared instance type,
   refused by its type anywhere in the chain whatever its row says.
   `PrincipalDirectory::activeOwnerChain()` returns the active chain.
+
+- `Testing\AssertsRolesSchema` (A4): asserts the product-owned columns on
+  Spatie's `roles` table, `public_id` (not null, unique) everywhere and the
+  optional `is_system`, `is_assignable`, `description` and `metadata` where
+  a product has them, with the flag defaults proved by a rolled-back insert.
 
 - Reference docs for 1.0: `docs/reference-schema.md` (the Spatie columns
   products own, A4, and the audit property shape, A5) and, in
