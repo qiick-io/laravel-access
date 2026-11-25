@@ -8,6 +8,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- `principals.created_by` has an index: PostgreSQL and SQLite do not create
+  one for a foreign key, so a user deletion scanned `principals`. A new test
+  requires an index on every foreign key of the package tables, on all four
+  engines.
+
 ## [0.1.0-beta.1] - 2026-11-25
 
 First tagged pre-release. Public APIs may still change in any 0.x minor.

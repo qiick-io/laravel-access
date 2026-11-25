@@ -60,7 +60,7 @@ return new class extends Migration
             $table->uuid('organisation_id')->nullable()->index();
             $table->uuid('owner_principal_id')->nullable()->index();
             $table->string('name');
-            $table->foreignId('created_by')->nullable()->constrained($usersTable)->nullOnDelete();
+            $table->foreignId('created_by')->nullable()->index()->constrained($usersTable)->nullOnDelete();
             $table->dateTime('expires_at')->nullable()->index();
             $table->timestamp('deactivated_at')->nullable()->index();
             $table->string('deactivation_reason', 32)->nullable();
