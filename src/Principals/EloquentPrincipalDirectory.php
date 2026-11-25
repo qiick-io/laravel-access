@@ -179,6 +179,12 @@ final class EloquentPrincipalDirectory implements PrincipalDirectory
 
     public function isActive(string $principalId): bool
     {
+        return $this->activeOwnerChain($principalId) !== null;
+    }
+
+    public function activeOwnerChain(string $principalId): ?array
+    {
+        $chain = [];
         $nextId = $principalId;
 
         // A cycle never reaches a principal without owner, so it runs out of steps.
@@ -186,13 +192,14 @@ final class EloquentPrincipalDirectory implements PrincipalDirectory
             $principal = $this->query()->whereKey($nextId)->first();
 
             if ($principal === null || ! $this->isUsable($principal)) {
-                return false;
+                return null;
             }
 
+            $chain[] = $principal;
             $nextId = $principal->owner_principal_id;
         }
 
-        return $nextId === null;
+        return $nextId === null ? $chain : null;
     }
 
     private function isUsable(Principal $principal): bool
