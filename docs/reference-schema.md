@@ -5,9 +5,9 @@ The package owns and migrates `user_groups`, `user_group_user`,
 Migrations). It never creates or edits Spatie's tables: Spatie's migration is
 published into each product and becomes the product's own file. This page is
 the normative shape of those product-owned tables (standards review A4,
-design §2.1–§2.3). Products assert it in their own schema tests; the
-package helper `Testing\AssertsSpatieTeamSchema` covers only the team
-columns (A3).
+design §2.1–§2.3). Products assert it with `Testing\AssertsRolesSchema`
+(the `roles` columns) and `Testing\AssertsSpatieTeamSchema` (the team
+columns, A3).
 
 Timestamps are stored in UTC. Future-dated columns are `dateTime`.
 
