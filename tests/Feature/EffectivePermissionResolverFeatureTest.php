@@ -2,8 +2,11 @@
 
 declare(strict_types=1);
 
+use Illuminate\Auth\Authenticatable;
+use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use Qiick\Access\Contracts\GroupRoleSource;
 use Qiick\Access\Contracts\PermissionVocabulary;
@@ -293,3 +296,103 @@ it('grants no group permissions when the Spatie permission or role class is not 
     'permission class not a model' => [stdClass::class, Role::class],
     'role class not a model' => [Permission::class, stdClass::class],
 ]);
+
+it('keeps principals of two databases apart, in identity and in the cache', function (): void {
+    Role::create(['name' => 'super-admin', 'guard_name' => 'web']);
+    $admin = SpatieUser::query()->create(['email' => 'admin@example.com']);
+    $admin->assignRole('super-admin');
+
+    // A second real database with the same tables and a plain user 1.
+    $tenantDatabase = tempnam(sys_get_temp_dir(), 'access-tenant-');
+    config()->set('database.connections.tenant', ['driver' => 'sqlite', 'database' => $tenantDatabase, 'prefix' => '']);
+    $defaultConnection = config('database.default');
+    config()->set('database.default', 'tenant');
+
+    try {
+        Schema::create('users', function (Blueprint $table): void {
+            $table->id();
+            $table->string('email')->nullable();
+        });
+        (require dirname(__DIR__, 2).'/vendor/spatie/laravel-permission/database/migrations/create_permission_tables.php.stub')->up();
+        DB::table('users')->insert(['id' => $admin->id, 'email' => 'tenant@example.com']);
+    } finally {
+        config()->set('database.default', $defaultConnection);
+    }
+
+    $roleCatalog = Mockery::mock(RoleCatalog::class);
+    $roleCatalog->shouldReceive('superAdminRoleName')->andReturn('super-admin');
+    $groupRoles = Mockery::mock(GroupRoleSource::class);
+    $groupRoles->shouldReceive('instanceRoleIdsFor')->andReturn([]);
+    $groupRoles->shouldReceive('roleIdsFor')->andReturn([]);
+    $this->app->forgetInstance(EffectivePermissionResolver::class);
+    $this->app->instance(RoleCatalog::class, $roleCatalog);
+    $this->app->instance(GroupRoleSource::class, $groupRoles);
+    $resolver = app(EffectivePermissionResolver::class);
+
+    $tenantUser = SpatieUser::on('tenant')->findOrFail($admin->id);
+
+    expect($resolver->isSuperAdmin($admin))->toBeTrue()
+        ->and($resolver->isSamePrincipal($admin, $tenantUser))->toBeFalse()
+        ->and($resolver->isSamePrincipal($admin, SpatieUser::query()->findOrFail($admin->id)))->toBeTrue()
+        // Same connection and id, another morph class: another principal.
+        ->and($resolver->isSamePrincipal($admin, (new class extends SpatieUser {})->forceFill(['id' => $admin->id])))->toBeFalse()
+        ->and($resolver->isSuperAdmin($tenantUser))->toBeFalse()
+        ->and($resolver->permissionsFor($tenantUser))->toBe([]);
+
+    DB::purge('tenant');
+    unlink($tenantDatabase);
+});
+
+it('never joins a connection name and a morph class into an ambiguous principal key', function (): void {
+    config()->set('database.connections.region|archive', ['driver' => 'sqlite', 'database' => ':memory:', 'prefix' => '']);
+    config()->set('database.connections.region', ['driver' => 'sqlite', 'database' => ':memory:', 'prefix' => '']);
+    $archivedUser = (new class extends Model implements Illuminate\Contracts\Auth\Authenticatable
+    {
+        use Authenticatable;
+
+        protected $connection = 'region|archive';
+
+        public function getMorphClass(): string
+        {
+            return 'user';
+        }
+    })->forceFill(['id' => 1]);
+    $regionUser = (new class extends Model implements Illuminate\Contracts\Auth\Authenticatable
+    {
+        use Authenticatable;
+
+        protected $connection = 'region';
+
+        public function getMorphClass(): string
+        {
+            return 'archive|user';
+        }
+    })->forceFill(['id' => 1]);
+
+    expect(app(EffectivePermissionResolver::class)->isSamePrincipal($archivedUser, $regionUser))->toBeFalse();
+});
+
+it('never lets a morph sibling class reuse the cached group grants of another class', function (): void {
+    $superAdmin = Role::create(['name' => 'super-admin', 'guard_name' => 'web']);
+    $viewer = Role::create(['name' => 'group-viewer', 'guard_name' => 'web']);
+    $viewer->givePermissionTo(Permission::create(['name' => FakePermissionEnum::CanShowUsers->value, 'guard_name' => 'web']));
+    $user = SpatieUser::query()->create(['email' => 'member@example.com']);
+    $sibling = MorphSiblingUser::query()->findOrFail($user->id);
+
+    // EloquentGroupRoleSource admits exactly one class: only SpatieUser has groups.
+    $groupRoles = Mockery::mock(GroupRoleSource::class);
+    $groupRoles->shouldReceive('instanceRoleIdsFor')->andReturnUsing(fn ($member): array => $member::class === SpatieUser::class ? [$superAdmin->id] : []);
+    $groupRoles->shouldReceive('roleIdsFor')->andReturnUsing(fn ($member): array => $member::class === SpatieUser::class ? [$viewer->id] : []);
+    $roleCatalog = Mockery::mock(RoleCatalog::class);
+    $roleCatalog->shouldReceive('superAdminRoleName')->andReturn('super-admin');
+    $this->app->instance(GroupRoleSource::class, $groupRoles);
+    $this->app->instance(RoleCatalog::class, $roleCatalog);
+    $this->app->forgetInstance(EffectivePermissionResolver::class);
+    $resolver = app(EffectivePermissionResolver::class);
+
+    expect($resolver->isSuperAdmin($user))->toBeTrue()
+        ->and($resolver->hasAssignedPermission($user, FakePermissionEnum::CanShowUsers->value))->toBeTrue()
+        ->and($resolver->isSuperAdmin($sibling))->toBeFalse()
+        ->and($resolver->hasAssignedPermission($sibling, FakePermissionEnum::CanShowUsers->value))->toBeFalse()
+        ->and($resolver->permissionsFor($sibling))->toBe([]);
+});

@@ -1,6 +1,6 @@
 # Adoption
 
-Product adoption order (design §10): package `0.1.0-beta.1` → **excubia-app** →
+Product adoption order (design §10): package `0.1.0-beta.2` → **excubia-app** →
 signaculum-core → instituta-core → **externa-core** last → then
 `qiick/laravel-api-keys` in each product.
 
@@ -142,6 +142,15 @@ super-admin). The team context is switched for the check and always restored.
 A service or agent with no user owner, and any instance principal, gets
 `false`: its powers come from the product's scopes alone.
 
+Instance principals are refused by their type, as listed in
+`access.principals.instance_types`. Keep every instance type in that list for
+as long as rows of it exist: a type dropped from the config is no longer
+recognised, and a row of it that a missing organisation rule let gain an
+organisation and an owner would get that owner's ceiling. `isActive()` is
+not a permission check: it says whether a principal may act at all, and
+only `PrincipalCeiling::allows()` bounds what a key may do, so a key
+authorizer calls both.
+
 `access.principals.model` may point at a subclass of
 `Qiick\Access\Principals\Principal` for product relations (API keys,
 grants).
@@ -178,6 +187,45 @@ membership FK targets `access.users_table` when set, otherwise the table from
 group uses `is_instance = true` with `organisation_id` NULL; a CHECK forbids
 `is_instance = true` together with a non-null `organisation_id`.
 
+Group memberships are read from the default database connection. They
+count only for a user that is exactly the group member model
+(`access.group_member_model`, else `auth.providers.users.model`) and whose
+connection name is exactly the default connection's; the member model
+itself must use the default connection. The package compares the declared
+names and never resolves where a connection points. Everything else gets no
+group roles: a subclass (a product with single-table inheritance sets
+`access.group_member_model` to the subclass it authenticates), a user of
+another connection, even to the same database, and a non-Eloquent user such
+as `GenericUser`.
+
+Using more than one database is the product's explicit choice, and it keeps
+these invariants. The database configuration belongs to the operator and is
+trusted: the boot check below guards against configuration mistakes, not
+against an attacker, who could change the configuration or run code anyway.
+
+- A connection is known by its key. Eloquent stamps the connection's
+  reported name on the models it loads, and boot fails when a connection in
+  `database.connections` sets a `name` other than its key, at the top
+  level, in a URL's query (`?name=`) or in a read, write or direct variant.
+  This includes `name` options in the URL query (`?write[name]=`). A
+  `name` nested anywhere outside the read, write and direct variants, and a
+  dot in a connection key, fail boot too: Laravel resolves a dotted name
+  inside another connection's config, and parses a `url` it finds there,
+  so every `url` at any depth is read as well. A
+  connection registered at runtime (`config()->set()`,
+  `DB::connectUsing()`) never reuses another connection's name. The package
+  does not enforce this one: such a registration is the application's own
+  code, and whoever can run it has already run code in the application.
+- The default connection is one dataset: its read replicas, writers and
+  direct (pooled) endpoints hold the same data, and it is never repointed at
+  another database while the process runs. A product that switches tenants
+  gives each tenant database its own connection name, keeps the group
+  tables and the member model on the default connection, and discards
+  actors, relations and cached authorization decisions loaded before a
+  switch.
+- Group role ids are looked up through Spatie's role model, so that model
+  uses the default connection too.
+
 A group name is unique within its organisation, and among the groups without
 an organisation (instance groups and the legacy unscoped ones): two
 organisations can both have an "Editors" group. The migration indexes
@@ -187,7 +235,13 @@ duplicates are refused on every engine (a plain NULL would let them through).
 externa 1.x keeps its own tables with a global unique `name`, which
 `AssertsGroupTablesSchema` accepts because it has no organisations; it adds
 `organisation_key` with the unique index when it moves to the package tables
-(additive).
+(additive). When externa adds organisations it also drops the global unique
+on `name`: `AssertsGroupTablesSchema` accepts either index, but keeping both
+would still forbid the same name in two organisations.
+
+A soft-deleted group keeps its name taken, as it did under the global
+unique; recreating a group with the same name needs the old row
+force-deleted (or renamed) first.
 
 Assert the group schema with `Qiick\Access\Testing\AssertsGroupTablesSchema`
 (AC17 / C75). When Spatie teams are on, set
@@ -200,7 +254,10 @@ Assert the product-owned columns on Spatie's `roles` table with
 `Qiick\Access\Testing\AssertsRolesSchema` (A4): `public_id` not null with a
 unique index everywhere, and, where the product has them, `is_system` and
 `is_assignable` not null defaulting to `false` and `true`, `description` and
-`metadata` nullable.
+`metadata` nullable. Its probe insert sets only `name`, `guard_name` and
+`public_id`, so any other column the product adds to `roles` must be nullable
+or have a default; Spatie's own team column (`organisation_id`, null for a
+global role) already is.
 
 `EffectivePermissionResolver` applies group role ids from instance groups,
 legacy unscoped groups, and organisation groups matching the current
