@@ -25,6 +25,13 @@ events, and the migrations (see `docs/reference-contracts.md`). Code tagged
 
 ## Unreleased
 
+- Use `EffectivePermissionResolver::isActorSuperAdmin($actor)` for super-admin
+  authority in policies. Replace acting-user role checks, including in policy
+  `before()` methods. `SuperAdminGuard::canManageSuperAdmins()` and
+  `isProtectedFrom()` now apply the same actor-aware rule. Keep
+  `isSuperAdmin($target)` for subject membership checks. See
+  [adoption](docs/adoption.md) for the policy regression test setup.
+
 ## 0.1.0-beta.2
 
 - The `create_principals_table` migration adds an index on
