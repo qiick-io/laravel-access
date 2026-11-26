@@ -252,6 +252,24 @@ it('fails when a connection key or a connection nested in another can stand for 
 
     expect(fn () => $checks->assertConnectionNamesMatchTheirKeys($config))->toThrow(RuntimeException::class, 'nests a');
 
+    // A URL nested at any depth carries its name in its query, and Laravel
+    // parses it once a dotted name reaches that nested connection.
+    $config->set("database.connections.{$defaultConnection}", [...$defaultConfig, 'tenants' => ['secondary' => ['url' => Str::of("sqlite:////tmp/tenant.sqlite?name={$defaultConnection}")]]]);
+
+    expect(fn () => $checks->assertConnectionNamesMatchTheirKeys($config))->toThrow(RuntimeException::class, 'nests a');
+
+    $config->set("database.connections.{$defaultConnection}", [...$defaultConfig, 'tenants' => ['secondary' => ['url' => 'sqlite:////tmp/tenant.sqlite?write[name]=other']]]);
+
+    expect(fn () => $checks->assertConnectionNamesMatchTheirKeys($config))->toThrow(RuntimeException::class, 'nests a');
+
+    $config->set("database.connections.{$defaultConnection}", [...$defaultConfig, 'read' => [], 'write' => ['url' => 'sqlite:////tmp/central.sqlite?name=other']]);
+
+    expect(fn () => $checks->assertConnectionNamesMatchTheirKeys($config))->toThrow(RuntimeException::class, 'reports the name [other]');
+
+    // A nested URL without a name is fine.
+    $config->set("database.connections.{$defaultConnection}", [...$defaultConfig, 'tenants' => ['secondary' => ['url' => 'sqlite:////tmp/tenant.sqlite']]]);
+    $checks->assertConnectionNamesMatchTheirKeys($config);
+
     // A non-string name is named by its type; a non-array connection has no name.
     $config->set("database.connections.{$defaultConnection}", [...$defaultConfig, 'name' => 7]);
 
