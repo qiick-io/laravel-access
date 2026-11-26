@@ -30,14 +30,15 @@ events, and the migrations (see `docs/reference-contracts.md`). Code tagged
   database migrated with `0.1.0-beta.1` either runs `migrate:fresh` or adds
   the index once: `CREATE INDEX principals_created_by_index ON principals
   (created_by)` (MySQL and MariaDB already have one from the foreign key).
-- Each effective database connection name must stand for one database for
-  the whole process (`docs/adoption.md`). Opening a connection
-  throws when its configured `name`, a URL's `?name=` option or its
-  writer's `name` matches another connection of a different database, when
-  its writer variants are different databases, or when the alias was
-  repointed at another database after it was opened. A product that
-  switches tenants by repointing one alias gives each tenant database its
-  own connection name instead.
+- Boot fails when a database connection in `database.connections` reports
+  a name other than its key: a `name` option at the top level, in a URL's
+  query or in a read, write or direct variant. Remove that `name`.
+- Group roles count only for exactly `access.group_member_model` (else
+  `auth.providers.users.model`) on the default connection. A product with
+  single-table inheritance sets `access.group_member_model` to the subclass
+  it authenticates. A non-Eloquent member model (`GenericUser`) gets no
+  group roles: bind your own `GroupRoleSource` for it. The multi-database
+  invariants are in `docs/adoption.md`.
 
 ## 0.1.0-beta.1 (first tagged pre-release)
 

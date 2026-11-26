@@ -26,10 +26,10 @@ use Qiick\Access\Contracts\TeamContext;
  * groups uses only {@see instanceRoleIdsFor()} (is_instance groups).
  *
  * Memberships belong to one model: user_group_user.user_id points at its
- * table. Only models on that table and connection (`access.group_member_model`,
- * default `auth.providers.users.model`) get group roles; another guard's
- * principal sharing an identifier, including a subclass with its own table,
- * gets none.
+ * table. Only instances of exactly that class (`access.group_member_model`,
+ * default `auth.providers.users.model`) on the default connection get group
+ * roles; another guard's principal sharing an identifier, a subclass, a user
+ * of another connection or a non-Eloquent user gets none.
  *
  * Resolves the connection per call so a singleton binding stays Octane-safe.
  *
@@ -81,15 +81,15 @@ final class EloquentGroupRoleSource implements GroupRoleSource
      */
     private function pluckRoleIds(Authenticatable $user, Closure $constrainGroups): array
     {
-        $groupConnection = $this->database->connection();
+        $groupConnectionName = $this->database->getDefaultConnection();
 
-        if (! $this->isGroupMember($user, $groupConnection->getName())) {
+        if (! $this->isGroupMember($user, $groupConnectionName)) {
             return [];
         }
 
         $now = now();
 
-        $query = $groupConnection
+        $query = $this->database->connection($groupConnectionName)
             ->table('user_group_user')
             ->join(
                 'user_groups',
@@ -129,34 +129,29 @@ final class EloquentGroupRoleSource implements GroupRoleSource
     }
 
     /**
-     * @param  string|null  $groupConnectionName  the connection the group tables are read from
+     * user_group_user.user_id holds ids of the member model's table on the
+     * group tables' connection (the default one). Membership counts only for
+     * exactly that class (an STI product configures the subclass) on exactly
+     * that connection name, compared as declared, never by resolving where
+     * it points: the boot checks make a loaded model's name its connection's
+     * key, and docs/adoption.md makes that connection one dataset. A
+     * non-Eloquent user carries no connection, so it gets nothing.
+     *
+     * @param  string  $groupConnectionName  the connection the group tables are read from
      */
-    private function isGroupMember(Authenticatable $user, ?string $groupConnectionName): bool
+    private function isGroupMember(Authenticatable $user, string $groupConnectionName): bool
     {
         $memberModel = $this->config->get('access.group_member_model')
             ?? $this->config->get('auth.providers.users.model');
 
-        if (! is_string($memberModel)) {
+        if (! $user instanceof Model || $user::class !== $memberModel) {
             return false;
         }
 
-        if (! is_a($memberModel, Model::class, true)) {
-            return $user instanceof $memberModel;
-        }
-
-        // user_group_user.user_id holds ids of the member model's table on the
-        // group tables' connection: any model on that table and connection is
-        // the same principal (STI and same-table subclasses); a subclass with
-        // its own table, or a user of another database, is not. Resolved
-        // names, since a loaded model carries its connection name and a new
-        // one has null for the default (beta.1 regression); ConnectionIdentityGuard
-        // makes a resolved name stand for one database, so two databases
-        // cannot share one.
         $member = new $memberModel;
 
-        return $user instanceof Model
-            && $user->getTable() === $member->getTable()
-            && $user->getConnection()->getName() === $groupConnectionName
-            && $member->getConnection()->getName() === $groupConnectionName;
+        return $user->getTable() === $member->getTable()
+            && ($user->getConnectionName() ?? $groupConnectionName) === $groupConnectionName
+            && ($member->getConnectionName() ?? $groupConnectionName) === $groupConnectionName;
     }
 }

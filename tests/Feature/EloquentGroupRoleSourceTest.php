@@ -16,7 +16,7 @@ use Qiick\Access\Tests\Support\SpatieUser;
 
 beforeEach(function (): void {
     // user_group_user.user_id points at this model's table only.
-    config()->set('auth.providers.users.model', FakeAuthenticatable::class);
+    config()->set('auth.providers.users.model', SpatieUser::class);
 
     Schema::create('user_groups', function (Blueprint $table): void {
         $table->id();
@@ -68,7 +68,7 @@ it('returns role ids from active groups the user belongs to', function (): void 
         ['user_group_id' => 1, 'role_id' => 2],
     ]);
 
-    $roleIds = app(GroupRoleSource::class)->roleIdsFor(new FakeAuthenticatable(10));
+    $roleIds = app(GroupRoleSource::class)->roleIdsFor((new SpatieUser)->forceFill(['id' => 10]));
 
     expect($roleIds)->toBe([2, 3]);
 })->group('engines');
@@ -102,7 +102,7 @@ it('excludes soft-deleted groups so they grant nothing (C7)', function (): void 
         ['user_group_id' => 2, 'role_id' => 99],
     ]);
 
-    $roleIds = app(GroupRoleSource::class)->roleIdsFor(new FakeAuthenticatable(10));
+    $roleIds = app(GroupRoleSource::class)->roleIdsFor((new SpatieUser)->forceFill(['id' => 10]));
 
     expect($roleIds)->toBe([5])
         ->and($roleIds)->not->toContain(99);
@@ -149,14 +149,14 @@ it('ignores memberships whose expires_at is in the past (A2 / AC15)', function (
         ['user_group_id' => 3, 'role_id' => 3],
     ]);
 
-    $roleIds = app(GroupRoleSource::class)->roleIdsFor(new FakeAuthenticatable(10));
+    $roleIds = app(GroupRoleSource::class)->roleIdsFor((new SpatieUser)->forceFill(['id' => 10]));
 
     expect($roleIds)->toBe([1, 3])
         ->and($roleIds)->not->toContain(2);
 })->group('engines');
 
 it('returns an empty list when the user has no group memberships', function (): void {
-    expect(app(GroupRoleSource::class)->roleIdsFor(new FakeAuthenticatable(1)))->toBe([]);
+    expect(app(GroupRoleSource::class)->roleIdsFor((new SpatieUser)->forceFill(['id' => 1])))->toBe([]);
 })->group('engines');
 
 it('scopes organisation groups to the current team and always includes instance groups', function (): void {
@@ -202,7 +202,7 @@ it('scopes organisation groups to the current team and always includes instance 
     $teamContext->shouldReceive('currentId')->andReturn('aaaaaaaa-aaaa-7aaa-8aaa-aaaaaaaaaaaa');
 
     $source = new EloquentGroupRoleSource(app('db'), $teamContext, app('config'));
-    $user = new FakeAuthenticatable(10);
+    $user = (new SpatieUser)->forceFill(['id' => 10]);
 
     expect($source->roleIdsFor($user))->toBe([1, 2])
         ->and($source->instanceRoleIdsFor($user))->toBe([1])
@@ -231,8 +231,8 @@ it('does not treat organisation-group roles as instance super-admin sources', fu
 
     $source = new EloquentGroupRoleSource(app('db'), new NoTeamContext, app('config'));
 
-    expect($source->roleIdsFor(new FakeAuthenticatable(10)))->toBe([])
-        ->and($source->instanceRoleIdsFor(new FakeAuthenticatable(10)))->toBe([]);
+    expect($source->roleIdsFor((new SpatieUser)->forceFill(['id' => 10])))->toBe([])
+        ->and($source->instanceRoleIdsFor((new SpatieUser)->forceFill(['id' => 10])))->toBe([]);
 })->group('engines');
 
 it('gives group roles only to the member model, not to another principal with the same id', function (): void {
@@ -286,19 +286,21 @@ it('gives group roles only to the member model, not to another principal with th
     };
     $source = app(GroupRoleSource::class);
 
-    expect($source->instanceRoleIdsFor(new FakeAuthenticatable(10)))->toBe([1])
+    expect($source->instanceRoleIdsFor((new SpatieUser)->forceFill(['id' => 10])))->toBe([1])
         ->and($source->instanceRoleIdsFor($otherGuardPrincipal))->toBe([])
         ->and($source->roleIdsFor($otherGuardPrincipal))->toBe([]);
 
+    // Even configured as the member model, a non-Eloquent principal carries
+    // no connection to compare, so it gets nothing.
     config()->set('access.group_member_model', $otherGuardPrincipal::class);
 
-    expect($source->instanceRoleIdsFor($otherGuardPrincipal))->toBe([1])
-        ->and($source->instanceRoleIdsFor(new FakeAuthenticatable(10)))->toBe([]);
+    expect($source->instanceRoleIdsFor($otherGuardPrincipal))->toBe([])
+        ->and($source->instanceRoleIdsFor((new SpatieUser)->forceFill(['id' => 10])))->toBe([]);
 
     config()->set('access.group_member_model', null);
     config()->set('auth.providers.users.model', null);
 
-    expect($source->instanceRoleIdsFor(new FakeAuthenticatable(10)))->toBe([]);
+    expect($source->instanceRoleIdsFor((new SpatieUser)->forceFill(['id' => 10])))->toBe([]);
 })->group('engines');
 
 /**
@@ -329,14 +331,12 @@ it('gives no group roles to a subclass of the member model that has its own tabl
     $user = (new SpatieUser)->forceFill(['id' => 1]);
     $sameTableSubclass = (new class extends SpatieUser {})->forceFill(['id' => 1]);
     $ownTableAdmin = (new OwnTableAdmin)->forceFill(['id' => 1]);
-    $otherConnectionUser = (new class extends SpatieUser
-    {
-        protected $connection = 'replica';
-    })->forceFill(['id' => 1]);
+    $otherConnectionUser = (new SpatieUser)->setConnection('replica')->forceFill(['id' => 1]);
     $source = app(GroupRoleSource::class);
 
     expect($source->instanceRoleIdsFor($user))->toBe([1])
-        ->and($source->instanceRoleIdsFor($sameTableSubclass))->toBe([1])
+        // Exactly the member class: an STI product configures the subclass.
+        ->and($source->instanceRoleIdsFor($sameTableSubclass))->toBe([])
         ->and($source->instanceRoleIdsFor($ownTableAdmin))->toBe([])
         ->and($source->roleIdsFor($ownTableAdmin))->toBe([])
         ->and($source->instanceRoleIdsFor($otherConnectionUser))->toBe([])

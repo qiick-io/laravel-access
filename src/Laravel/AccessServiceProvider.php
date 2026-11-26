@@ -11,7 +11,6 @@ use Illuminate\Contracts\Config\Repository as ConfigRepository;
 use Illuminate\Contracts\Foundation\Application;
 use Illuminate\Database\DatabaseManager;
 use Illuminate\Database\Eloquent\Model;
-use Illuminate\Database\Events\ConnectionEstablished;
 use Illuminate\Database\Events\MigrationsEnded;
 use Illuminate\Queue\Events\JobFailed;
 use Illuminate\Queue\Events\JobProcessed;
@@ -164,7 +163,6 @@ final class AccessServiceProvider extends ServiceProvider
         $config = $this->app->make(ConfigRepository::class);
 
         $this->app->make(AccessBootChecks::class)->assert();
-        $this->registerConnectionIdentityGuard();
 
         foreach (['groups', 'principals'] as $migrationSet) {
             if ($config->get("access.migrations.{$migrationSet}", true) === true) {
@@ -200,23 +198,6 @@ final class AccessServiceProvider extends ServiceProvider
                 AccessSchema::ensureConstraints();
             }
         });
-    }
-
-    /**
-     * Before any query runs on a connection, its effective name must stand
-     * for one database ({@see ConnectionIdentityGuard}); connections another
-     * provider opened before this one booted are checked now.
-     */
-    private function registerConnectionIdentityGuard(): void
-    {
-        $this->app->singleton(ConnectionIdentityGuard::class);
-        $guard = $this->app->make(ConnectionIdentityGuard::class);
-
-        foreach ($this->app->make(DatabaseManager::class)->getConnections() as $establishedConnection) {
-            $guard->assertUnambiguous($establishedConnection);
-        }
-
-        Event::listen(ConnectionEstablished::class, $guard(...));
     }
 
     private function registerGateBefore(): void

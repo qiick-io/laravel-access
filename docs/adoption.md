@@ -187,30 +187,35 @@ membership FK targets `access.users_table` when set, otherwise the table from
 group uses `is_instance = true` with `organisation_id` NULL; a CHECK forbids
 `is_instance = true` together with a non-null `organisation_id`.
 
-Group memberships are read from the default database connection, so the
-group member model (`access.group_member_model`, else the auth users model)
-lives there too; a user of another connection gets no group roles.
+Group memberships are read from the default database connection. They
+count only for a user that is exactly the group member model
+(`access.group_member_model`, else `auth.providers.users.model`) and whose
+connection name is exactly the default connection's; the member model
+itself must use the default connection. The package compares the declared
+names and never resolves where a connection points. Everything else gets no
+group roles: a subclass (a product with single-table inheritance sets
+`access.group_member_model` to the subclass it authenticates), a user of
+another connection, even to the same database, and a non-Eloquent user such
+as `GenericUser`.
 
-Eloquent identifies a loaded model's database by its connection's effective
-name: the configured `name`, a URL's `?name=` option or the writer's `name`
-can each override the key. So each effective connection name stands for one
-database (driver, host, port, socket, database, prefix and schema) for the
-whole process. When Laravel opens or reconnects a connection whose name
-already stands for another database, the call throws before any query runs,
-and again on every retry:
+Using more than one database is the product's explicit choice, and it keeps
+these invariants:
 
-- two configured connections reporting one name for different databases;
-- writer variants of one read/write connection that are different
-  databases (read endpoints must be replicas of the writer's dataset);
-- an alias repointed at another database after it was opened (a purge or
-  reconnect after a config change), as some tenancy setups do. Give each
-  tenant database its own connection name instead (for example
-  `DB::build()`, which names a connection after its configuration), and
-  discard actors, relations and cached authorization decisions loaded
-  through the previous one.
-
-Two names for the same database stay allowed; they are still different
-principals for the resolver and the group member check.
+- A connection is known by its key. Eloquent stamps the connection's
+  reported name on the models it loads, and boot fails when a connection in
+  `database.connections` sets a `name` other than its key, at the top
+  level, in a URL's query (`?name=`) or in a read, write or direct variant.
+  A connection registered at runtime (`config()->set()`,
+  `DB::connectUsing()`) never reuses another connection's name.
+- The default connection is one dataset: its read replicas, writers and
+  direct (pooled) endpoints hold the same data, and it is never repointed at
+  another database while the process runs. A product that switches tenants
+  gives each tenant database its own connection name, keeps the group
+  tables and the member model on the default connection, and discards
+  actors, relations and cached authorization decisions loaded before a
+  switch.
+- Group role ids are looked up through Spatie's role model, so that model
+  uses the default connection too.
 
 A group name is unique within its organisation, and among the groups without
 an organisation (instance groups and the legacy unscoped ones): two

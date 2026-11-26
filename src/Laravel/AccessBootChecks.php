@@ -6,6 +6,7 @@ namespace Qiick\Access\Laravel;
 
 use Illuminate\Contracts\Config\Repository as ConfigRepository;
 use Illuminate\Contracts\Foundation\Application;
+use Illuminate\Support\ConfigurationUrlParser;
 use Qiick\Access\Contracts\ActorResolver;
 use Qiick\Access\Contracts\AuthorizationResponder;
 use Qiick\Access\Contracts\LegacyGateBefore;
@@ -37,6 +38,7 @@ final class AccessBootChecks
         $this->assertEveryGuardClassified($config);
         $this->assertNoLegacyMigrationsSwitch($config);
         $this->assertGateSelection($config);
+        $this->assertConnectionNamesMatchTheirKeys($config);
     }
 
     /**
@@ -79,6 +81,71 @@ final class AccessBootChecks
                 'access.use_package_gate = false or access.gate_shadow = true requires ['.LegacyGateBefore::class.'] to be bound before boot.',
             );
         }
+    }
+
+    /**
+     * Eloquent stamps a connection's reported name on every model it loads,
+     * and the group member check trusts that name. Laravel takes it from the
+     * `name` option after merging a URL's query options and the selected
+     * read, write or direct variant over the base config, so those are every
+     * place it can come from. A name other than the key would let another
+     * database's users pass for that connection's, so boot fails instead.
+     *
+     * @throws RuntimeException naming the first connection that reports another name
+     */
+    public function assertConnectionNamesMatchTheirKeys(ConfigRepository $config): void
+    {
+        $connections = $config->get('database.connections', []);
+
+        foreach (is_array($connections) ? $connections : [] as $key => $connection) {
+            foreach ($this->reportedNames($connection) as $reportedName) {
+                if ($reportedName !== $key) {
+                    $shownName = is_scalar($reportedName) ? (string) $reportedName : get_debug_type($reportedName);
+
+                    throw new RuntimeException(
+                        "Database connection [{$key}] reports the name [{$shownName}]; remove that name so the connection is known by its key (see docs/adoption.md).",
+                    );
+                }
+            }
+        }
+    }
+
+    /**
+     * @return list<mixed> every `name` the connection's configuration sets
+     */
+    private function reportedNames(mixed $connection): array
+    {
+        if (is_string($connection)) {
+            $connection = ['url' => $connection];
+        }
+
+        if (! is_array($connection)) {
+            return [];
+        }
+
+        $configurations = [$connection];
+
+        if (is_string($connection['url'] ?? null)) {
+            $configurations[] = (new ConfigurationUrlParser)->parseConfiguration($connection['url']);
+        }
+
+        foreach (['read', 'write', 'direct'] as $variantType) {
+            $variants = $connection[$variantType] ?? [];
+
+            foreach (is_array($variants) && array_is_list($variants) ? $variants : [$variants] as $variant) {
+                $configurations[] = $variant;
+            }
+        }
+
+        $names = [];
+
+        foreach ($configurations as $configuration) {
+            if (is_array($configuration) && array_key_exists('name', $configuration)) {
+                $names[] = $configuration['name'];
+            }
+        }
+
+        return $names;
     }
 
     public function assertRequiredBindings(): void

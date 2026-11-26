@@ -180,14 +180,14 @@ it('fails when a database connection reports a name other than its key', functio
 
     $config->set('database.connections.secondary', null);
 })->with([
-    'top-level name' => fn () => fn (string $name): array => ['driver' => 'sqlite', 'database' => '/tmp/tenant.sqlite', 'name' => $name],
-    'URL query option' => fn () => fn (string $name): array => ['url' => "sqlite:////tmp/tenant.sqlite?name={$name}"],
-    'URL string' => fn () => fn (string $name): string => "sqlite:////tmp/tenant.sqlite?name={$name}",
-    'read endpoint of another database' => fn () => fn (string $name): array => ['driver' => 'sqlite', 'name' => $name, 'read' => ['database' => '/tmp/tenant.sqlite'], 'write' => ['database' => '/tmp/central.sqlite']],
-    'read variant name' => fn () => fn (string $name): array => ['driver' => 'sqlite', 'database' => '/tmp/tenant.sqlite', 'read' => ['name' => $name], 'write' => []],
-    'writer name' => fn () => fn (string $name): array => ['driver' => 'sqlite', 'database' => '/tmp/tenant.sqlite', 'read' => [], 'write' => ['name' => $name]],
-    'one of several writers' => fn () => fn (string $name): array => ['driver' => 'sqlite', 'database' => '/tmp/tenant.sqlite', 'read' => [], 'write' => [['host' => 'a'], ['host' => 'b', 'name' => $name]]],
-    'direct endpoint' => fn () => fn (string $name): array => ['driver' => 'pgsql', 'database' => 'tenant', 'direct' => ['name' => $name]],
+    'top-level name' => fn (string $name): array => ['driver' => 'sqlite', 'database' => '/tmp/tenant.sqlite', 'name' => $name],
+    'URL query option' => fn (string $name): array => ['url' => "sqlite:////tmp/tenant.sqlite?name={$name}"],
+    'URL string' => fn (string $name): string => "sqlite:////tmp/tenant.sqlite?name={$name}",
+    'read endpoint of another database' => fn (string $name): array => ['driver' => 'sqlite', 'name' => $name, 'read' => ['database' => '/tmp/tenant.sqlite'], 'write' => ['database' => '/tmp/central.sqlite']],
+    'read variant name' => fn (string $name): array => ['driver' => 'sqlite', 'database' => '/tmp/tenant.sqlite', 'read' => ['name' => $name], 'write' => []],
+    'writer name' => fn (string $name): array => ['driver' => 'sqlite', 'database' => '/tmp/tenant.sqlite', 'read' => [], 'write' => ['name' => $name]],
+    'one of several writers' => fn (string $name): array => ['driver' => 'sqlite', 'database' => '/tmp/tenant.sqlite', 'read' => [], 'write' => [['host' => 'a'], ['host' => 'b', 'name' => $name]]],
+    'direct endpoint' => fn (string $name): array => ['driver' => 'pgsql', 'database' => 'tenant', 'direct' => ['name' => $name]],
 ]);
 
 it('accepts connections that report their own key, including writer and replica lists', function (): void {

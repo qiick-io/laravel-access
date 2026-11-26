@@ -10,15 +10,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
-- An effective connection name stands for one database per process
-  (`ConnectionIdentityGuard`, on Laravel's `ConnectionEstablished`):
-  opening or reconnecting a connection whose effective name (after a URL's
-  query options and the writer's options) already stands for another
-  database throws before any query runs. Eloquent stamps that name on the
-  models it loads, so a second database could otherwise pass its users off
-  as the default connection's, with their group roles and super-admin
-  verdicts. This also rejects an alias repointed at another database and
-  writer variants that are different databases.
+- Group membership counts only for exactly the configured member model
+  class on exactly the default connection name, compared as declared. A
+  subclass, a user of another connection and a non-Eloquent user (such as
+  `GenericUser`, which two database auth providers can both return) get no
+  group roles.
+- Boot fails when a database connection reports a name other than its key
+  (`AccessBootChecks::assertConnectionNamesMatchTheirKeys()`): a `name`
+  option at the top level, in a URL's query or in a read, write or direct
+  variant. Eloquent stamps that name on the models it loads, so a second
+  database could otherwise pass its users off as the default connection's.
 
 ### Fixed
 
@@ -31,9 +32,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   with a new member model's (null for the default connection), so every real
   user failed the member check and group roles, permissions and the
   super-admin group counted for nobody in `0.1.0-beta.1` (fail-closed). It
-  now compares resolved connection names, and admits only users of the
-  connection the group tables are read from: a user of another database
-  with a matching id no longer gets that database's memberships.
+  now treats a null connection name as the default connection's, and
+  admits only users of the connection the group tables are read from: a
+  user of another database with a matching id no longer gets that
+  database's memberships.
 - The resolver's principal identity and cache key include the resolved
   connection name, so users of two databases with the same class and id are
   different principals (`isSamePrincipal()`, cached roles and super-admin
