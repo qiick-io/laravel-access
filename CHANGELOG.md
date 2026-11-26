@@ -19,7 +19,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`AccessBootChecks::assertConnectionNamesMatchTheirKeys()`): a `name`
   option at the top level, in a read, write or direct variant, or in its
   URL's query (a `Stringable` URL included), or a `name` nested anywhere
-  else (a connection inside another). Dotted connection keys fail too:
+  else (a connection inside another), including the query of a `url` at
+  any depth. The check guards against configuration mistakes; the database
+  configuration itself is trusted. Dotted connection keys fail too:
   Laravel resolves a dotted name inside another connection. Eloquent stamps that name on the models it loads, so a second
   database could otherwise pass its users off as the default connection's.
 

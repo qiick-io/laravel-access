@@ -199,7 +199,9 @@ another connection, even to the same database, and a non-Eloquent user such
 as `GenericUser`.
 
 Using more than one database is the product's explicit choice, and it keeps
-these invariants:
+these invariants. The database configuration belongs to the operator and is
+trusted: the boot check below guards against configuration mistakes, not
+against an attacker, who could change the configuration or run code anyway.
 
 - A connection is known by its key. Eloquent stamps the connection's
   reported name on the models it loads, and boot fails when a connection in
@@ -208,7 +210,8 @@ these invariants:
   This includes `name` options in the URL query (`?write[name]=`). A
   `name` nested anywhere outside the read, write and direct variants, and a
   dot in a connection key, fail boot too: Laravel resolves a dotted name
-  inside another connection's config. A
+  inside another connection's config, and parses a `url` it finds there,
+  so every `url` at any depth is read as well. A
   connection registered at runtime (`config()->set()`,
   `DB::connectUsing()`) never reuses another connection's name. The package
   does not enforce this one: such a registration is the application's own

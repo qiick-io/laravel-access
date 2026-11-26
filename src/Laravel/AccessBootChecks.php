@@ -167,8 +167,10 @@ final class AccessBootChecks
                     continue;
                 }
 
-                if (array_key_exists('name', $variant)) {
-                    $reportedNames[] = $variant['name'];
+                foreach ($this->connectionConfigurations($variant) as $variantConfiguration) {
+                    if (array_key_exists('name', $variantConfiguration)) {
+                        $reportedNames[] = $variantConfiguration['name'];
+                    }
                 }
 
                 $nestedOptions = [...$nestedOptions, ...array_filter($variant, is_array(...))];
@@ -195,11 +197,20 @@ final class AccessBootChecks
     }
 
     /**
+     * A `name` at any depth, a URL's query options included: Laravel parses
+     * the `url` of whichever nested array a dotted connection name reaches.
+     *
      * @param  array<array-key, mixed>  $options
      */
     private function containsName(array $options): bool
     {
         if (array_key_exists('name', $options)) {
+            return true;
+        }
+
+        $urlOptions = $this->connectionConfigurations($options)[1] ?? null;
+
+        if ($urlOptions !== null && $this->containsName($urlOptions)) {
             return true;
         }
 
