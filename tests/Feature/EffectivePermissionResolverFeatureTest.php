@@ -371,3 +371,28 @@ it('never joins a connection name and a morph class into an ambiguous principal 
 
     expect(app(EffectivePermissionResolver::class)->isSamePrincipal($archivedUser, $regionUser))->toBeFalse();
 });
+
+it('never lets a morph sibling class reuse the cached group grants of another class', function (): void {
+    $superAdmin = Role::create(['name' => 'super-admin', 'guard_name' => 'web']);
+    $viewer = Role::create(['name' => 'group-viewer', 'guard_name' => 'web']);
+    $viewer->givePermissionTo(Permission::create(['name' => FakePermissionEnum::CanShowUsers->value, 'guard_name' => 'web']));
+    $user = SpatieUser::query()->create(['email' => 'member@example.com']);
+    $sibling = MorphSiblingUser::query()->findOrFail($user->id);
+
+    // EloquentGroupRoleSource admits exactly one class: only SpatieUser has groups.
+    $groupRoles = Mockery::mock(GroupRoleSource::class);
+    $groupRoles->shouldReceive('instanceRoleIdsFor')->andReturnUsing(fn ($member): array => $member::class === SpatieUser::class ? [$superAdmin->id] : []);
+    $groupRoles->shouldReceive('roleIdsFor')->andReturnUsing(fn ($member): array => $member::class === SpatieUser::class ? [$viewer->id] : []);
+    $roleCatalog = Mockery::mock(RoleCatalog::class);
+    $roleCatalog->shouldReceive('superAdminRoleName')->andReturn('super-admin');
+    $this->app->instance(GroupRoleSource::class, $groupRoles);
+    $this->app->instance(RoleCatalog::class, $roleCatalog);
+    $this->app->forgetInstance(EffectivePermissionResolver::class);
+    $resolver = app(EffectivePermissionResolver::class);
+
+    expect($resolver->isSuperAdmin($user))->toBeTrue()
+        ->and($resolver->hasAssignedPermission($user, FakePermissionEnum::CanShowUsers->value))->toBeTrue()
+        ->and($resolver->isSuperAdmin($sibling))->toBeFalse()
+        ->and($resolver->hasAssignedPermission($sibling, FakePermissionEnum::CanShowUsers->value))->toBeFalse()
+        ->and($resolver->permissionsFor($sibling))->toBe([]);
+});

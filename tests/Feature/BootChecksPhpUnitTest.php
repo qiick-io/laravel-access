@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use Illuminate\Contracts\Config\Repository as ConfigRepository;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Str;
 use Qiick\Access\Contracts\ActorResolver;
 use Qiick\Access\Contracts\AuthorizationResponder;
 use Qiick\Access\Contracts\RoleCatalog;
@@ -191,6 +192,7 @@ it('fails when a database connection reports a name other than its key', functio
     'writer inside the URL query' => fn (string $name): array => ['url' => "sqlite:////tmp/tenant.sqlite?read[database]=/tmp/tenant.sqlite&write[database]=/tmp/central.sqlite&write[name]={$name}"],
     'writer list inside a URL string' => fn (string $name): string => "sqlite:////tmp/tenant.sqlite?read[database]=/tmp/tenant.sqlite&write[0][host]=a&write[1][name]={$name}",
     'direct inside the URL query' => fn (string $name): array => ['url' => "pgsql://tenant.internal/tenant?direct[name]={$name}"],
+    'Stringable URL' => fn (string $name): array => ['url' => Str::of("sqlite:////tmp/tenant.sqlite?name={$name}")],
 ]);
 
 it('accepts connections that report their own key, including writer and replica lists', function (): void {
@@ -216,4 +218,29 @@ it('accepts connections that report their own key, including writer and replica 
     $config->set('database.connections.failover', null);
     $config->set('database.connections.url', null);
     unlink($database);
+});
+
+it('fails when a connection key or a connection nested in another can stand for another name', function (): void {
+    $checks = app(AccessBootChecks::class);
+    $config = app(ConfigRepository::class);
+    $defaultConnection = $config->get('database.default');
+    $defaultConfig = $config->get("database.connections.{$defaultConnection}");
+
+    // Laravel resolves DB::connection('tenant.read') through Arr::get(): a
+    // literal dotted key, or else a connection nested inside 'tenant'.
+    $config->set('database.connections', [...$config->get('database.connections'), 'tenant.read' => ['driver' => 'sqlite', 'database' => '/tmp/tenant.sqlite']]);
+
+    expect(fn () => $checks->assertConnectionNamesMatchTheirKeys($config))
+        ->toThrow(RuntimeException::class, 'Database connection [tenant.read] has a dot in its key');
+
+    $connections = $config->get('database.connections');
+    unset($connections['tenant.read']);
+    $config->set('database.connections', $connections);
+    $config->set("database.connections.{$defaultConnection}.secondary", ['driver' => 'sqlite', 'database' => '/tmp/tenant.sqlite', 'name' => $defaultConnection]);
+
+    expect(fn () => $checks->assertConnectionNamesMatchTheirKeys($config))
+        ->toThrow(RuntimeException::class, "Database connection [{$defaultConnection}] nests a 'name' outside its read, write and direct variants");
+
+    $config->set("database.connections.{$defaultConnection}", $defaultConfig);
+    $checks->assertConnectionNamesMatchTheirKeys($config);
 });
