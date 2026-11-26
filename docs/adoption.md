@@ -387,12 +387,14 @@ It fails on any Gate ability call (`can`, `cannot`, `cant`, `canAny`,
 on one whose ability it cannot read statically, and on dynamically named calls
 in Policies, and on any static `Gate::` method outside the known Gate API (a
 macro). It also flags role-only `isSuperAdmin()` and `isDirectSuperAdmin()`
-calls and role predicates such as `hasRole()` with a `super-admin` literal
-or `SuperAdmin` enum case in Policies. Callable references to these predicates
-fail because their role arguments cannot be read at the call site. Class
-attributes count as part of their class, and trait aliases of a
-watched method (`use T { hasPermission as checkPermission; }`) count as that
-method. Outside Policies and the Inertia share (`share()` of
+calls in Policies. For `hasRole()` and related methods, `roles->contains()`
+and the `role()` scope, it recognises the role name from `RoleCatalog`
+case-insensitively, including pipe lists with spaces, as well as catalog
+lookups and enum cases such as `SuperAdmin` or `SUPER_ADMIN`. Callable
+references to role predicates fail because the scanner cannot read the role
+arguments at the call site. Class attributes count as part of their class,
+and trait aliases of a watched method (`use T { hasPermission as checkPermission; }`)
+count as that method. Outside Policies and the Inertia share (`share()` of
 `App\Http\Middleware\HandleInertiaRequests`, or the class passed as the
 scanner's third argument), each direct `hasPermission()` /
 `hasAssignedPermission()` site must be listed:
