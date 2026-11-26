@@ -26,9 +26,9 @@ use Symfony\Component\HttpFoundation\Response;
 
 /*
  * Design §6 route middleware and FormRequest trait. Web actors: the resolver,
- * super-admin included. API actors: credential scopes ∩ the owner's currently
- * assigned permissions, never super-admin, and denied when no scope check is
- * bound.
+ * super-admin included. API actors: credential scopes ∩ the owner ceiling
+ * (assigned permissions, or the vocabulary for a super-admin owner; never the
+ * Gate bypass), and denied when no scope check is bound.
  */
 
 /**
@@ -166,13 +166,43 @@ it('limits an API actor whose owner is super-admin to its scopes', function (): 
         ->and($scopeCheck->calls[0])->toBe([$actor, FakePermissionEnum::CanShowUsers->value]);
 });
 
-it('never grants an API actor through the owner super-admin role', function (): void {
+it('gives an API actor of a super-admin owner the permission vocabulary within its scopes', function (): void {
+    // Decision 2026-11-26: a super-admin's key ceiling is every explicit
+    // permission, so a super-admin alone can create a working key.
     $owner = userWithPermissions();
     $owner->assignRole('super-admin');
     enterApiActor($owner);
     $this->app->instance(ApiActorScopeCheck::class, new ListedScopeCheck([FakePermissionEnum::CanShowUsers->value]));
 
-    expect(passThroughPermissionMiddleware(requestAs($owner), FakePermissionEnum::CanShowUsers->value)->getContent())
+    expect(passThroughPermissionMiddleware(requestAs(null), FakePermissionEnum::CanShowUsers->value)->getContent())->toBe('next')
+        ->and(passThroughPermissionMiddleware(requestAs(null), FakePermissionEnum::CanEditUsers->value)->getContent())->toBe('forbidden:can-edit-users');
+});
+
+it('never gives a super-admin owner\'s API actor a permission outside the vocabulary', function (): void {
+    Permission::create(['name' => 'can-purge-everything', 'guard_name' => 'web']);
+    Role::findByName('super-admin')->givePermissionTo('can-purge-everything');
+    $owner = userWithPermissions();
+    $owner->assignRole('super-admin');
+    enterApiActor($owner);
+    $this->app->instance(ApiActorScopeCheck::class, new ListedScopeCheck(['can-purge-everything']));
+
+    expect(passThroughPermissionMiddleware(requestAs(null), 'can-purge-everything')->getContent())
+        ->toBe('forbidden:can-purge-everything');
+});
+
+it('denies an API actor as soon as its owner stops being super-admin', function (): void {
+    $owner = userWithPermissions();
+    $owner->assignRole('super-admin');
+    enterApiActor($owner);
+    $this->app->instance(ApiActorScopeCheck::class, new ListedScopeCheck([FakePermissionEnum::CanShowUsers->value]));
+
+    expect(passThroughPermissionMiddleware(requestAs(null), FakePermissionEnum::CanShowUsers->value)->getContent())->toBe('next');
+
+    // A demotion that fires no Spatie event: only the fresh read catches it.
+    DB::table('model_has_roles')->delete();
+    app(PermissionRegistrar::class)->forgetCachedPermissions();
+
+    expect(passThroughPermissionMiddleware(requestAs(null), FakePermissionEnum::CanShowUsers->value)->getContent())
         ->toBe('forbidden:can-show-users');
 });
 
@@ -276,13 +306,14 @@ it('denies a web request whose user is not the bound actor', function (): void {
         ->toBe('next');
 });
 
-it('never counts the super-admin role\'s own permissions for an API actor', function (): void {
+it('never counts the super-admin role\'s own permissions beyond the vocabulary for an API actor', function (): void {
+    Permission::create(['name' => 'can-delete-users', 'guard_name' => 'web']);
+    Permission::create(['name' => 'can-purge-everything', 'guard_name' => 'web']);
     $superAdminRole = Role::findByName('super-admin');
-    $superAdminRole->givePermissionTo(FakePermissionEnum::CanEditUsers->value);
+    $superAdminRole->givePermissionTo('can-purge-everything');
     $editorRole = Role::create(['name' => 'editor', 'guard_name' => 'web']);
     $editorRole->givePermissionTo(FakePermissionEnum::CanShowUsers->value);
 
-    Permission::create(['name' => 'can-delete-users', 'guard_name' => 'web']);
     $owner = userWithPermissions('can-delete-users');
     $owner->assignRole($superAdminRole, $editorRole);
     enterApiActor($owner);
@@ -290,12 +321,17 @@ it('never counts the super-admin role\'s own permissions for an API actor', func
         FakePermissionEnum::CanShowUsers->value,
         FakePermissionEnum::CanEditUsers->value,
         'can-delete-users',
+        'can-purge-everything',
     ]));
 
+    // Vocabulary through super-admin, and a direct grant outside it; never
+    // a permission that only the super-admin role row carries.
     expect(passThroughPermissionMiddleware(requestAs(null), FakePermissionEnum::CanEditUsers->value)->getContent())
-        ->toBe('forbidden:can-edit-users')
+        ->toBe('next')
         ->and(passThroughPermissionMiddleware(requestAs(null), FakePermissionEnum::CanShowUsers->value)->getContent())
         ->toBe('next')
         ->and(passThroughPermissionMiddleware(requestAs(null), 'can-delete-users')->getContent())
-        ->toBe('next');
+        ->toBe('next')
+        ->and(passThroughPermissionMiddleware(requestAs(null), 'can-purge-everything')->getContent())
+        ->toBe('forbidden:can-purge-everything');
 });

@@ -164,10 +164,8 @@ final class EffectivePermissionResolver
     /**
      * Whether the permission is actually assigned to the user (directly,
      * through a direct role or through an active group role), ignoring the
-     * super-admin grant. This is the owner ceiling for API actors: super-admin
-     * never applies to them (design §3.1 step 2), so a key owned by a
-     * super-admin reaches only what its owner really holds. Pass `fresh` for
-     * use-time checks behind a credential (§4.2).
+     * super-admin grant. Use isWithinOwnerCeiling() for what an API key may
+     * reach; pass `fresh` for use-time checks behind a credential (§4.2).
      */
     public function hasAssignedPermission(Authenticatable $user, string $name, bool $fresh = false): bool
     {
@@ -176,6 +174,25 @@ final class EffectivePermissionResolver
         }
 
         return in_array($name, $this->resolve($user)['assigned_permissions'], true);
+    }
+
+    /**
+     * The owner ceiling behind an API credential: what a key owned by this
+     * user may reach at most, before the credential's own scopes narrow it.
+     * Assigned permissions, or, for an instance super-admin, every permission
+     * of the vocabulary (decision 2026-11-26): a super-admin alone can then
+     * issue a working key. Never the Gate bypass itself (design §3.1 step 2):
+     * a name outside the vocabulary, such as one only the super-admin role
+     * row carries, stays out. Pass `fresh` for use-time checks, so a demoted
+     * owner's keys lose the grant on the next request (§4.2).
+     */
+    public function isWithinOwnerCeiling(Authenticatable $owner, string $name, bool $fresh = false): bool
+    {
+        if ($this->hasAssignedPermission($owner, $name, $fresh)) {
+            return true;
+        }
+
+        return $this->isSuperAdmin($owner) && $this->vocabulary->isPermission($name);
     }
 
     public function forget(?Authenticatable $user = null): void

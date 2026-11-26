@@ -10,6 +10,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `EffectivePermissionResolver::isWithinOwnerCeiling()`: the owner ceiling
+  behind an API key. A super-admin alone can now issue working keys: their
+  ceiling is every permission of the vocabulary, never the Gate bypass
+  (decision `docs/decisions/2026-11-26-super-admin-key-ceiling.md`).
+- `Rules\ExclusiveSuperAdminRoleRule` rejects super-admin combined with any
+  other role on a user's role list; other roles combine freely.
+
 - `PrincipalDirectory::markErased()` lets product soft-delete flows write a
   permanent membership tombstone for a principal of type `user`. Custom
   directory implementations must add the new interface method.
@@ -20,6 +27,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   to deny super-admin authority to API actors. `SuperAdminGuard` now applies
   this check when protecting super-admin accounts. See `UPGRADING.md`.
 - The AC9 scanner reports role-only super-admin checks in policies.
+- `EnsureUserHasPermission`, `AuthorizesWithPermission` and
+  `PrincipalCeiling::allows()` now give an API key owned by a super-admin
+  the vocabulary within its scopes (before: nothing). The Gate bypass, a
+  permission outside the vocabulary and the super-admin role row's own
+  permissions stay out; a demoted owner's keys lose the grant on the next
+  request. The AC9 scanner watches `isWithinOwnerCeiling()` too.
 
 ## [0.1.0-beta.2] - 2026-11-26
 

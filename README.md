@@ -54,7 +54,7 @@ Products must bind `RoleCatalog`, `TwoFactorPolicy`, `TwoFactorResponder` and
 | Threat | Mitigation |
 | --- | --- |
 | Super-admin elevation through a key, grant or public door | `Gate::before` step 2 abstains for API actors; Spatie's permission callback off; AC2 |
-| Future model-less check on an API path | Step 2 unconditional; `permission:` middleware and trait give API actors only scopes ∩ the owner's assigned permissions, never super-admin, and deny them when no `ApiActorScopeCheck` is bound; Policies use the resolver, never `$actor->can(<permission>)`; AC2, AC8, AC9 |
+| Future model-less check on an API path | Step 2 unconditional; `permission:` middleware and trait give API actors only scopes ∩ the owner ceiling (assigned permissions, the vocabulary for a super-admin owner), never the Gate bypass, and deny them when no `ApiActorScopeCheck` is bound; Policies use the resolver, never `$actor->can(<permission>)`; AC2, AC8, AC9 |
 | Forged actor kind | Context bound only after verification; resolver never reads request input; either-signal rule; AC4 |
 | Job escaping the key's limits | `CarriesActorContext` job middleware; AC5 |
 | Stale permissions after demotion | `fresh` use-time checks, event and lifecycle clears, scoped resolver; AC6, AC11 |

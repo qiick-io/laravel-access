@@ -27,8 +27,8 @@ use Spatie\Permission\PermissionRegistrar;
 /*
  * The owner ceiling behind an API key (design §15.4): the principal is active,
  * its nearest `user` principal up the owner chain, in the same organisation,
- * actually holds the permission in that organisation (read fresh, never through
- * super-admin). Services without a user owner and instance principals have an
+ * actually holds the permission in that organisation, or is an instance
+ * super-admin and the permission is in the vocabulary (read fresh). Services without a user owner and instance principals have an
  * empty ceiling: their powers come from the product's scopes only.
  */
 
@@ -172,7 +172,11 @@ it('fails closed on an owner chain that crosses organisations or loops', functio
         ->and(ceiling()->allows($second->id, FakePermissionEnum::CanShowUsers->value))->toBeFalse();
 });
 
-it('never grants through the owner\'s super-admin role', function (): void {
+it('gives a super-admin owner the permission vocabulary, never more', function (): void {
+    // Decision 2026-11-26: a super-admin's key ceiling is every explicit
+    // permission; a permission only the super-admin role row carries is not one.
+    Permission::create(['name' => 'can-purge-everything', 'guard_name' => 'web']);
+    Role::findByName('super-admin')->givePermissionTo('can-purge-everything');
     $organisationId = (string) Str::uuid();
     $superAdmin = SpatieUser::query()->create(['email' => 'admin@example.com']);
     app(PermissionRegistrar::class)->setPermissionsTeamId($organisationId);
@@ -180,8 +184,14 @@ it('never grants through the owner\'s super-admin role', function (): void {
     app(PermissionRegistrar::class)->setPermissionsTeamId(null);
     $principal = principals()->forMember($superAdmin, $organisationId);
 
-    expect(app(EffectivePermissionResolver::class)->isSuperAdmin($superAdmin))->toBeTrue()
-        ->and(ceiling()->allows($principal->id, FakePermissionEnum::CanShowUsers->value))->toBeFalse();
+    expect(ceiling()->allows($principal->id, FakePermissionEnum::CanShowUsers->value))->toBeTrue()
+        ->and(ceiling()->allows($principal->id, FakePermissionEnum::CanEditUsers->value))->toBeTrue()
+        ->and(ceiling()->allows($principal->id, 'can-purge-everything'))->toBeFalse();
+
+    // A demotion that fires no Spatie event: the fresh read catches it.
+    DB::table('model_has_roles')->delete();
+
+    expect(ceiling()->allows($principal->id, FakePermissionEnum::CanShowUsers->value))->toBeFalse();
 });
 
 it('works without organisations, as in a single-tenant product', function (): void {

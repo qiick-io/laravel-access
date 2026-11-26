@@ -23,8 +23,8 @@ use SplFileInfo;
  *   statically (a variable, a constant, a spread) and any dynamically named
  *   call fail too. Role-only super-admin predicates and super-admin role
  *   checks fail because policies must account for the verified actor;
- * - outside Policies and the Inertia share, every direct `hasPermission()` /
- *   `hasAssignedPermission()` must be listed by site (`Class::method`, or the
+ * - outside Policies and the Inertia share, every direct `hasPermission()`,
+ *   `hasAssignedPermission()` or `isWithinOwnerCeiling()` must be listed by site (`Class::method`, or the
  *   file path outside classes) in `access.direct_checks` of
  *   qiick-standards.json, with a reason, a decision link and a `review_by`
  *   date that has not passed. A listed site with no check left fails, so the
@@ -480,7 +480,7 @@ final class DirectPermissionCheckScanner
 
     private function judgeDirectCheck(string $methodName, bool $isPolicy): ?false
     {
-        return in_array($methodName, ['haspermission', 'hasassignedpermission'], true) && ! $isPolicy ? null : false;
+        return in_array($methodName, ['haspermission', 'hasassignedpermission', 'iswithinownerceiling'], true) && ! $isPolicy ? null : false;
     }
 
     /**

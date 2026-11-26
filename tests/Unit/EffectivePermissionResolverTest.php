@@ -819,3 +819,40 @@ it('falls back to unknown when the auth identifier is neither int nor string', f
     expect($resolver->roleNamesFor($user))->toBe([])
         ->and($resolver->permissionsFor($user))->toBe([]);
 });
+
+it('bounds an owner ceiling by assigned permissions, or by the vocabulary for a super-admin', function (): void {
+    $superAdmin = new PermissionedFakeUser(11, ['super-admin']);
+    $member = new PermissionedFakeUser(12, ['member'], ['can-show-users']);
+
+    $roleCatalog = Mockery::mock(RoleCatalog::class);
+    $roleCatalog->shouldReceive('superAdminRoleName')->andReturn('super-admin');
+
+    $groupRoles = Mockery::mock(GroupRoleSource::class);
+    $groupRoles->shouldReceive('instanceRoleIdsFor')->andReturn([]);
+    $groupRoles->shouldReceive('roleIdsFor')->andReturn([]);
+
+    $vocabulary = Mockery::mock(PermissionVocabulary::class);
+    $vocabulary->shouldReceive('all')->andReturn(['can-show-users', 'can-edit-users']);
+    $vocabulary->shouldReceive('isPermission')->andReturnUsing(
+        static fn (string $name): bool => in_array($name, ['can-show-users', 'can-edit-users'], true),
+    );
+
+    $teamContext = Mockery::mock(TeamContext::class);
+    $teamContext->shouldReceive('currentId')->andReturn(null);
+
+    $registrar = Mockery::mock(PermissionRegistrar::class);
+    $registrar->teams = false;
+
+    $resolver = new EffectivePermissionResolver($roleCatalog, $groupRoles, $vocabulary, $teamContext, $registrar);
+
+    expect($resolver->isWithinOwnerCeiling($superAdmin, 'can-edit-users'))->toBeTrue()
+        ->and($resolver->isWithinOwnerCeiling($superAdmin, 'can-purge-everything'))->toBeFalse()
+        ->and($resolver->isWithinOwnerCeiling($member, 'can-show-users'))->toBeTrue()
+        ->and($resolver->isWithinOwnerCeiling($member, 'can-edit-users'))->toBeFalse();
+
+    // Cached until a fresh read: a demotion counts at once only with fresh.
+    $superAdmin->setRoleNames([]);
+
+    expect($resolver->isWithinOwnerCeiling($superAdmin, 'can-edit-users'))->toBeTrue()
+        ->and($resolver->isWithinOwnerCeiling($superAdmin, 'can-edit-users', true))->toBeFalse();
+});

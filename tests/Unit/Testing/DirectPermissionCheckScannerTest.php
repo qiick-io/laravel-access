@@ -238,6 +238,7 @@ it('flags an unlisted direct hasPermission() outside Policies with its site', fu
 })->with([
     'method call' => ["\$resolver->hasPermission(\$user, 'can-show-users')"],
     'assigned permission' => ["\$resolver->hasAssignedPermission(\$user, 'can-show-users', true)"],
+    'owner ceiling' => ["\$resolver->isWithinOwnerCeiling(\$user, 'can-show-users', true)"],
     'nullsafe' => ["\$resolver?->hasPermission(\$user, 'x')"],
     'static call' => ["Resolver::hasPermission(\$user, 'x')"],
     'mixed case' => ["\$resolver->HasPermission(\$user, 'x')"],
