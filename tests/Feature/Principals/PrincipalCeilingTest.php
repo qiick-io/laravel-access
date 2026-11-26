@@ -3,7 +3,6 @@
 declare(strict_types=1);
 
 use Illuminate\Database\Eloquent\Model;
-use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\QueryException;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\DB;
@@ -20,6 +19,7 @@ use Qiick\Access\Principals\PrincipalCeiling;
 use Qiick\Access\Principals\PrincipalDirectory;
 use Qiick\Access\Tests\Support\FakePermissionEnum;
 use Qiick\Access\Tests\Support\SpatieUser;
+use Qiick\Access\Tests\Support\UuidTeamPermissionMigration;
 use Spatie\Permission\Models\Permission;
 use Spatie\Permission\Models\Role;
 use Spatie\Permission\PermissionRegistrar;
@@ -50,7 +50,7 @@ beforeEach(function (): void {
         $table->string('email')->nullable();
     });
 
-    uuidTeamPermissionTables()->up();
+    UuidTeamPermissionMigration::make()->up();
     (require dirname(__DIR__, 3).'/database/migrations/principals/2026_11_24_100000_create_principals_table.php')->up();
 
     (new ReflectionProperty(Model::class, 'guardableColumns'))->setValue(null, []);
@@ -100,19 +100,6 @@ function editorIn(string $organisationId, string $email = 'editor@example.com'):
     $registrar->setPermissionsTeamId($previousTeamId);
 
     return $user;
-}
-
-/**
- * Spatie's tables with uuid team columns, as the fleet schema requires (A3):
- * the stock stub declares bigint team ids, which real engines refuse for uuids.
- */
-function uuidTeamPermissionTables(): Migration
-{
-    $stub = (string) file_get_contents(dirname(__DIR__, 3).'/vendor/spatie/laravel-permission/database/migrations/create_permission_tables.php.stub');
-    $path = sys_get_temp_dir().'/qiick-access-uuid-team-permission-tables-'.md5($stub).'.php';
-    file_put_contents($path, str_replace("\$table->unsignedBigInteger(\$columnNames['team_foreign_key'])", "\$table->uuid(\$columnNames['team_foreign_key'])", $stub));
-
-    return require $path;
 }
 
 function ceiling(): PrincipalCeiling

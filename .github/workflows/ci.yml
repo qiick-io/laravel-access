@@ -97,6 +97,8 @@ jobs:
       - name: Pest
         run: vendor/bin/pest
 
+      - run: node tests/Erasure/run.mjs
+
       # Mutation targets from the design §11. Per-class min 95; surface the table
       # in the job summary. Bound the step so a hung mutate cannot burn the cell.
       - name: Pest mutate (security-critical classes, per-class min 95)
@@ -122,7 +124,7 @@ jobs:
         database:
           - name: MySQL 8.4
             connection: mysql
-            image: mysql:8.4
+            image: mysql:8.4@sha256:8c233bad33d520a7aae1c1e619c3a9775f4a1ba2d463d692fada04ec7f40be00
             port: 3306
             options: >-
               -e MYSQL_ALLOW_EMPTY_PASSWORD=yes -e MYSQL_DATABASE=laravel_access
@@ -134,13 +136,27 @@ jobs:
             options: >-
               -e MARIADB_ALLOW_EMPTY_ROOT_PASSWORD=yes -e MARIADB_DATABASE=laravel_access
               --health-cmd="healthcheck.sh --connect --innodb_initialized" --health-interval=5s --health-retries=20
+          - name: MariaDB 11.4
+            connection: mariadb
+            image: mariadb:11.4@sha256:a8992b5e5404d11e03c54a31d0c1bdea3fd116d283aa6d1a627551f29045309b
+            port: 3306
+            options: >-
+              -e MARIADB_ALLOW_EMPTY_ROOT_PASSWORD=yes -e MARIADB_DATABASE=laravel_access
+              --health-cmd="healthcheck.sh --connect --innodb_initialized" --health-interval=5s --health-retries=20
           - name: PostgreSQL 17
             connection: pgsql
-            image: postgres:17
+            image: postgres:17@sha256:87c8b42f423b45d5247e6aa8fdb2e7762fec164c68a50fe3eb07e7bfcaf4dbcf
             port: 5432
             options: >-
               -e POSTGRES_HOST_AUTH_METHOD=trust -e POSTGRES_DB=laravel_access
               --health-cmd="pg_isready -U postgres" --health-interval=5s --health-retries=20
+    env:
+      DB_CONNECTION: ${{ matrix.database.connection }}
+      DB_HOST: 127.0.0.1
+      DB_PORT: ${{ matrix.database.port }}
+      DB_DATABASE: laravel_access
+      DB_USERNAME: ${{ matrix.database.connection == 'pgsql' && 'postgres' || 'root' }}
+      DB_PASSWORD: ''
     services:
       database:
         image: ${{ matrix.database.image }}
@@ -173,23 +189,16 @@ jobs:
           composer update --no-interaction --prefer-dist --with-all-dependencies
 
       - name: Pest (group engines)
-        env:
-          DB_CONNECTION: ${{ matrix.database.connection }}
-          DB_HOST: 127.0.0.1
-          DB_PORT: ${{ matrix.database.port }}
-          DB_DATABASE: laravel_access
-          DB_USERNAME: ${{ matrix.database.connection == 'pgsql' && 'postgres' || 'root' }}
-          DB_PASSWORD: ''
         run: vendor/bin/pest --group=engines
 
+      - run: node tests/Erasure/run.mjs
+
   standards:
-    # qiick-io/app-ui@v0.12.0
-    uses: qiick-io/app-ui/.github/workflows/drift-check.yml@f613af9febfce3b6d7f7f41785e9845a610080c7 # v0.12.0
+    uses: qiick-io/app-ui/.github/workflows/drift-check.yml@0d97ae1429a856411c76e6de1ec258cae0eabab6 # v0.15.0
     with:
       standards: true
       registry: false
 
   pr-title:
     if: github.event_name == 'pull_request'
-    # qiick-io/app-ui@v0.12.0
-    uses: qiick-io/app-ui/.github/workflows/pr-title.yml@f613af9febfce3b6d7f7f41785e9845a610080c7 # v0.12.0
+    uses: qiick-io/app-ui/.github/workflows/pr-title.yml@0d97ae1429a856411c76e6de1ec258cae0eabab6 # v0.15.0
