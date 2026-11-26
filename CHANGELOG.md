@@ -8,6 +8,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.0-beta.2] - 2026-11-26
+
+Fixes group roles, which counted for nobody in `0.1.0-beta.1`, and makes
+group membership a declared rule. Public APIs may still change in any 0.x
+minor.
+
+### Upgrade notes
+
+Behaviour changes that can affect a product (details in `UPGRADING.md`):
+
+- Group roles count only for exactly the member model class on the default
+  connection: a product with single-table inheritance configures the
+  subclass it authenticates, and a non-Eloquent member gets none.
+- Boot fails when a database connection reports a name other than its key,
+  or has a dot in its key.
+- A database migrated with `0.1.0-beta.1` adds the `principals.created_by`
+  index (or runs `migrate:fresh`).
+
 ### Security
 
 - Group membership counts only for exactly the configured member model
@@ -22,8 +40,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   else (a connection inside another), including the query of a `url` at
   any depth. The check guards against configuration mistakes; the database
   configuration itself is trusted. Dotted connection keys fail too:
-  Laravel resolves a dotted name inside another connection. Eloquent stamps that name on the models it loads, so a second
-  database could otherwise pass its users off as the default connection's.
+  Laravel resolves a dotted name inside another connection. Eloquent
+  stamps that name on the models it loads, so a second database could
+  otherwise pass its users off as the default connection's.
 
 ### Fixed
 
@@ -47,6 +66,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   JSON pair, so a `|` in either cannot make two principals equal. The
   cached results and super-admin verdicts are also kept per exact class,
   so a morph sibling never reuses a group grant admitted for another class.
+
+### Documentation
+
+- `docs/adoption.md` takes in the non-blocking notes of the independent
+  reviews: instance principal types, `isActive()` versus the owner ceiling,
+  group-name uniqueness when externa adds organisations, and the columns
+  `AssertsRolesSchema` leaves unset. It also states the multi-database
+  invariants behind the group member check.
 
 ## [0.1.0-beta.1] - 2026-11-25
 
@@ -303,5 +330,6 @@ first-install requirements (details in `docs/adoption.md` and `UPGRADING.md`):
   `composer.json` `require` entry with constraint rationale, usage,
   maintainer, license, known risk and an in-package exit plan.
 
-[Unreleased]: https://github.com/qiick-io/laravel-access/compare/v0.1.0-beta.1...HEAD
+[Unreleased]: https://github.com/qiick-io/laravel-access/compare/v0.1.0-beta.2...HEAD
+[0.1.0-beta.2]: https://github.com/qiick-io/laravel-access/compare/v0.1.0-beta.1...v0.1.0-beta.2
 [0.1.0-beta.1]: https://github.com/qiick-io/laravel-access/releases/tag/v0.1.0-beta.1

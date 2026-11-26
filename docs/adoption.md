@@ -1,6 +1,6 @@
 # Adoption
 
-Product adoption order (design §10): package `0.1.0-beta.1` → **excubia-app** →
+Product adoption order (design §10): package `0.1.0-beta.2` → **excubia-app** →
 signaculum-core → instituta-core → **externa-core** last → then
 `qiick/laravel-api-keys` in each product.
 
