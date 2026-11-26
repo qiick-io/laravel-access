@@ -206,6 +206,9 @@ these invariants:
   `database.connections` sets a `name` other than its key, at the top
   level, in a URL's query (`?name=`) or in a read, write or direct variant.
   This includes `name` options in the URL query (`?write[name]=`). A
+  `name` nested anywhere outside the read, write and direct variants, and a
+  dot in a connection key, fail boot too: Laravel resolves a dotted name
+  inside another connection's config. A
   connection registered at runtime (`config()->set()`,
   `DB::connectUsing()`) never reuses another connection's name. The package
   does not enforce this one: such a registration is the application's own

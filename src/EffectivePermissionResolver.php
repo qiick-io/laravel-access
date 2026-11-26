@@ -29,19 +29,23 @@ use Spatie\Permission\PermissionRegistrar;
 final class EffectivePermissionResolver
 {
     /**
-     * Keyed by principal type, then identifier, then team. The type is part of
-     * the key: two Authenticatable models (a web user and another guard's
-     * principal) can share an identifier and must never share permissions.
+     * Keyed by principal type, then identifier, then exact class, then team.
+     * The type is part of the key: two Authenticatable models (a web user and
+     * another guard's principal) can share an identifier and must never share
+     * permissions. The class too: a group source may admit one class only, so
+     * morph siblings never share a group grant; forget() drops every class of
+     * the principal at once, so a role event on one still clears the other.
      *
-     * @var array<string, array<string, array<string, array{permissions: list<string>, assigned_permissions: list<string>, role_names: list<string>, role_ids: list<string>}>>>
+     * @var array<string, array<string, array<class-string, array<string, array{permissions: list<string>, assigned_permissions: list<string>, role_names: list<string>, role_ids: list<string>}>>>>
      */
     private array $cache = [];
 
     /**
-     * Super-admin verdicts by principal type, then identifier. No team key:
-     * the verdict is instance-level (C30), so one read serves every team.
+     * Super-admin verdicts by principal type, identifier, then exact class.
+     * No team key: the verdict is instance-level (C30), so one read serves
+     * every team.
      *
-     * @var array<string, array<string, bool>>
+     * @var array<string, array<string, array<class-string, bool>>>
      */
     private array $superAdminVerdicts = [];
 
@@ -81,7 +85,7 @@ final class EffectivePermissionResolver
         $principalType = $this->principalType($user);
         $identifier = $this->identifierKey($user);
 
-        return $this->superAdminVerdicts[$principalType][$identifier] ??= in_array(
+        return $this->superAdminVerdicts[$principalType][$identifier][$user::class] ??= in_array(
             $this->roleCatalog->superAdminRoleName(),
             $this->globalRoleNamesIgnoringTeamFilter($user),
             true,
@@ -186,8 +190,8 @@ final class EffectivePermissionResolver
         $identifier = $this->identifierKey($user);
         $teamKey = $this->teamKey();
 
-        if (isset($this->cache[$principalType][$identifier][$teamKey])) {
-            return $this->cache[$principalType][$identifier][$teamKey];
+        if (isset($this->cache[$principalType][$identifier][$user::class][$teamKey])) {
+            return $this->cache[$principalType][$identifier][$user::class][$teamKey];
         }
 
         // Under teams Spatie filters these relations by the team current when
@@ -217,7 +221,7 @@ final class EffectivePermissionResolver
             $roleNames[] = $this->roleCatalog->superAdminRoleName();
         }
 
-        return $this->cache[$principalType][$identifier][$teamKey] = [
+        return $this->cache[$principalType][$identifier][$user::class][$teamKey] = [
             'permissions' => $isSuperAdmin ? $this->vocabulary->all() : $assignedPermissions,
             'assigned_permissions' => $assignedPermissions,
             'role_names' => $this->uniqueSortedStrings($roleNames),

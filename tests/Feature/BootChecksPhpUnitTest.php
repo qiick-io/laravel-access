@@ -192,6 +192,8 @@ it('fails when a database connection reports a name other than its key', functio
     'writer inside the URL query' => fn (string $name): array => ['url' => "sqlite:////tmp/tenant.sqlite?read[database]=/tmp/tenant.sqlite&write[database]=/tmp/central.sqlite&write[name]={$name}"],
     'writer list inside a URL string' => fn (string $name): string => "sqlite:////tmp/tenant.sqlite?read[database]=/tmp/tenant.sqlite&write[0][host]=a&write[1][name]={$name}",
     'direct inside the URL query' => fn (string $name): array => ['url' => "pgsql://tenant.internal/tenant?direct[name]={$name}"],
+    'top-level name next to a URL' => fn (string $name): array => ['url' => 'sqlite:////tmp/tenant.sqlite', 'name' => $name],
+    'writer after a scalar list entry' => fn (string $name): array => ['driver' => 'sqlite', 'database' => '/tmp/tenant.sqlite', 'read' => [], 'write' => ['ignored', ['name' => $name]]],
     'Stringable URL' => fn (string $name): array => ['url' => Str::of("sqlite:////tmp/tenant.sqlite?name={$name}")],
 ]);
 
@@ -241,6 +243,22 @@ it('fails when a connection key or a connection nested in another can stand for 
     expect(fn () => $checks->assertConnectionNamesMatchTheirKeys($config))
         ->toThrow(RuntimeException::class, "Database connection [{$defaultConnection}] nests a 'name' outside its read, write and direct variants");
 
+    // Deeper, and inside a variant: still a connection Laravel could reach.
+    $config->set("database.connections.{$defaultConnection}", [...$defaultConfig, 'options' => ['tenants' => ['secondary' => ['name' => $defaultConnection]]]]);
+
+    expect(fn () => $checks->assertConnectionNamesMatchTheirKeys($config))->toThrow(RuntimeException::class, 'nests a');
+
+    $config->set("database.connections.{$defaultConnection}", [...$defaultConfig, 'read' => [], 'write' => ['database' => '/tmp/central.sqlite', 'sticky' => ['name' => $defaultConnection]]]);
+
+    expect(fn () => $checks->assertConnectionNamesMatchTheirKeys($config))->toThrow(RuntimeException::class, 'nests a');
+
+    // A non-string name is named by its type; a non-array connection has no name.
+    $config->set("database.connections.{$defaultConnection}", [...$defaultConfig, 'name' => 7]);
+
+    expect(fn () => $checks->assertConnectionNamesMatchTheirKeys($config))->toThrow(RuntimeException::class, 'reports the name [int]');
+
     $config->set("database.connections.{$defaultConnection}", $defaultConfig);
+    $config->set('database.connections.unset', 42);
     $checks->assertConnectionNamesMatchTheirKeys($config);
+    $config->set('database.connections.unset', null);
 });

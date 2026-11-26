@@ -14,6 +14,7 @@ use Qiick\Access\Contracts\RoleCatalog;
 use Qiick\Access\Contracts\TwoFactorPolicy;
 use Qiick\Access\Contracts\TwoFactorResponder;
 use RuntimeException;
+use Stringable;
 
 /**
  * Fail-closed boot assertions for the package (AC12, R4, A1). Extracted from
@@ -87,41 +88,43 @@ final class AccessBootChecks
      * Eloquent stamps a connection's reported name on every model it loads,
      * and the group member check trusts that name. Laravel takes it from the
      * `name` option after merging a URL's query options and the selected
-     * read, write or direct variant over the base config, so those are every
-     * place it can come from. A name other than the key would let another
-     * database's users pass for that connection's, so boot fails instead.
+     * read, write or direct variant over the base config. It finds the config
+     * with Arr::get(), so a dotted name reaches a literal dotted key or a
+     * connection nested inside another. Boot fails on all of these, since
+     * each could let another database's users pass for a declared connection:
+     * a dotted key, a `name` other than the key at the top level or in a
+     * variant, and a `name` anywhere else (a nested connection).
      *
-     * @throws RuntimeException naming the first connection that reports another name
+     * @throws RuntimeException naming the first connection that can report another name
      */
     public function assertConnectionNamesMatchTheirKeys(ConfigRepository $config): void
     {
         $connections = $config->get('database.connections', []);
 
         foreach (is_array($connections) ? $connections : [] as $key => $connection) {
-            foreach ($this->reportedNames($connection) as $reportedName) {
-                if ($reportedName !== $key) {
-                    $shownName = is_scalar($reportedName) ? (string) $reportedName : get_debug_type($reportedName);
+            $key = (string) $key;
 
-                    throw new RuntimeException(
-                        "Database connection [{$key}] reports the name [{$shownName}]; remove that name so the connection is known by its key (see docs/adoption.md).",
-                    );
-                }
+            if (str_contains($key, '.')) {
+                throw new RuntimeException(
+                    "Database connection [{$key}] has a dot in its key; Laravel would also resolve that name inside another connection, so rename it.",
+                );
+            }
+
+            foreach ($this->connectionConfigurations($connection) as $configuration) {
+                $this->assertReportsItsKey($key, $configuration);
             }
         }
     }
 
     /**
-     * Every `name` the connection's configuration sets, at any depth: Laravel
-     * merges the URL's query options (nested `read[...]`, `write[...]`,
-     * `direct[...]` included) over the base config, then the selected variant
-     * over that. Collecting them all, wherever they sit, follows that merge
-     * without copying it; a `name` that could never be reported still fails.
+     * The connection's own options and, when it has a URL, the options
+     * Laravel parses from it (a Stringable URL included).
      *
-     * @return list<mixed>
+     * @return list<array<array-key, mixed>>
      */
-    private function reportedNames(mixed $connection): array
+    private function connectionConfigurations(mixed $connection): array
     {
-        if (is_string($connection)) {
+        if (is_string($connection) || $connection instanceof Stringable) {
             $connection = ['url' => $connection];
         }
 
@@ -129,30 +132,84 @@ final class AccessBootChecks
             return [];
         }
 
-        $names = $this->namesWithin($connection);
+        $url = $connection['url'] ?? null;
 
-        if (is_string($connection['url'] ?? null)) {
-            $names = [...$names, ...$this->namesWithin((new ConfigurationUrlParser)->parseConfiguration($connection['url']))];
+        if (! is_string($url) && ! $url instanceof Stringable) {
+            return [$connection];
         }
 
-        return $names;
+        return [$connection, (new ConfigurationUrlParser)->parseConfiguration((string) $url)];
+    }
+
+    /**
+     * @param  array<array-key, mixed>  $configuration
+     *
+     * @throws RuntimeException when a reported name differs from the key or a name sits outside the variants
+     */
+    private function assertReportsItsKey(string $key, array $configuration): void
+    {
+        $reportedNames = array_key_exists('name', $configuration) ? [$configuration['name']] : [];
+        $nestedOptions = [];
+
+        foreach ($configuration as $option => $value) {
+            if (! is_array($value)) {
+                continue;
+            }
+
+            if (! in_array($option, ['read', 'write', 'direct'], true)) {
+                $nestedOptions[] = $value;
+
+                continue;
+            }
+
+            foreach (array_is_list($value) ? $value : [$value] as $variant) {
+                if (! is_array($variant)) {
+                    continue;
+                }
+
+                if (array_key_exists('name', $variant)) {
+                    $reportedNames[] = $variant['name'];
+                }
+
+                $nestedOptions = [...$nestedOptions, ...array_filter($variant, is_array(...))];
+            }
+        }
+
+        foreach ($reportedNames as $reportedName) {
+            if ($reportedName !== $key) {
+                $shownName = is_string($reportedName) ? $reportedName : get_debug_type($reportedName);
+
+                throw new RuntimeException(
+                    "Database connection [{$key}] reports the name [{$shownName}]; remove that name so the connection is known by its key (see docs/adoption.md).",
+                );
+            }
+        }
+
+        foreach ($nestedOptions as $nestedOption) {
+            if ($this->containsName($nestedOption)) {
+                throw new RuntimeException(
+                    "Database connection [{$key}] nests a 'name' outside its read, write and direct variants; move that connection to its own key (see docs/adoption.md).",
+                );
+            }
+        }
     }
 
     /**
      * @param  array<array-key, mixed>  $options
-     * @return list<mixed>
      */
-    private function namesWithin(array $options): array
+    private function containsName(array $options): bool
     {
-        $names = array_key_exists('name', $options) ? [$options['name']] : [];
+        if (array_key_exists('name', $options)) {
+            return true;
+        }
 
         foreach ($options as $value) {
-            if (is_array($value)) {
-                $names = [...$names, ...$this->namesWithin($value)];
+            if (is_array($value) && $this->containsName($value)) {
+                return true;
             }
         }
 
-        return $names;
+        return false;
     }
 
     public function assertRequiredBindings(): void

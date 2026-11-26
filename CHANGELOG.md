@@ -17,8 +17,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   group roles.
 - Boot fails when a database connection reports a name other than its key
   (`AccessBootChecks::assertConnectionNamesMatchTheirKeys()`): a `name`
-  option at any depth of the connection's config or of its URL's query
-  (read, write and direct variants included). Eloquent stamps that name on the models it loads, so a second
+  option at the top level, in a read, write or direct variant, or in its
+  URL's query (a `Stringable` URL included), or a `name` nested anywhere
+  else (a connection inside another). Dotted connection keys fail too:
+  Laravel resolves a dotted name inside another connection. Eloquent stamps that name on the models it loads, so a second
   database could otherwise pass its users off as the default connection's.
 
 ### Fixed
@@ -40,7 +42,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   connection name, so users of two databases with the same class and id are
   different principals (`isSamePrincipal()`, cached roles and super-admin
   verdicts). The connection name and the morph class are kept apart as a
-  JSON pair, so a `|` in either cannot make two principals equal.
+  JSON pair, so a `|` in either cannot make two principals equal. The
+  cached results and super-admin verdicts are also kept per exact class,
+  so a morph sibling never reuses a group grant admitted for another class.
 
 ## [0.1.0-beta.1] - 2026-11-25
 
