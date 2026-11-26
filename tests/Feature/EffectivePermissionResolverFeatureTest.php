@@ -2,6 +2,8 @@
 
 declare(strict_types=1);
 
+use Illuminate\Auth\Authenticatable;
+use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\DB;
@@ -339,4 +341,33 @@ it('keeps principals of two databases apart, in identity and in the cache', func
 
     DB::purge('tenant');
     unlink($tenantDatabase);
+});
+
+it('never joins a connection name and a morph class into an ambiguous principal key', function (): void {
+    config()->set('database.connections.region|archive', ['driver' => 'sqlite', 'database' => ':memory:', 'prefix' => '']);
+    config()->set('database.connections.region', ['driver' => 'sqlite', 'database' => ':memory:', 'prefix' => '']);
+    $archivedUser = (new class extends Model implements Illuminate\Contracts\Auth\Authenticatable
+    {
+        use Authenticatable;
+
+        protected $connection = 'region|archive';
+
+        public function getMorphClass(): string
+        {
+            return 'user';
+        }
+    })->forceFill(['id' => 1]);
+    $regionUser = (new class extends Model implements Illuminate\Contracts\Auth\Authenticatable
+    {
+        use Authenticatable;
+
+        protected $connection = 'region';
+
+        public function getMorphClass(): string
+        {
+            return 'archive|user';
+        }
+    })->forceFill(['id' => 1]);
+
+    expect(app(EffectivePermissionResolver::class)->isSamePrincipal($archivedUser, $regionUser))->toBeFalse();
 });
