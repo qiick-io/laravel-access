@@ -17,8 +17,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   group roles.
 - Boot fails when a database connection reports a name other than its key
   (`AccessBootChecks::assertConnectionNamesMatchTheirKeys()`): a `name`
-  option at the top level, in a URL's query or in a read, write or direct
-  variant. Eloquent stamps that name on the models it loads, so a second
+  option at any depth of the connection's config or of its URL's query
+  (read, write and direct variants included). Eloquent stamps that name on the models it loads, so a second
   database could otherwise pass its users off as the default connection's.
 
 ### Fixed

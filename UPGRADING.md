@@ -31,8 +31,9 @@ events, and the migrations (see `docs/reference-contracts.md`). Code tagged
   the index once: `CREATE INDEX principals_created_by_index ON principals
   (created_by)` (MySQL and MariaDB already have one from the foreign key).
 - Boot fails when a database connection in `database.connections` reports
-  a name other than its key: a `name` option at the top level, in a URL's
-  query or in a read, write or direct variant. Remove that `name`.
+  a name other than its key: a `name` option at any depth of its config or
+  of its URL's query (read, write and direct variants included). Remove
+  that `name`.
 - Group roles count only for exactly `access.group_member_model` (else
   `auth.providers.users.model`) on the default connection. A product with
   single-table inheritance sets `access.group_member_model` to the subclass

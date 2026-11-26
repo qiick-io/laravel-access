@@ -111,7 +111,13 @@ final class AccessBootChecks
     }
 
     /**
-     * @return list<mixed> every `name` the connection's configuration sets
+     * Every `name` the connection's configuration sets, at any depth: Laravel
+     * merges the URL's query options (nested `read[...]`, `write[...]`,
+     * `direct[...]` included) over the base config, then the selected variant
+     * over that. Collecting them all, wherever they sit, follows that merge
+     * without copying it; a `name` that could never be reported still fails.
+     *
+     * @return list<mixed>
      */
     private function reportedNames(mixed $connection): array
     {
@@ -123,25 +129,26 @@ final class AccessBootChecks
             return [];
         }
 
-        $configurations = [$connection];
+        $names = $this->namesWithin($connection);
 
         if (is_string($connection['url'] ?? null)) {
-            $configurations[] = (new ConfigurationUrlParser)->parseConfiguration($connection['url']);
+            $names = [...$names, ...$this->namesWithin((new ConfigurationUrlParser)->parseConfiguration($connection['url']))];
         }
 
-        foreach (['read', 'write', 'direct'] as $variantType) {
-            $variants = $connection[$variantType] ?? [];
+        return $names;
+    }
 
-            foreach (is_array($variants) && array_is_list($variants) ? $variants : [$variants] as $variant) {
-                $configurations[] = $variant;
-            }
-        }
+    /**
+     * @param  array<array-key, mixed>  $options
+     * @return list<mixed>
+     */
+    private function namesWithin(array $options): array
+    {
+        $names = array_key_exists('name', $options) ? [$options['name']] : [];
 
-        $names = [];
-
-        foreach ($configurations as $configuration) {
-            if (is_array($configuration) && array_key_exists('name', $configuration)) {
-                $names[] = $configuration['name'];
+        foreach ($options as $value) {
+            if (is_array($value)) {
+                $names = [...$names, ...$this->namesWithin($value)];
             }
         }
 

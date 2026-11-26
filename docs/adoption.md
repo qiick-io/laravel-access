@@ -205,8 +205,11 @@ these invariants:
   reported name on the models it loads, and boot fails when a connection in
   `database.connections` sets a `name` other than its key, at the top
   level, in a URL's query (`?name=`) or in a read, write or direct variant.
-  A connection registered at runtime (`config()->set()`,
-  `DB::connectUsing()`) never reuses another connection's name.
+  This includes `name` options in the URL query (`?write[name]=`). A
+  connection registered at runtime (`config()->set()`,
+  `DB::connectUsing()`) never reuses another connection's name. The package
+  does not enforce this one: such a registration is the application's own
+  code, and whoever can run it has already run code in the application.
 - The default connection is one dataset: its read replicas, writers and
   direct (pooled) endpoints hold the same data, and it is never repointed at
   another database while the process runs. A product that switches tenants
