@@ -8,15 +8,19 @@ use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Contracts\Events\Dispatcher;
 use Illuminate\Database\Connection;
 use Illuminate\Database\DatabaseManager;
+use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Query\Builder;
 use Illuminate\Database\QueryException;
 use Illuminate\Support\Str;
 use InvalidArgumentException;
 use LogicException;
+use Qiick\Access\Contracts\RoleCatalog;
 use Qiick\Access\EffectivePermissionResolver;
 use Qiick\Access\Events\SubjectErasedEvent;
 use Qiick\Access\Laravel\MigrationSettings;
 use Qiick\Access\Principals\EloquentPrincipalDirectory;
 use RuntimeException;
+use Spatie\Permission\PermissionRegistrar;
 
 /**
  * Erases the subject's access data on the users connection so the product can
@@ -37,6 +41,8 @@ final class AccessEraser
         private readonly DatabaseManager $database,
         private readonly EffectivePermissionResolver $permissions,
         private readonly Dispatcher $events,
+        private readonly RoleCatalog $roleCatalog,
+        private readonly PermissionRegistrar $registrar,
     ) {}
 
     /**
@@ -112,7 +118,6 @@ final class AccessEraser
 
         if (! $dryRun) {
             $connection->afterCommit(function () use ($user, $report): void {
-                // A scoped grant can affect the instance-level super-admin verdict too.
                 $this->permissions->forget($user);
                 $this->events->dispatch(new SubjectErasedEvent($report));
             });
@@ -141,7 +146,8 @@ final class AccessEraser
             $memberships = $connection->table('user_group_user')->where('user_id', $userId);
 
             if ($organisationId !== null) {
-                $memberships->whereIn('user_group_id', $connection->table('user_groups')->where('organisation_id', $organisationId)->select('id'));
+                $memberships->whereIn('user_group_id', $connection->table('user_groups')
+                    ->where('organisation_id', $organisationId)->where('is_instance', false)->select('id'));
             }
 
             // The membership is only a link with a required subject foreign key.
@@ -156,14 +162,24 @@ final class AccessEraser
             $table = config()->string("permission.table_names.{$pivot}");
             $stores[$table] = $this->counts();
 
-            if (! $schema->hasTable($table) || ($organisationId !== null && ! $hasTeams)) {
+            if (! $schema->hasTable($table)) {
                 continue;
             }
 
             $grants = $connection->table($table)->where('model_type', $morphClass)->where($morphKey, $userId);
 
             if ($organisationId !== null) {
+                if (! $hasTeams) {
+                    $stores[$table] = $this->counts(kept: $grants->count(), reason: 'outside_organisation_scope');
+
+                    continue;
+                }
+
                 $grants->where($teamKey, $organisationId);
+
+                if ($pivot === 'model_has_roles') {
+                    $grants->whereNotIn($this->registrar->pivotRole, $this->instanceSuperAdminRoles($connection, $teamKey));
+                }
             }
 
             // Spatie uses the subject columns in its primary key. An unlink
@@ -174,9 +190,24 @@ final class AccessEraser
         return $stores;
     }
 
-    /** @return StoreCounts */
-    private function counts(int $deleted = 0, int $anonymised = 0, int $kept = 0): array
+    /** C30 treats a global super-admin role as instance-wide even when its pivot carries a team. */
+    private function instanceSuperAdminRoles(Connection $connection, string $teamKey): Builder
     {
-        return ['deleted' => $deleted, 'anonymised' => $anonymised, 'kept' => $kept, 'reason' => $kept > 0 ? 'legal_obligation' : null];
+        $roleClass = $this->registrar->getRoleClass();
+
+        if (! is_a($roleClass, Model::class, true)) {
+            throw new LogicException('Access erasure requires an Eloquent role model.');
+        }
+
+        $role = new $roleClass;
+
+        return $connection->table($role->getTable())->select($role->getKeyName())
+            ->whereNull($teamKey)->where('name', $this->roleCatalog->superAdminRoleName());
+    }
+
+    /** @return StoreCounts */
+    private function counts(int $deleted = 0, int $anonymised = 0, int $kept = 0, string $reason = 'legal_obligation'): array
+    {
+        return ['deleted' => $deleted, 'anonymised' => $anonymised, 'kept' => $kept, 'reason' => $kept > 0 ? $reason : null];
     }
 }

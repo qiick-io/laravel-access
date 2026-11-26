@@ -247,8 +247,7 @@ final class EloquentPrincipalDirectory implements PrincipalDirectory
             'owner_principal_id' => null,
             'name' => $isSubject ? 'Erased user' : 'Erased owner',
             'metadata' => null,
-            'deactivated_at' => $isSubject && $principal->deactivation_reason !== DeactivationReason::Erased
-                ? now() : ($principal->deactivated_at ?? now()),
+            'deactivated_at' => $principal->deactivated_at ?? now(),
             'deactivation_reason' => $isSubject ? $reason : ($principal->deactivation_reason ?? $reason),
         ]);
 

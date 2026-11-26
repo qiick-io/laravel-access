@@ -593,6 +593,7 @@ it('erases a user: principals erased and unlinked, then the user deleted, in one
     $instanceLevel = directory()->forMember(member(), null);
     $agent = directory()->createService('agent', $organisationId, 'Agent', $member);
     directory()->deactivate($instanceLevel, DeactivationReason::Offboarded);
+    $offboardedAt = $instanceLevel->refresh()->deactivated_at;
     $erasedEarlier = directory()->forMember(member(), (string) Str::uuid());
     directory()->deactivate($erasedEarlier, DeactivationReason::Erased);
     $erasedEarlierAt = Principal::query()->findOrFail($erasedEarlier->id)->deactivated_at;
@@ -614,7 +615,7 @@ it('erases a user: principals erased and unlinked, then the user deleted, in one
         ->and($rows[$agent->id]->deactivation_reason)->toBe(DeactivationReason::OwnerDeactivated)
         ->and($rows[$erasedEarlier->id]->deactivated_at->equalTo($erasedEarlierAt))->toBeTrue()
         ->and($rows[$erasedEarlier->id]->user_id)->toBeNull()
-        ->and($rows[$instanceLevel->id]->deactivated_at->greaterThan($erasedEarlierAt))->toBeTrue()
+        ->and($rows[$instanceLevel->id]->deactivated_at->equalTo($offboardedAt))->toBeTrue()
         ->and($rows[$other->id]->deactivated_at)->toBeNull()
         ->and(directory()->isActive($member->id))->toBeFalse();
 

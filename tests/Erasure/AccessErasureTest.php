@@ -20,12 +20,56 @@ it('erases only the selected organisation and keeps the product user row', funct
     $directory = app(PrincipalDirectory::class);
     $member = $directory->forMember($user, $organisationId);
     $otherMember = $directory->forMember($user, (string) Str::uuid());
+    $directory->deactivate($member, DeactivationReason::Offboarded);
+    $offboardedAt = $member->refresh()->deactivated_at;
+    $this->travel(30)->days();
 
     app(AccessEraser::class)->erase((string) $user->getKey(), (string) Str::uuid(), 'anonymise', [$member->id], organisationId: $organisationId);
 
     expect(Principal::query()->findOrFail($member->id)->user_id)->toBeNull()
+        ->and($member->refresh()->deactivated_at->equalTo($offboardedAt))->toBeTrue()
         ->and(Principal::query()->findOrFail($otherMember->id)->user_id)->toBe($user->getKey())
         ->and(DB::table('users')->where('id', $user->getKey())->exists())->toBeTrue();
+});
+
+it('preserves instance super-admin grants when erasing one organisation', function (): void {
+    $organisationId = (string) Str::uuid();
+    $directMember = SpatieUser::query()->create(['email' => 'direct@example.test']);
+    $groupMember = SpatieUser::query()->create(['email' => 'group@example.test']);
+    $superAdminRoleId = DB::table('roles')->insertGetId(['name' => 'super-admin', 'guard_name' => 'web']);
+    $memberRoleId = DB::table('roles')->insertGetId(['name' => 'member', 'guard_name' => 'web']);
+    $assignment = ['model_type' => $directMember->getMorphClass(), 'model_id' => $directMember->getKey(), 'organisation_id' => $organisationId];
+    DB::table('model_has_roles')->insert([
+        [...$assignment, 'role_id' => $superAdminRoleId],
+        [...$assignment, 'role_id' => $memberRoleId],
+    ]);
+
+    $instanceGroupId = DB::table('user_groups')->insertGetId(['public_id' => (string) Str::uuid(), 'name' => 'Instance admins', 'is_instance' => true]);
+    $organisationGroupId = DB::table('user_groups')->insertGetId(['public_id' => (string) Str::uuid(), 'name' => 'Members', 'organisation_id' => $organisationId, 'is_instance' => false]);
+    DB::table('user_group_role')->insert(['user_group_id' => $instanceGroupId, 'role_id' => $superAdminRoleId]);
+    DB::table('user_group_user')->insert([
+        ['user_group_id' => $instanceGroupId, 'user_id' => $groupMember->getKey()],
+        ['user_group_id' => $organisationGroupId, 'user_id' => $groupMember->getKey()],
+    ]);
+
+    $resolver = app(EffectivePermissionResolver::class);
+    expect($resolver->isSuperAdmin($directMember))->toBeTrue()
+        ->and($resolver->isSuperAdmin($groupMember))->toBeTrue();
+
+    $eraser = app(AccessEraser::class);
+    $eraser->erase((string) $directMember->getKey(), (string) Str::uuid(), AccessEraser::DELETE, organisationId: $organisationId);
+    $eraser->erase((string) $groupMember->getKey(), (string) Str::uuid(), AccessEraser::ANONYMISE, organisationId: $organisationId);
+
+    expect(DB::table('model_has_roles')->pluck('role_id')->all())->toEqual([$superAdminRoleId])
+        ->and(DB::table('user_group_user')->pluck('user_group_id')->all())->toEqual([$instanceGroupId])
+        ->and($resolver->isSuperAdmin($directMember))->toBeTrue()
+        ->and($resolver->isSuperAdmin($groupMember))->toBeTrue();
+
+    $eraser->erase((string) $directMember->getKey(), (string) Str::uuid(), AccessEraser::DELETE);
+    $eraser->erase((string) $groupMember->getKey(), (string) Str::uuid(), AccessEraser::ANONYMISE);
+
+    expect($resolver->isSuperAdmin($directMember))->toBeFalse()
+        ->and($resolver->isSuperAdmin($groupMember))->toBeFalse();
 });
 
 it('evicts the resolver verdicts on commit even when the caller still holds a loaded user model', function (): void {
@@ -47,6 +91,11 @@ it('evicts the resolver verdicts on commit even when the caller still holds a lo
     $eraser = app(AccessEraser::class);
     $userId = (string) $user->getKey();
     $userPublicId = (string) Str::uuid();
+
+    $scopedReport = $eraser->erase($userId, $userPublicId, AccessEraser::DELETE, organisationId: $organisationId);
+    $outsideScope = ['deleted' => 0, 'anonymised' => 0, 'kept' => 1, 'reason' => 'outside_organisation_scope'];
+    expect($scopedReport->stores['model_has_roles'])->toBe($outsideScope)
+        ->and($scopedReport->stores['model_has_permissions'])->toBe($outsideScope);
 
     expect($resolver->isSuperAdmin($user))->toBeTrue()
         ->and($resolver->permissionsFor($user))->toContain('can-show-users')
