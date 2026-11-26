@@ -8,11 +8,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `PrincipalDirectory::markErased()` lets product soft-delete flows write a
+  permanent membership tombstone for a principal of type `user`. Custom
+  directory implementations must add the new interface method.
+
 ### Security
 
 - Product policies can use `EffectivePermissionResolver::isActorSuperAdmin()`
   to deny super-admin authority to API actors. `SuperAdminGuard` now applies
   this check when protecting super-admin accounts. See `UPGRADING.md`.
+- The AC9 scanner reports role-only super-admin checks in policies.
 
 ## [0.1.0-beta.2] - 2026-11-26
 

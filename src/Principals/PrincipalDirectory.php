@@ -61,6 +61,8 @@ interface PrincipalDirectory
      * Deactivates owned principals and dispatches PrincipalDeactivated after
      * commit so the product can revoke their credentials.
      *
+     * @throws \InvalidArgumentException when the stored principal is not type `user`
+     *
      * @api
      */
     public function markErased(Principal $principal): void;

@@ -459,6 +459,67 @@ function scanPolicyBody(string $body, string $header = POLICY_HEADER): array
 const ENUM_MESSAGE = 'with the permission enum in a Policy';
 const UNVERIFIABLE_MESSAGE = 'with an ability that cannot be verified statically';
 
+it('reports role-only super-admin checks in Policies', function (string $body): void {
+    $violations = scanPolicyBody($body);
+
+    expect($violations)->toHaveCount(1)
+        ->and($violations[0])->toContain('super-admin', 'AC9');
+})->with([
+    'model predicate' => ['return $actor->isSuperAdmin();'],
+    'resolver predicate' => ['return $this->resolver->isSuperAdmin($actor);'],
+    'direct role predicate' => ['return $this->resolver->isDirectSuperAdmin($actor);'],
+    'role name' => ["return \$actor->hasRole('super-admin');"],
+    'role enum after named guard' => ["return \$actor?->hasRole(guard: 'web', roles: RoleEnum::SuperAdmin->value);"],
+    'pipe list' => ["return \$actor->hasRole('admin|super-admin');"],
+    'array argument' => ["return \$actor->hasAllRoles(['admin', 'super-admin']);"],
+    'later variadic argument' => ["return \$actor->hasAnyRole('admin', 'super-admin');"],
+    'first-class role callable' => ['return $actor->hasRole(...);'],
+    'callable string' => ["return [\$actor, 'isSuperAdmin'];"],
+]);
+
+it('resolves a super-admin role predicate through a trait alias', function (): void {
+    expect(scanProduct([
+        'app/Policies/UserPolicy.php' => <<<'PHP'
+            <?php
+
+            final class UserPolicy
+            {
+                use HasRoles { hasRole as hasMembershipRole; }
+
+                public function update($actor): bool
+                {
+                    return $actor->hasMembershipRole('super-admin');
+                }
+            }
+            PHP,
+    ]))->toHaveCount(1);
+});
+
+it('allows role membership checks in domain services', function (): void {
+    expect(scanProduct([
+        'app/Services/RoleService.php' => <<<'PHP'
+            <?php
+
+            final class RoleService
+            {
+                public function check($target): bool
+                {
+                    return $this->resolver->isSuperAdmin($target) && $target->hasRole('super-admin');
+                }
+            }
+            PHP,
+    ]))->toBe([]);
+});
+
+it('allows actor-aware authority, protected targets and ordinary roles in Policies', function (): void {
+    expect(scanPolicyBody(<<<'PHP'
+        return $this->resolver->isActorSuperAdmin($actor)
+            && !$this->guard->isProtectedFrom($actor, $target)
+            && $membership->hasRole(OrganizationRoleEnum::Owner)
+            && $actor->hasRole('admin');
+        PHP))->toBe([]);
+});
+
 it('reads calls across whitespace and comments', function (): void {
     expect(scanPolicyBody("return \$actor -> /* note */ can ( // why\n FakePermissionEnum::CanShowUsers );"))
         ->toHaveCount(1);

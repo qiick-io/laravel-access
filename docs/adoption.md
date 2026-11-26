@@ -104,12 +104,12 @@ by writing rows directly; the `Principal` model is fully guarded.
   with `organisation_required`). It is returned even when deactivated: check
   `isActive()` before use;
 - `markErased($principal)`: in the product's soft-delete transaction, call
-  this for each principal linked to the user. It records an `erased` tombstone
-  even for an inactive principal, preserves the original deactivation time
-  and keeps the user link so `forMember()` refuses to reactivate it after a
-  restore. It deactivates owned principals and emits `PrincipalDeactivated`
-  after commit so listeners can revoke credentials. Products with a custom
-  `PrincipalDirectory` implement the same transition;
+  this for each principal of type `user` linked to the user. It records an
+  `erased` tombstone even for an inactive principal, preserves the original
+  deactivation time and keeps the user link so `forMember()` refuses to
+  reactivate it after a restore. It deactivates owned principals and emits
+  `PrincipalDeactivated` after commit so listeners can revoke credentials.
+  Products with a custom `PrincipalDirectory` implement the same transition;
 - `deactivate($principal, DeactivationReason)`: deactivates the principal,
   unless it already is (an erased tombstone is never rewritten), and every
   active principal it owns, in one transaction. `PrincipalDeactivated` (with
@@ -299,9 +299,9 @@ Product policies must use `EffectivePermissionResolver::isActorSuperAdmin($actor
 when granting super-admin authority, including in a policy's `before()` method.
 It uses the same actor resolution as `Gate::before` and returns `false` for API
 keys, OAuth grants and public API actors, even when their acting user has the
-role. `isSuperAdmin($target)` remains the role-membership check for the subject
-of a policy. For protected accounts, `SuperAdminGuard::isProtectedFrom($actor,
-$target)` combines these checks.
+role. For protected accounts, `SuperAdminGuard::isProtectedFrom($actor,
+$target)` combines actor authority with subject role membership. Use
+`isSuperAdmin($target)` in domain services that need role membership alone.
 
 Exercise each super-admin policy exception with the same user in a web session
 and behind a scoped API credential. Use `Gate::forUser($actor)->allows($ability,
@@ -386,7 +386,11 @@ It fails on any Gate ability call (`can`, `cannot`, `cant`, `canAny`,
 `allows`, `denies`, `authorize`, `inspect`) with a permission inside a Policy,
 on one whose ability it cannot read statically, and on dynamically named calls
 in Policies, and on any static `Gate::` method outside the known Gate API (a
-macro). Class attributes count as part of their class, and trait aliases of a
+macro). It also flags role-only `isSuperAdmin()` and `isDirectSuperAdmin()`
+calls and role predicates such as `hasRole()` with a `super-admin` literal
+or `SuperAdmin` enum case in Policies. Callable references to these predicates
+fail because their role arguments cannot be read at the call site. Class
+attributes count as part of their class, and trait aliases of a
 watched method (`use T { hasPermission as checkPermission; }`) count as that
 method. Outside Policies and the Inertia share (`share()` of
 `App\Http\Middleware\HandleInertiaRequests`, or the class passed as the

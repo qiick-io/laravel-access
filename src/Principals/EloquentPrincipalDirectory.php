@@ -140,6 +140,11 @@ final class EloquentPrincipalDirectory implements PrincipalDirectory
             if ($shouldMarkErased) {
                 // Lock against reactivation while reading the original cutoff.
                 $storedPrincipal = (clone $principalQuery)->lockForUpdate()->firstOrFail();
+
+                if ($storedPrincipal->type !== 'user') {
+                    throw new InvalidArgumentException('markErased() requires a principal of type [user].');
+                }
+
                 $deactivatedAt = $storedPrincipal->deactivated_at;
                 $principalQuery->where(function (Builder $query): void {
                     $query->whereNull('deactivation_reason')->orWhere('deactivation_reason', '!=', DeactivationReason::Erased->value);
