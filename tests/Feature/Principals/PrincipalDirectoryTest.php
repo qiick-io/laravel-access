@@ -755,7 +755,18 @@ it('preserves the membership tombstone when a product soft-deletes and restores 
         ->and(directory()->isActive($principal->id))->toBeFalse()
         ->and(directory()->isActive($agent->id))->toBeFalse()
         ->and(fn () => directory()->forMember($user, null))->toThrow(LogicException::class, 'erased');
-})->with(['active' => [false], 'offboarded' => [true]]);
+})->with(['active' => [false], 'offboarded' => [true]])->group('engines');
+
+it('refuses to mark a stored service principal erased through the membership tombstone API', function (): void {
+    migratePrincipals();
+    Event::fake([PrincipalDeactivated::class]);
+    $service = directory()->createService('service', null, 'Service');
+    $service->forceFill(['type' => 'user']);
+
+    expect(fn () => directory()->markErased($service))->toThrow(InvalidArgumentException::class, 'type [user]')
+        ->and(directory()->isActive($service->id))->toBeTrue();
+    Event::assertNotDispatched(PrincipalDeactivated::class);
+})->group('engines');
 
 it('refuses an erasure that leaves the user row in place, and rolls it back (review R1)', function (Closure $deleteUser): void {
     Schema::table('users', function (Blueprint $table): void {
