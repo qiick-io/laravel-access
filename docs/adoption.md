@@ -116,18 +116,10 @@ by writing rows directly; the `Principal` model is fully guarded.
   the owned ids) is dispatched after the surrounding transaction commits.
   **Revoke their API keys in a listener** (qiick/laravel-api-keys reason
   `owner`);
-- `eraseUser($user, fn ($user) => $user->forceDelete())`: GDPR erasure in
-  one transaction. Every principal of the user becomes an `erased` tombstone
-  (user unlinked, name anonymised), the principals it owns are deactivated,
-  then the closure hard-deletes the user. If the user row still exists
-  afterwards (a soft delete, or no delete), `eraseUser()` throws and rolls
-  everything back: an erasure that keeps the person's data, or lets a restore
-  mint a fresh principal past the tombstone, never commits.
-  `principals.user_id` is `ON DELETE RESTRICT`, so deleting a user who still
-  has principals any other way throws `UserHasPrincipalsException` (a soft
-  delete is allowed, since it keeps the row). The users model and the
-  principal model must use one database connection: `eraseUser()` refuses
-  otherwise, because the user delete would wait on its own locks;
+- `eraseUser($user, $deleteUser)`: the existing directory entry point for
+  products that use its hard-delete callback. It shares the principal
+  scrub with the fleet eraser and keeps the `PrincipalDeactivated` events.
+  If the callback leaves the user row in place, the transaction rolls back;
 - `isActive($principalId)`: the use-time check behind a key: not deactivated,
   not expired, a `user` principal still has its user, an instance-level row
   is one the organisation rule allows, and every owner up the chain is active.
@@ -137,6 +129,27 @@ The directory reads `access.principals.organisation_required` and
 `instance_types` at runtime while the database rule was fixed when the
 migration ran: keep them unchanged after migrating, or the database refuses
 what the directory allows with a driver error.
+
+### Fleet erasure
+
+The product's erasure job resolves `Qiick\Access\Erasure\AccessEraser` from
+the container and calls `erase()` with the subject snapshot. For a full
+erasure, call it in the users connection transaction immediately before
+hard-deleting the user. Both operations commit together. For offboarding,
+pass `organisationId` and keep the user row. Principals and group memberships
+are scoped to that organisation, as are Spatie grants when teams are enabled.
+Instance-level grants stay in effect during organisation offboarding.
+
+Both modes scrub subject principals, unlink their creator and ownership
+references, deactivate owned accounts and remove membership and grant rows.
+The principal UUIDs remain as tombstones for audit and credential references.
+The result reports counts only. `dryRun: true` previews those counts. After
+commit Access drops the subject's process-local permission and super-admin
+verdicts and emits `Qiick\Access\Events\SubjectErasedEvent` with the report.
+Access evaluates the product's `TwoFactorPolicy` on each check. The product
+owns any cache its policy maintains, its activity records, and credential
+revocation. Keep the users, principals, group tables and Spatie grants on the
+default connection for the fleet eraser.
 
 **The owner ceiling behind a key** (design §15.4): the product's key
 authorizer checks the credential's own scopes, then

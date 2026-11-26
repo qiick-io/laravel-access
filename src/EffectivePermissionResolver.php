@@ -203,6 +203,16 @@ final class EffectivePermissionResolver
         $this->superAdminVerdicts = [];
     }
 
+    /** @internal Counts the subject's process-local verdicts for erasure previews. */
+    public function cachedVerdictCount(Authenticatable $user): int
+    {
+        $principalType = $this->principalType($user);
+        $identifier = $this->identifierKey($user);
+
+        return array_sum(array_map(count(...), $this->cache[$principalType][$identifier] ?? []))
+            + count($this->superAdminVerdicts[$principalType][$identifier] ?? []);
+    }
+
     /**
      * @return array{permissions: list<string>, assigned_permissions: list<string>, role_names: list<string>, role_ids: list<string>}
      */
@@ -216,12 +226,15 @@ final class EffectivePermissionResolver
             return $this->cache[$principalType][$identifier][$user::class][$teamKey];
         }
 
-        // Under teams Spatie filters these relations by the team current when
-        // they were loaded, possibly another one than this entry's (C29).
-        if ($this->registrar->teams) {
-            $this->unsetRelations($user, 'roles', 'permissions');
+        // Loaded Eloquent relations may predate erasure or belong to the team
+        // that was current when they were loaded (C29).
+        if ($user instanceof Model) {
+            $user->unsetRelation('roles')->unsetRelation('permissions');
         }
 
+        // The same verdict as isSuperAdmin(), with the instance-level grant
+        // added to roles without bringing in another organisation's roles (C30).
+        $isSuperAdmin = $this->isSuperAdmin($user);
         $directRoleIds = $this->pluckRoleIds($user);
         $directRoleNames = $this->pluckRoleNames($user);
         $groupRoleIds = $this->groupRoles->roleIdsFor($user);
@@ -229,10 +242,6 @@ final class EffectivePermissionResolver
 
         $roleIds = $this->uniqueSortedIds([...$directRoleIds, ...$groupRoleIds]);
 
-        // C30 / B2: the same verdict as isSuperAdmin(), so permissionsFor /
-        // roleNamesFor agree under teams. Role names stay the current team's,
-        // plus the super-admin role, never another organisation's roles.
-        $isSuperAdmin = $this->isSuperAdmin($user);
         $assignedPermissions = $this->uniqueSortedStrings([
             ...$this->pluckPermissionNames($user),
             ...$this->permissionNamesForRoleIds($groupRoleIds),
@@ -276,6 +285,10 @@ final class EffectivePermissionResolver
     private function directGlobalRoleNamesIgnoringTeamFilter(Authenticatable $user): array
     {
         if (! $this->registrar->teams) {
+            if ($user instanceof Model) {
+                $user->unsetRelation('roles');
+            }
+
             return $this->pluckRoleNames($user);
         }
 

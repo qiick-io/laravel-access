@@ -81,6 +81,8 @@ interface PrincipalDirectory
      * principals.user_id is ON DELETE RESTRICT, so this is the only way a user
      * with principals can be deleted. PrincipalDeactivated is dispatched per
      * erased principal after the commit.
+     * The fleet eraser shares the principal scrub and lets the product's
+     * orchestrator own the user deletion and completion event.
      *
      * @param  \Closure(Authenticatable): void  $deleteUser  the product's hard user deletion
      *
