@@ -727,6 +727,9 @@ it('preserves the membership tombstone when a product soft-deletes and restores 
     if ($wasAlreadyInactive) {
         directory()->deactivate($principal, DeactivationReason::Offboarded);
         $this->travel(5)->minutes();
+        directory()->deactivate($principal, DeactivationReason::Admin);
+
+        expect($principal->deactivation_reason)->toBe(DeactivationReason::Offboarded);
     }
 
     DB::transaction(function () use ($user, $principal): void {
