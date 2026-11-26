@@ -80,7 +80,7 @@ comma-separated), `ACCESS_PERMISSION_ENUM`, and, for externa until v2,
 | Type | When |
 | --- | --- |
 | `Principals\PrincipalCreated` | After commit: a new principal row was created by `forMember`, `createService` or `instance` (not when an existing one is returned); a rolled-back creation never reaches a listener |
-| `Principals\PrincipalDeactivated` | After commit: once per `deactivate()` call and once per principal `eraseUser()` erases. For a principal that was already inactive, the row keeps its stored reason while the event's `reason` is the one just passed. `ownedIds` lists every principal it owns, directly or transitively, active or not; those get no event of their own, so a listener revokes their keys too |
+| `Principals\PrincipalDeactivated` | After commit, once per `deactivate()` or `markErased()` call and once per principal `eraseUser()` erases. `deactivate()` preserves an inactive principal's stored reason. `markErased()` records `Erased` while retaining the user link and the original cutoff. `ownedIds` lists all directly and transitively owned principals so a listener can revoke their keys too. |
 | `Principals\UserHasPrincipalsException` | An Eloquent hard delete of a user with principals outside `eraseUser()`; other deletes fail on the restrict foreign key |
 
 Other refusals use PHP's own exceptions: `InvalidArgumentException` for a

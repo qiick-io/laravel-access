@@ -117,15 +117,37 @@ final class EloquentPrincipalDirectory implements PrincipalDirectory
         return $this->announceIfCreated($principal);
     }
 
+    public function markErased(Principal $principal): void
+    {
+        $this->deactivatePrincipal($principal, DeactivationReason::Erased, shouldMarkErased: true);
+    }
+
     public function deactivate(Principal $principal, DeactivationReason $reason): void
+    {
+        $this->deactivatePrincipal($principal, $reason, shouldMarkErased: false);
+    }
+
+    /** Apply the state transition and ownership cascade on the same connection. */
+    private function deactivatePrincipal(Principal $principal, DeactivationReason $reason, bool $shouldMarkErased): void
     {
         // On the principal model's connection, so the cascade is atomic where
         // the rows live, not on the default connection.
-        $ownedIds = $this->database->connection($this->query()->getModel()->getConnectionName())->transaction(function () use ($principal, $reason): array {
-            // An already deactivated principal keeps its reason and time, so an
-            // erased tombstone is never rewritten (review B3).
-            $this->query()->whereKey($principal->id)->whereNull('deactivated_at')
-                ->update(['deactivated_at' => now(), 'deactivation_reason' => $reason->value]);
+        $ownedIds = $this->database->connection($this->query()->getModel()->getConnectionName())->transaction(function () use ($principal, $reason, $shouldMarkErased): array {
+            $principalQuery = $this->query()->whereKey($principal->id);
+            $deactivatedAt = null;
+
+            if ($shouldMarkErased) {
+                // Lock against reactivation while reading the original cutoff.
+                $storedPrincipal = (clone $principalQuery)->lockForUpdate()->firstOrFail();
+                $deactivatedAt = $storedPrincipal->deactivated_at;
+                $principalQuery->where(function (Builder $query): void {
+                    $query->whereNull('deactivation_reason')->orWhere('deactivation_reason', '!=', DeactivationReason::Erased->value);
+                });
+            } else {
+                $principalQuery->whereNull('deactivated_at');
+            }
+
+            $principalQuery->update(['deactivated_at' => $deactivatedAt ?? now(), 'deactivation_reason' => $reason->value]);
 
             return $this->deactivateOwned($principal->id);
         });
