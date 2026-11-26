@@ -189,10 +189,28 @@ group uses `is_instance = true` with `organisation_id` NULL; a CHECK forbids
 
 Group memberships are read from the default database connection, so the
 group member model (`access.group_member_model`, else the auth users model)
-lives there too; a user of another connection gets no group roles. Each
-configured connection's identity is its key: boot fails when a connection
-sets a `name` other than its key, since Laravel would report that name and
-two databases could then pass for one.
+lives there too; a user of another connection gets no group roles.
+
+Eloquent identifies a loaded model's database by its connection's effective
+name: the configured `name`, a URL's `?name=` option or the writer's `name`
+can each override the key. So each effective connection name stands for one
+database (driver, host, port, socket, database, prefix and schema) for the
+whole process. When Laravel opens or reconnects a connection whose name
+already stands for another database, the call throws before any query runs,
+and again on every retry:
+
+- two configured connections reporting one name for different databases;
+- writer variants of one read/write connection that are different
+  databases (read endpoints must be replicas of the writer's dataset);
+- an alias repointed at another database after it was opened (a purge or
+  reconnect after a config change), as some tenancy setups do. Give each
+  tenant database its own connection name instead (for example
+  `DB::build()`, which names a connection after its configuration), and
+  discard actors, relations and cached authorization decisions loaded
+  through the previous one.
+
+Two names for the same database stay allowed; they are still different
+principals for the resolver and the group member check.
 
 A group name is unique within its organisation, and among the groups without
 an organisation (instance groups and the legacy unscoped ones): two

@@ -30,9 +30,14 @@ events, and the migrations (see `docs/reference-contracts.md`). Code tagged
   database migrated with `0.1.0-beta.1` either runs `migrate:fresh` or adds
   the index once: `CREATE INDEX principals_created_by_index ON principals
   (created_by)` (MySQL and MariaDB already have one from the foreign key).
-- Boot fails when a database connection in `database.connections` sets a
-  `name` other than its key. Remove that `name` (the key is the connection's
-  identity).
+- Each effective database connection name must stand for one database for
+  the whole process (`docs/adoption.md`). Opening a connection
+  throws when its configured `name`, a URL's `?name=` option or its
+  writer's `name` matches another connection of a different database, when
+  its writer variants are different databases, or when the alias was
+  repointed at another database after it was opened. A product that
+  switches tenants by repointing one alias gives each tenant database its
+  own connection name instead.
 
 ## 0.1.0-beta.1 (first tagged pre-release)
 

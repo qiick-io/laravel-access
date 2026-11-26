@@ -12,6 +12,7 @@ use Qiick\Access\Contracts\GroupRoleSource;
 use Qiick\Access\Contracts\PermissionVocabulary;
 use Qiick\Access\Contracts\RoleCatalog;
 use Qiick\Access\Contracts\TeamContext;
+use Qiick\Access\Laravel\ConnectionIdentityGuard;
 use Spatie\Permission\PermissionRegistrar;
 
 /**
@@ -297,12 +298,15 @@ final class EffectivePermissionResolver
      * Spatie's identity for a model is its morph class (model_type), so a
      * sibling class sharing it is the same principal: a role event on one
      * clears the other's entry. The resolved connection name keeps users of
-     * two databases with the same id apart, in identity and in the cache.
+     * two databases with the same id apart, in identity and in the cache;
+     * {@see ConnectionIdentityGuard} makes that name
+     * stand for one database. JSON keeps the pair unambiguous when either
+     * part contains a separator.
      */
     private function principalType(Authenticatable $user): string
     {
         if ($user instanceof Model) {
-            return $user->getConnection()->getName().'|'.$user->getMorphClass();
+            return json_encode([$user->getConnection()->getName(), $user->getMorphClass()], JSON_THROW_ON_ERROR);
         }
 
         return $user::class;

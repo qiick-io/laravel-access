@@ -149,8 +149,8 @@ final class EloquentGroupRoleSource implements GroupRoleSource
         // the same principal (STI and same-table subclasses); a subclass with
         // its own table, or a user of another database, is not. Resolved
         // names, since a loaded model carries its connection name and a new
-        // one has null for the default (beta.1 regression); AccessBootChecks
-        // makes a resolved name the connection's own key, so two databases
+        // one has null for the default (beta.1 regression); ConnectionIdentityGuard
+        // makes a resolved name stand for one database, so two databases
         // cannot share one.
         $member = new $memberModel;
 

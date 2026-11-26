@@ -37,7 +37,6 @@ final class AccessBootChecks
         $this->assertEveryGuardClassified($config);
         $this->assertNoLegacyMigrationsSwitch($config);
         $this->assertGateSelection($config);
-        $this->assertConnectionNamesMatchTheirKeys($config);
     }
 
     /**
@@ -79,29 +78,6 @@ final class AccessBootChecks
             throw new RuntimeException(
                 'access.use_package_gate = false or access.gate_shadow = true requires ['.LegacyGateBefore::class.'] to be bound before boot.',
             );
-        }
-    }
-
-    /**
-     * A connection reports its configured 'name' instead of its key, and
-     * Eloquent re-resolves a loaded model by the reported name. A 'name' other
-     * than the key would let two databases share one identity in the group
-     * member check and the resolver's principal key, so boot fails instead.
-     *
-     * @throws RuntimeException naming the first connection whose name differs from its key
-     */
-    public function assertConnectionNamesMatchTheirKeys(ConfigRepository $config): void
-    {
-        $connections = $config->get('database.connections', []);
-
-        foreach (is_array($connections) ? $connections : [] as $key => $connection) {
-            $reportedName = is_array($connection) ? ($connection['name'] ?? $key) : $key;
-
-            if ($reportedName !== $key) {
-                throw new RuntimeException(
-                    "Database connection [{$key}] has a 'name' other than its key; remove it so the connection's identity is its key.",
-                );
-            }
         }
     }
 

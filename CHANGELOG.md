@@ -10,10 +10,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
-- Boot fails when a database connection has a `name` other than its key
-  (`AccessBootChecks::assertConnectionNamesMatchTheirKeys()`): Laravel
-  reports that name and Eloquent re-resolves loaded models by it, so two
-  databases could share one identity in the group member check.
+- An effective connection name stands for one database per process
+  (`ConnectionIdentityGuard`, on Laravel's `ConnectionEstablished`):
+  opening or reconnecting a connection whose effective name (after a URL's
+  query options and the writer's options) already stands for another
+  database throws before any query runs. Eloquent stamps that name on the
+  models it loads, so a second database could otherwise pass its users off
+  as the default connection's, with their group roles and super-admin
+  verdicts. This also rejects an alias repointed at another database and
+  writer variants that are different databases.
 
 ### Fixed
 
@@ -32,7 +37,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The resolver's principal identity and cache key include the resolved
   connection name, so users of two databases with the same class and id are
   different principals (`isSamePrincipal()`, cached roles and super-admin
-  verdicts).
+  verdicts). The connection name and the morph class are kept apart as a
+  JSON pair, so a `|` in either cannot make two principals equal.
 
 ## [0.1.0-beta.1] - 2026-11-25
 

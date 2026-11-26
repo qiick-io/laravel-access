@@ -161,21 +161,3 @@ it('fails when the replaced access.migrations.load switch is still configured', 
 
     $config->set('access.migrations', ['groups' => true, 'principals' => true]);
 });
-
-it('fails when a database connection reports a name other than its key', function (): void {
-    $checks = app(AccessBootChecks::class);
-    $config = app(ConfigRepository::class);
-    $checks->assertConnectionNamesMatchTheirKeys($config);
-
-    // Laravel reports a configured 'name' instead of the key, and Eloquent
-    // re-resolves loaded models by that name, so two databases could share
-    // one identity in the group member check.
-    $config->set('database.connections.secondary', ['driver' => 'sqlite', 'database' => ':memory:', 'name' => $config->get('database.default')]);
-
-    expect(fn () => $checks->assertConnectionNamesMatchTheirKeys($config))
-        ->toThrow(RuntimeException::class, "Database connection [secondary] has a 'name' other than its key; remove it so the connection's identity is its key.");
-
-    $config->set('database.connections.secondary', ['driver' => 'sqlite', 'database' => ':memory:', 'name' => 'secondary']);
-    $checks->assertConnectionNamesMatchTheirKeys($config);
-    $config->set('database.connections.secondary', null);
-});
