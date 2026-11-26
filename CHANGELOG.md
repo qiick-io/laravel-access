@@ -29,10 +29,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The AC9 scanner reports role-only super-admin checks in policies.
 - `EnsureUserHasPermission`, `AuthorizesWithPermission` and
   `PrincipalCeiling::allows()` now give an API key owned by a super-admin
-  the vocabulary within its scopes (before: nothing). The Gate bypass, a
-  permission outside the vocabulary and the super-admin role row's own
-  permissions stay out; a demoted owner's keys lose the grant on the next
-  request. The AC9 scanner watches `isWithinOwnerCeiling()` too.
+  the vocabulary within its scopes (before: nothing), for every API actor
+  with an owner. The Gate bypass and any permission outside the vocabulary
+  stay out for a super-admin owner, even one assigned to them; a demoted owner's keys lose the grant on the next
+  request. The AC9 scanner watches `isWithinOwnerCeiling()` too and rejects
+  it in Policies, where it would ignore the credential's scopes.
+  `ExclusiveSuperAdminRoleRule` compares names case-insensitively and
+  rejects entries that are not role names.
 
 ## [0.1.0-beta.2] - 2026-11-26
 

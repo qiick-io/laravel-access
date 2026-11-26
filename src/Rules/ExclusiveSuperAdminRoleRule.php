@@ -16,7 +16,8 @@ use Qiick\Access\Contracts\RoleCatalog;
  *
  * Products put it on the role field of their user requests, next to their own
  * rules (`['array', new ExclusiveSuperAdminRoleRule]`); a value that is not a
- * list is left to those rules. The role picker disables the other roles once
+ * list is left to those rules. Roles are given by name: an entry that is not
+ * a string fails, and names compare case-insensitively. The role picker disables the other roles once
  * super-admin is picked, so this is the trust-boundary check behind it.
  *
  * @api
@@ -29,8 +30,17 @@ final class ExclusiveSuperAdminRoleRule implements ValidationRule
             return;
         }
 
-        $roleNames = array_unique(array_filter($value, is_string(...)));
-        $superAdminRoleName = app(RoleCatalog::class)->superAdminRoleName();
+        if (array_filter($value, is_string(...)) !== $value) {
+            // A role id could name the super-admin row without its name.
+            $fail('Roles must be given by name.')->translate();
+
+            return;
+        }
+
+        // Case-folded: a case-insensitive role store resolves `Super-Admin`
+        // to the super-admin row (review of PR #58).
+        $roleNames = array_unique(array_map(mb_strtolower(...), $value));
+        $superAdminRoleName = mb_strtolower(app(RoleCatalog::class)->superAdminRoleName());
 
         if (in_array($superAdminRoleName, $roleNames, true) && count($roleNames) > 1) {
             $fail('The super-admin role cannot be combined with other roles.')->translate();

@@ -821,7 +821,7 @@ it('falls back to unknown when the auth identifier is neither int nor string', f
 });
 
 it('bounds an owner ceiling by assigned permissions, or by the vocabulary for a super-admin', function (): void {
-    $superAdmin = new PermissionedFakeUser(11, ['super-admin']);
+    $superAdmin = new PermissionedFakeUser(11, ['super-admin'], ['can-purge-everything']);
     $member = new PermissionedFakeUser(12, ['member'], ['can-show-users']);
 
     $roleCatalog = Mockery::mock(RoleCatalog::class);
@@ -846,6 +846,7 @@ it('bounds an owner ceiling by assigned permissions, or by the vocabulary for a 
     $resolver = new EffectivePermissionResolver($roleCatalog, $groupRoles, $vocabulary, $teamContext, $registrar);
 
     expect($resolver->isWithinOwnerCeiling($superAdmin, 'can-edit-users'))->toBeTrue()
+        // Assigned to the super-admin but outside the vocabulary: still out.
         ->and($resolver->isWithinOwnerCeiling($superAdmin, 'can-purge-everything'))->toBeFalse()
         ->and($resolver->isWithinOwnerCeiling($member, 'can-show-users'))->toBeTrue()
         ->and($resolver->isWithinOwnerCeiling($member, 'can-edit-users'))->toBeFalse();

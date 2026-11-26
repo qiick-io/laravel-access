@@ -324,14 +324,14 @@ it('never counts the super-admin role\'s own permissions beyond the vocabulary f
         'can-purge-everything',
     ]));
 
-    // Vocabulary through super-admin, and a direct grant outside it; never
-    // a permission that only the super-admin role row carries.
+    // The vocabulary exactly: nothing outside it, whether assigned directly,
+    // through an ordinary role or on the super-admin role row.
     expect(passThroughPermissionMiddleware(requestAs(null), FakePermissionEnum::CanEditUsers->value)->getContent())
         ->toBe('next')
         ->and(passThroughPermissionMiddleware(requestAs(null), FakePermissionEnum::CanShowUsers->value)->getContent())
         ->toBe('next')
         ->and(passThroughPermissionMiddleware(requestAs(null), 'can-delete-users')->getContent())
-        ->toBe('next')
+        ->toBe('forbidden:can-delete-users')
         ->and(passThroughPermissionMiddleware(requestAs(null), 'can-purge-everything')->getContent())
         ->toBe('forbidden:can-purge-everything');
 });

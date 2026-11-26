@@ -478,9 +478,21 @@ final class DirectPermissionCheckScanner
             : false;
     }
 
-    private function judgeDirectCheck(string $methodName, bool $isPolicy): ?false
+    private function judgeDirectCheck(string $methodName, bool $isPolicy): string|false|null
     {
-        return in_array($methodName, ['haspermission', 'hasassignedpermission', 'iswithinownerceiling'], true) && ! $isPolicy ? null : false;
+        if (! in_array($methodName, ['haspermission', 'hasassignedpermission', 'iswithinownerceiling'], true)) {
+            return false;
+        }
+
+        if (! $isPolicy) {
+            return null;
+        }
+
+        // The owner ceiling ignores the credential's scopes: a Policy using it
+        // would let a key act beyond them (review of PR #58).
+        return $methodName === 'iswithinownerceiling'
+            ? 'isWithinOwnerCeiling() in a Policy ignores the credential scopes; check permissions through hasPermission() (AC9).'
+            : false;
     }
 
     /**

@@ -34,6 +34,11 @@ it('leaves a value that is not a list to the other rules', function (): void {
         ->and(roleErrors(null))->toBe([]);
 });
 
-it('compares the role name exactly', function (): void {
-    expect(roleErrors(['Super-Admin', 'admin']))->toBe([]);
+it('compares the role name case-insensitively', function (): void {
+    expect(roleErrors(['Super-Admin', 'admin']))->toHaveCount(1)
+        ->and(roleErrors(['super-admin', 'SUPER-ADMIN']))->toBe([]);
+});
+
+it('rejects roles that are not given by name', function (): void {
+    expect(roleErrors([1, 'admin']))->toBe(['Roles must be given by name.']);
 });
