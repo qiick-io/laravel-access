@@ -36,7 +36,7 @@ final class SuperAdminGuard
 
     public function canManageSuperAdmins(?Authenticatable $actor): bool
     {
-        return $actor !== null && $this->resolver->isSuperAdmin($actor);
+        return $this->resolver->isActorSuperAdmin($actor);
     }
 
     public function isProtectedFrom(?Authenticatable $actor, Authenticatable $target): bool
