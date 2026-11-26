@@ -25,6 +25,19 @@ events, and the migrations (see `docs/reference-contracts.md`). Code tagged
 
 ## Unreleased
 
+- API keys of a super-admin owner: `EnsureUserHasPermission`,
+  `AuthorizesWithPermission` and `PrincipalCeiling::allows()` now allow
+  every permission of the vocabulary that the key's scopes cover (decision
+  [2026-11-26](docs/decisions/2026-11-26-super-admin-key-ceiling.md)).
+  Replace `hasAssignedPermission()` with `isWithinOwnerCeiling()` wherever
+  the product computes a key ceiling (grantable scopes, key authorizers), so
+  issuance and use agree. Rename the site in `access.direct_checks` too.
+- Add `new ExclusiveSuperAdminRoleRule` to the role field of user create and
+  update requests; super-admin combined with another role is then a 422.
+  Accounts that already hold super-admin and other roles keep working; clean
+  them up in the product's upgrade command if you want the new rule to hold
+  for old rows.
+
 - Use `EffectivePermissionResolver::isActorSuperAdmin($actor)` for super-admin
   authority in policies. Replace acting-user role checks, including in policy
   `before()` methods. `SuperAdminGuard::canManageSuperAdmins()` and

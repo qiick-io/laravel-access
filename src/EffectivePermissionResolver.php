@@ -164,10 +164,8 @@ final class EffectivePermissionResolver
     /**
      * Whether the permission is actually assigned to the user (directly,
      * through a direct role or through an active group role), ignoring the
-     * super-admin grant. This is the owner ceiling for API actors: super-admin
-     * never applies to them (design §3.1 step 2), so a key owned by a
-     * super-admin reaches only what its owner really holds. Pass `fresh` for
-     * use-time checks behind a credential (§4.2).
+     * super-admin grant. Use isWithinOwnerCeiling() for what an API key may
+     * reach; pass `fresh` for use-time checks behind a credential (§4.2).
      */
     public function hasAssignedPermission(Authenticatable $user, string $name, bool $fresh = false): bool
     {
@@ -176,6 +174,33 @@ final class EffectivePermissionResolver
         }
 
         return in_array($name, $this->resolve($user)['assigned_permissions'], true);
+    }
+
+    /**
+     * The owner ceiling behind an API credential: what a key owned by this
+     * user may reach at most, before the credential's own scopes narrow it.
+     * Assigned permissions, or, for an instance super-admin, every permission
+     * of the vocabulary and nothing else (decision 2026-11-26): a super-admin
+     * alone can then issue a working key. Never the Gate bypass itself
+     * (design §3.1 step 2): a name outside the vocabulary stays out for a
+     * super-admin, even when assigned to them or to the super-admin role row.
+     * It applies to every API actor with an owner (keys, OAuth and public API
+     * credentials alike); their scopes narrow it. Pass `fresh` for use-time checks, so a demoted
+     * owner's keys lose the grant on the next request (§4.2).
+     */
+    public function isWithinOwnerCeiling(Authenticatable $owner, string $name, bool $fresh = false): bool
+    {
+        if ($fresh) {
+            $this->forget($owner);
+        }
+
+        // A super-admin's ceiling is the vocabulary exactly: a legacy name
+        // assigned to them outside it stays out too (review of PR #58).
+        if ($this->isSuperAdmin($owner)) {
+            return $this->vocabulary->isPermission($name);
+        }
+
+        return $this->hasAssignedPermission($owner, $name);
     }
 
     public function forget(?Authenticatable $user = null): void

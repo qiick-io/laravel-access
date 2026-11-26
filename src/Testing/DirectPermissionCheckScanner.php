@@ -23,8 +23,8 @@ use SplFileInfo;
  *   statically (a variable, a constant, a spread) and any dynamically named
  *   call fail too. Role-only super-admin predicates and super-admin role
  *   checks fail because policies must account for the verified actor;
- * - outside Policies and the Inertia share, every direct `hasPermission()` /
- *   `hasAssignedPermission()` must be listed by site (`Class::method`, or the
+ * - outside Policies and the Inertia share, every direct `hasPermission()`,
+ *   `hasAssignedPermission()` or `isWithinOwnerCeiling()` must be listed by site (`Class::method`, or the
  *   file path outside classes) in `access.direct_checks` of
  *   qiick-standards.json, with a reason, a decision link and a `review_by`
  *   date that has not passed. A listed site with no check left fails, so the
@@ -478,9 +478,21 @@ final class DirectPermissionCheckScanner
             : false;
     }
 
-    private function judgeDirectCheck(string $methodName, bool $isPolicy): ?false
+    private function judgeDirectCheck(string $methodName, bool $isPolicy): string|false|null
     {
-        return in_array($methodName, ['haspermission', 'hasassignedpermission'], true) && ! $isPolicy ? null : false;
+        if (! in_array($methodName, ['haspermission', 'hasassignedpermission', 'iswithinownerceiling'], true)) {
+            return false;
+        }
+
+        if (! $isPolicy) {
+            return null;
+        }
+
+        // The owner ceiling ignores the credential's scopes: a Policy using it
+        // would let a key act beyond them (review of PR #58).
+        return $methodName === 'iswithinownerceiling'
+            ? 'isWithinOwnerCeiling() in a Policy ignores the credential scopes; check permissions through hasPermission() (AC9).'
+            : false;
     }
 
     /**

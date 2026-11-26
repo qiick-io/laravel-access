@@ -40,6 +40,7 @@ above, the public classes are:
 | --- | --- |
 | Gate and resolver | `GateBefore`, `EffectivePermissionResolver`, `SuperAdminGuard` |
 | HTTP | `Http\EnsureUserHasPermission`, `Http\EnsureTwoFactorIsEnabled`, `Http\Concerns\AuthorizesWithPermission` |
+| Validation | `Rules\ExclusiveSuperAdminRoleRule` |
 | Actor runtime | `Laravel\AccessContext`, `Laravel\ContainerActorResolver`, `Laravel\CarriesActorContext`, `Laravel\ActorPayloadStamper`, `Laravel\SpatieTeamQueueBoundary` |
 | Adapters | `Laravel\NoTeamContext`, `Laravel\SpatieTeamContext`, `Laravel\EloquentGroupRoleSource`, `Laravel\SpatiePermissionVocabulary` |
 | Schema | `Laravel\AccessSchema`, `Laravel\AccessServiceProvider` |

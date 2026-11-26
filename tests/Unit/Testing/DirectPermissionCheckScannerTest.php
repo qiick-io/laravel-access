@@ -238,6 +238,7 @@ it('flags an unlisted direct hasPermission() outside Policies with its site', fu
 })->with([
     'method call' => ["\$resolver->hasPermission(\$user, 'can-show-users')"],
     'assigned permission' => ["\$resolver->hasAssignedPermission(\$user, 'can-show-users', true)"],
+    'owner ceiling' => ["\$resolver->isWithinOwnerCeiling(\$user, 'can-show-users', true)"],
     'nullsafe' => ["\$resolver?->hasPermission(\$user, 'x')"],
     'static call' => ["Resolver::hasPermission(\$user, 'x')"],
     'mixed case' => ["\$resolver->HasPermission(\$user, 'x')"],
@@ -929,4 +930,10 @@ it('reads every trait alias form and ignores aliases of unwatched methods', func
 it('applies the Gate macro rule only inside Policies', function (): void {
     expect(scanProduct(['app/Http/Controllers/PostController.php' => "<?php\nnamespace App\\Http\\Controllers;\nuse Illuminate\\Support\\Facades\\Gate;\nfinal class PostController\n{\n    public function index(\$a)\n    {\n        return Gate::checkPermission(\$a, 'x');\n    }\n}\n"]))
         ->toBe([]);
+});
+
+it('rejects the owner ceiling in a Policy, which would ignore the credential scopes', function (): void {
+    expect(scanPolicyBody("return \$this->resolver->isWithinOwnerCeiling(\$actor, 'can-show-users', true);"))->toHaveCount(1)
+        ->and(scanPolicyBody("return [\$this->resolver, 'isWithinOwnerCeiling'];"))->toHaveCount(1)
+        ->and(scanPolicyBody("return \$this->resolver->hasPermission(\$actor, 'can-show-users');"))->toBe([]);
 });

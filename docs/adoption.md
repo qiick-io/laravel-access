@@ -157,8 +157,10 @@ authorizer checks the credential's own scopes, then
 $permission)`. It is true only when the principal and every owner up its chain
 are active, the nearest `user` principal up that chain (the principal itself
 for a membership) is in the same organisation, and that user holds the
-permission in that organisation right now (read fresh, never through
-super-admin). The team context is switched for the check and always restored.
+permission in that organisation right now (read fresh). An instance
+super-admin's ceiling is every permission of the vocabulary (decision
+[2026-11-26](decisions/2026-11-26-super-admin-key-ceiling.md)), never the
+super-admin Gate bypass. The team context is switched for the check and always restored.
 A service or agent with no user owner, and any instance principal, gets
 `false`: its powers come from the product's scopes alone.
 
@@ -344,8 +346,10 @@ A web actor passes with the permission from the resolver, super-admin
 included, only when the request's guard is in `access.web_guards` (default
 `web`) and its user is the bound `AccessContext` user, if one is bound. An API
 actor passes only when the credential's scopes allow the permission **and** its
-owner currently holds it (read fresh, never through super-admin: neither the
-vocabulary grant nor permissions attached to the super-admin role count). The
+owner ceiling covers it (`isWithinOwnerCeiling()`, read fresh): the owner's
+assigned permissions, or the vocabulary for an instance super-admin owner.
+Never the Gate bypass, and never permissions only attached to the
+super-admin role row. The
 scope half is the product's (or `qiick/laravel-api-keys`'s)
 `ApiActorScopeCheck` binding; with none bound, every API actor is denied.
 
@@ -396,8 +400,8 @@ arguments at the call site. Class attributes count as part of their class,
 and trait aliases of a watched method (`use T { hasPermission as checkPermission; }`)
 count as that method. Outside Policies and the Inertia share (`share()` of
 `App\Http\Middleware\HandleInertiaRequests`, or the class passed as the
-scanner's third argument), each direct `hasPermission()` /
-`hasAssignedPermission()` site must be listed:
+scanner's third argument), each direct `hasPermission()`,
+`hasAssignedPermission()` or `isWithinOwnerCeiling()` site must be listed:
 
 ```json
 "access": {
