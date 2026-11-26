@@ -103,6 +103,13 @@ by writing rows directly; the `Principal` model is fully guarded.
 - `instance($type, $name)`: the singleton of a declared instance type (only
   with `organisation_required`). It is returned even when deactivated: check
   `isActive()` before use;
+- `markErased($principal)`: in the product's soft-delete transaction, call
+  this for each principal linked to the user. It records an `erased` tombstone
+  even for an inactive principal, preserves the original deactivation time
+  and keeps the user link so `forMember()` refuses to reactivate it after a
+  restore. It deactivates owned principals and emits `PrincipalDeactivated`
+  after commit so listeners can revoke credentials. Products with a custom
+  `PrincipalDirectory` implement the same transition;
 - `deactivate($principal, DeactivationReason)`: deactivates the principal,
   unless it already is (an erased tombstone is never rewritten), and every
   active principal it owns, in one transaction. `PrincipalDeactivated` (with

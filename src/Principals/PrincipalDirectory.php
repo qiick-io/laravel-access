@@ -55,6 +55,17 @@ interface PrincipalDirectory
     public function instance(string $type, string $name): Principal;
 
     /**
+     * Write an irreversible membership tombstone in the product's soft-delete
+     * transaction. Keeps the user link so restoring or rejoining cannot
+     * reactivate the principal, and retains the original deactivation time.
+     * Deactivates owned principals and dispatches PrincipalDeactivated after
+     * commit so the product can revoke their credentials.
+     *
+     * @api
+     */
+    public function markErased(Principal $principal): void;
+
+    /**
      * Sets deactivated_at and the reason unless the principal is already
      * deactivated (an erased tombstone stays erased), deactivates every active
      * owned principal (one transaction), then dispatches PrincipalDeactivated

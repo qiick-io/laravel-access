@@ -711,6 +711,49 @@ class SoftDeletingUser extends ErasableUser
     use SoftDeletes;
 }
 
+it('preserves the membership tombstone when a product soft-deletes and restores a user', function (bool $wasAlreadyInactive): void {
+    Schema::table('users', function (Blueprint $table): void {
+        $table->softDeletes();
+    });
+    config()->set('auth.providers.users.model', SoftDeletingUser::class);
+    migratePrincipals();
+    Event::fake([PrincipalDeactivated::class]);
+    $user = SoftDeletingUser::query()->findOrFail(1);
+    $principal = directory()->forMember($user, null);
+    $agent = directory()->createService('agent', null, 'Agent', $principal);
+    $deactivatedAt = now()->startOfSecond();
+    $this->travelTo($deactivatedAt);
+
+    if ($wasAlreadyInactive) {
+        directory()->deactivate($principal, DeactivationReason::Offboarded);
+        $this->travel(5)->minutes();
+    }
+
+    DB::transaction(function () use ($user, $principal): void {
+        $user->delete();
+        directory()->markErased($principal);
+        Event::assertNotDispatched(PrincipalDeactivated::class, fn (PrincipalDeactivated $event): bool => $event->reason === DeactivationReason::Erased);
+    });
+
+    Event::assertDispatched(PrincipalDeactivated::class, fn (PrincipalDeactivated $event): bool => $event->principal->id === $principal->id
+        && $event->reason === DeactivationReason::Erased && $event->ownedIds === [$agent->id]);
+    $markedAt = $principal->refresh()->updated_at;
+
+    $this->travel(5)->minutes();
+    directory()->markErased($principal);
+    $user->restore();
+
+    $storedPrincipal = $principal->refresh();
+
+    expect($storedPrincipal->user_id)->toBe(1)
+        ->and($storedPrincipal->deactivation_reason)->toBe(DeactivationReason::Erased)
+        ->and($storedPrincipal->deactivated_at?->equalTo($deactivatedAt))->toBeTrue()
+        ->and($storedPrincipal->updated_at?->equalTo($markedAt))->toBeTrue()
+        ->and(directory()->isActive($principal->id))->toBeFalse()
+        ->and(directory()->isActive($agent->id))->toBeFalse()
+        ->and(fn () => directory()->forMember($user, null))->toThrow(LogicException::class, 'erased');
+})->with(['active' => [false], 'offboarded' => [true]]);
+
 it('refuses an erasure that leaves the user row in place, and rolls it back (review R1)', function (Closure $deleteUser): void {
     Schema::table('users', function (Blueprint $table): void {
         $table->softDeletes();
