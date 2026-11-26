@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use Qiick\Access\Contracts\RoleCatalog;
 use Qiick\Access\Testing\DirectPermissionCheckScanner;
 use Qiick\Access\Tests\Support\FakeIntPermissionEnum;
 use Qiick\Access\Tests\Support\FakePermissionEnum;
@@ -469,9 +470,21 @@ it('reports role-only super-admin checks in Policies', function (string $body): 
     'resolver predicate' => ['return $this->resolver->isSuperAdmin($actor);'],
     'direct role predicate' => ['return $this->resolver->isDirectSuperAdmin($actor);'],
     'role name' => ["return \$actor->hasRole('super-admin');"],
+    'catalog lookup' => ['return $actor->hasRole($catalog->superAdminRoleName());'],
+    'nullsafe catalog lookup' => ['return $actor->hasRole($catalog?->superAdminRoleName());'],
+    'catalog facade lookup' => ['return $actor->hasRole(RoleCatalogFacade::superAdminRoleName());'],
+    'uppercase enum case' => ['return $actor->hasRole(RoleEnum::SUPER_ADMIN);'],
+    'case variation' => ["return \$actor->hasRole('Super-Admin');"],
+    'pipe separators with spaces' => ["return \$actor->hasRole('admin | Super-Admin | auditor');"],
+    'roles collection' => ["return \$actor->roles->contains('name', 'super-admin');"],
+    'nullsafe roles property' => ["return \$actor?->roles->contains('name', 'super-admin');"],
+    'strict roles collection' => ["return \$actor->roles?->containsStrict('name', 'super-admin');"],
+    'static role scope' => ["return User::role('super-admin')->exists();"],
+    'chained role scope' => ['return User::query()->role($catalog->superAdminRoleName())->exists();'],
     'role enum after named guard' => ["return \$actor?->hasRole(guard: 'web', roles: RoleEnum::SuperAdmin->value);"],
     'pipe list' => ["return \$actor->hasRole('admin|super-admin');"],
     'array argument' => ["return \$actor->hasAllRoles(['admin', 'super-admin']);"],
+    'exact role list' => ["return \$actor->hasExactRoles(['admin', 'super-admin']);"],
     'later variadic argument' => ["return \$actor->hasAnyRole('admin', 'super-admin');"],
     'first-class role callable' => ['return $actor->hasRole(...);'],
     'callable string' => ["return [\$actor, 'isSuperAdmin'];"],
@@ -516,8 +529,26 @@ it('allows actor-aware authority, protected targets and ordinary roles in Polici
         return $this->resolver->isActorSuperAdmin($actor)
             && !$this->guard->isProtectedFrom($actor, $target)
             && $membership->hasRole(OrganizationRoleEnum::Owner)
-            && $actor->hasRole('admin');
+            && $actor->hasRole('admin')
+            && $actor->hasRole($catalog->defaultRoleName())
+            && $actor->roles->contains('name', 'admin')
+            && $actor->roles->pluck('super-admin')->isNotEmpty()
+            && User::role('admin')->exists()
+            && $labels->contains('super-admin');
         PHP))->toBe([]);
+});
+
+it('reads the configured super-admin role name from the product catalog', function (): void {
+    app()->instance(RoleCatalog::class, new class implements RoleCatalog
+    {
+        public function superAdminRoleName(): string
+        {
+            return ' Root-Operator ';
+        }
+    });
+
+    expect(scanPolicyBody("return \$actor->hasRole('admin | ROOT-OPERATOR');"))->toHaveCount(1)
+        ->and(scanPolicyBody("return \$actor->hasRole('super-admin');"))->toBe([]);
 });
 
 it('reads calls across whitespace and comments', function (): void {

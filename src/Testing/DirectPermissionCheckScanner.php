@@ -8,6 +8,7 @@ use BackedEnum;
 use DateTimeImmutable;
 use InvalidArgumentException;
 use PhpToken;
+use Qiick\Access\Contracts\RoleCatalog;
 use RecursiveDirectoryIterator;
 use RecursiveIteratorIterator;
 use SplFileInfo;
@@ -50,6 +51,8 @@ final class DirectPermissionCheckScanner
     /** @var list<string> */
     private readonly array $permissionNames;
 
+    private readonly string $superAdminRoleName;
+
     private readonly DateTimeImmutable $today;
 
     /** The one site allowed to read permissions directly: the Inertia share (design §6). */
@@ -87,6 +90,7 @@ final class DirectPermissionCheckScanner
 
         $this->permissionEnumClass = strtolower(ltrim($permissionEnumClass, '\\'));
         $this->permissionNames = $permissionNames;
+        $this->superAdminRoleName = strtolower(trim(app(RoleCatalog::class)->superAdminRoleName()));
         $this->today = $today ?? new DateTimeImmutable('today');
         $this->inertiaShareSite = strtolower(ltrim($inertiaShareClass, '\\')).'::share';
     }
@@ -435,13 +439,16 @@ final class DirectPermissionCheckScanner
         $methodName = strtolower($nameToken->text);
         $methodName = $this->methodAliases[$methodName] ?? $methodName;
 
-        $isRoleOnlySuperAdminCheck = $isPolicy && (
-            $this->isSuperAdminPredicate($methodName)
-            || ($this->isRolePredicate($methodName) && $this->hasSuperAdminRoleArgument($this->argumentTokens($tokens, $openIndex, shouldReadAll: true)))
-        );
+        if ($isPolicy) {
+            $isRoleCollectionCheck = in_array($methodName, ['contains', 'containsstrict'], true)
+                && ($tokens[$index - 1] ?? null)?->text === 'roles'
+                && ($tokens[$index - 2] ?? null)?->is([T_OBJECT_OPERATOR, T_NULLSAFE_OBJECT_OPERATOR]) === true;
+            $isRoleCheck = $this->isRolePredicate($methodName) || $methodName === 'role' || $isRoleCollectionCheck;
 
-        if ($isRoleOnlySuperAdminCheck) {
-            return "{$methodName}() with role-only super-admin authority in a Policy; use isActorSuperAdmin() or isProtectedFrom() (AC9).";
+            if ($this->isSuperAdminPredicate($methodName)
+                || ($isRoleCheck && $this->hasSuperAdminRoleArgument($this->argumentTokens($tokens, $openIndex, shouldReadAll: true)))) {
+                return "{$methodName}() with role-only super-admin authority in a Policy; use isActorSuperAdmin() or isProtectedFrom() (AC9).";
+            }
         }
 
         if ($isPolicy && $token->is(T_DOUBLE_COLON) && $this->isGateFacade($tokens[$index - 1] ?? $token, $namespace, $imports)
@@ -508,11 +515,27 @@ final class DirectPermissionCheckScanner
         }
 
         foreach ($arguments as $index => $token) {
-            if ($token->is(T_CONSTANT_ENCAPSED_STRING) && in_array('super-admin', explode('|', substr($token->text, 1, -1)), true)) {
+            if ($token->is(T_CONSTANT_ENCAPSED_STRING)) {
+                $roleNames = array_map(trim(...), explode('|', strtolower(substr($token->text, 1, -1))));
+
+                if (in_array($this->superAdminRoleName, $roleNames, true)) {
+                    return true;
+                }
+            }
+
+            if (! $token->is(T_STRING)) {
+                continue;
+            }
+
+            $symbol = strtolower($token->text);
+            $previousToken = $arguments[$index - 1] ?? null;
+
+            if ($previousToken?->is(T_DOUBLE_COLON) === true && str_replace('_', '', $symbol) === 'superadmin') {
                 return true;
             }
 
-            if ($token->is(T_STRING) && ($arguments[$index - 1] ?? null)?->text === '::' && strtolower($token->text) === 'superadmin') {
+            if ($symbol === 'superadminrolename' && ($arguments[$index + 1] ?? null)?->text === '('
+                && $previousToken?->is([T_OBJECT_OPERATOR, T_NULLSAFE_OBJECT_OPERATOR, T_DOUBLE_COLON]) === true) {
                 return true;
             }
         }
