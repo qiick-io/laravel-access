@@ -3,6 +3,8 @@
 declare(strict_types=1);
 
 use Illuminate\Contracts\Config\Repository as ConfigRepository;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Str;
 use Qiick\Access\Contracts\ActorResolver;
 use Qiick\Access\Contracts\AuthorizationResponder;
 use Qiick\Access\Contracts\RoleCatalog;
@@ -160,4 +162,121 @@ it('fails when the replaced access.migrations.load switch is still configured', 
         ->and(fn () => $checks->assert())->toThrow(RuntimeException::class, 'access.migrations.load was replaced');
 
     $config->set('access.migrations', ['groups' => true, 'principals' => true]);
+});
+
+it('fails when a database connection reports a name other than its key', function (Closure $connectionConfig): void {
+    $checks = app(AccessBootChecks::class);
+    $config = app(ConfigRepository::class);
+    $checks->assertConnectionNamesMatchTheirKeys($config);
+    $defaultConnection = $config->get('database.default');
+
+    // Eloquent stamps a connection's reported name on the models it loads, and
+    // Laravel takes that name from these options (URL query options and the
+    // read/write/direct variants are merged over the base config), so a
+    // second database could pass its users off as the default's.
+    $config->set('database.connections.secondary', $connectionConfig($defaultConnection));
+
+    expect(fn () => $checks->assertConnectionNamesMatchTheirKeys($config))
+        ->toThrow(RuntimeException::class, "Database connection [secondary] reports the name [{$defaultConnection}]");
+
+    $config->set('database.connections.secondary', null);
+})->with([
+    'top-level name' => fn (string $name): array => ['driver' => 'sqlite', 'database' => '/tmp/tenant.sqlite', 'name' => $name],
+    'URL query option' => fn (string $name): array => ['url' => "sqlite:////tmp/tenant.sqlite?name={$name}"],
+    'URL string' => fn (string $name): string => "sqlite:////tmp/tenant.sqlite?name={$name}",
+    'read endpoint of another database' => fn (string $name): array => ['driver' => 'sqlite', 'name' => $name, 'read' => ['database' => '/tmp/tenant.sqlite'], 'write' => ['database' => '/tmp/central.sqlite']],
+    'read variant name' => fn (string $name): array => ['driver' => 'sqlite', 'database' => '/tmp/tenant.sqlite', 'read' => ['name' => $name], 'write' => []],
+    'writer name' => fn (string $name): array => ['driver' => 'sqlite', 'database' => '/tmp/tenant.sqlite', 'read' => [], 'write' => ['name' => $name]],
+    'one of several writers' => fn (string $name): array => ['driver' => 'sqlite', 'database' => '/tmp/tenant.sqlite', 'read' => [], 'write' => [['host' => 'a'], ['host' => 'b', 'name' => $name]]],
+    'direct endpoint' => fn (string $name): array => ['driver' => 'pgsql', 'database' => 'tenant', 'direct' => ['name' => $name]],
+    'writer inside the URL query' => fn (string $name): array => ['url' => "sqlite:////tmp/tenant.sqlite?read[database]=/tmp/tenant.sqlite&write[database]=/tmp/central.sqlite&write[name]={$name}"],
+    'writer list inside a URL string' => fn (string $name): string => "sqlite:////tmp/tenant.sqlite?read[database]=/tmp/tenant.sqlite&write[0][host]=a&write[1][name]={$name}",
+    'direct inside the URL query' => fn (string $name): array => ['url' => "pgsql://tenant.internal/tenant?direct[name]={$name}"],
+    'top-level name next to a URL' => fn (string $name): array => ['url' => 'sqlite:////tmp/tenant.sqlite', 'name' => $name],
+    'writer after a scalar list entry' => fn (string $name): array => ['driver' => 'sqlite', 'database' => '/tmp/tenant.sqlite', 'read' => [], 'write' => ['ignored', ['name' => $name]]],
+    'Stringable URL' => fn (string $name): array => ['url' => Str::of("sqlite:////tmp/tenant.sqlite?name={$name}")],
+]);
+
+it('accepts connections that report their own key, including writer and replica lists', function (): void {
+    $checks = app(AccessBootChecks::class);
+    $config = app(ConfigRepository::class);
+    $database = tempnam(sys_get_temp_dir(), 'access-shared-');
+    $config->set('database.connections.failover', [
+        'driver' => 'sqlite',
+        'database' => $database,
+        'prefix' => '',
+        'name' => 'failover',
+        'read' => [['host' => 'replica-a'], ['host' => 'replica-b']],
+        'write' => [['host' => 'writer-a'], ['host' => 'writer-b', 'name' => 'failover']],
+    ]);
+    $config->set('database.connections.url', "sqlite:///{$database}?name=url");
+
+    $checks->assertConnectionNamesMatchTheirKeys($config);
+
+    // Two writers of one dataset on different hosts are a supported shape.
+    expect(DB::connection('failover')->select('select 1 as one'))->toHaveCount(1);
+
+    DB::purge('failover');
+    $config->set('database.connections.failover', null);
+    $config->set('database.connections.url', null);
+    unlink($database);
+});
+
+it('fails when a connection key or a connection nested in another can stand for another name', function (): void {
+    $checks = app(AccessBootChecks::class);
+    $config = app(ConfigRepository::class);
+    $defaultConnection = $config->get('database.default');
+    $defaultConfig = $config->get("database.connections.{$defaultConnection}");
+
+    // Laravel resolves DB::connection('tenant.read') through Arr::get(): a
+    // literal dotted key, or else a connection nested inside 'tenant'.
+    $config->set('database.connections', [...$config->get('database.connections'), 'tenant.read' => ['driver' => 'sqlite', 'database' => '/tmp/tenant.sqlite']]);
+
+    expect(fn () => $checks->assertConnectionNamesMatchTheirKeys($config))
+        ->toThrow(RuntimeException::class, 'Database connection [tenant.read] has a dot in its key');
+
+    $connections = $config->get('database.connections');
+    unset($connections['tenant.read']);
+    $config->set('database.connections', $connections);
+    $config->set("database.connections.{$defaultConnection}.secondary", ['driver' => 'sqlite', 'database' => '/tmp/tenant.sqlite', 'name' => $defaultConnection]);
+
+    expect(fn () => $checks->assertConnectionNamesMatchTheirKeys($config))
+        ->toThrow(RuntimeException::class, "Database connection [{$defaultConnection}] nests a 'name' outside its read, write and direct variants");
+
+    // Deeper, and inside a variant: still a connection Laravel could reach.
+    $config->set("database.connections.{$defaultConnection}", [...$defaultConfig, 'options' => ['tenants' => ['secondary' => ['name' => $defaultConnection]]]]);
+
+    expect(fn () => $checks->assertConnectionNamesMatchTheirKeys($config))->toThrow(RuntimeException::class, 'nests a');
+
+    $config->set("database.connections.{$defaultConnection}", [...$defaultConfig, 'read' => [], 'write' => ['database' => '/tmp/central.sqlite', 'sticky' => ['name' => $defaultConnection]]]);
+
+    expect(fn () => $checks->assertConnectionNamesMatchTheirKeys($config))->toThrow(RuntimeException::class, 'nests a');
+
+    // A URL nested at any depth carries its name in its query, and Laravel
+    // parses it once a dotted name reaches that nested connection.
+    $config->set("database.connections.{$defaultConnection}", [...$defaultConfig, 'tenants' => ['secondary' => ['url' => Str::of("sqlite:////tmp/tenant.sqlite?name={$defaultConnection}")]]]);
+
+    expect(fn () => $checks->assertConnectionNamesMatchTheirKeys($config))->toThrow(RuntimeException::class, 'nests a');
+
+    $config->set("database.connections.{$defaultConnection}", [...$defaultConfig, 'tenants' => ['secondary' => ['url' => 'sqlite:////tmp/tenant.sqlite?write[name]=other']]]);
+
+    expect(fn () => $checks->assertConnectionNamesMatchTheirKeys($config))->toThrow(RuntimeException::class, 'nests a');
+
+    $config->set("database.connections.{$defaultConnection}", [...$defaultConfig, 'read' => [], 'write' => ['url' => 'sqlite:////tmp/central.sqlite?name=other']]);
+
+    expect(fn () => $checks->assertConnectionNamesMatchTheirKeys($config))->toThrow(RuntimeException::class, 'reports the name [other]');
+
+    // A nested URL without a name is fine.
+    $config->set("database.connections.{$defaultConnection}", [...$defaultConfig, 'tenants' => ['secondary' => ['url' => 'sqlite:////tmp/tenant.sqlite']]]);
+    $checks->assertConnectionNamesMatchTheirKeys($config);
+
+    // A non-string name is named by its type; a non-array connection has no name.
+    $config->set("database.connections.{$defaultConnection}", [...$defaultConfig, 'name' => 7]);
+
+    expect(fn () => $checks->assertConnectionNamesMatchTheirKeys($config))->toThrow(RuntimeException::class, 'reports the name [int]');
+
+    $config->set("database.connections.{$defaultConnection}", $defaultConfig);
+    $config->set('database.connections.unset', 42);
+    $checks->assertConnectionNamesMatchTheirKeys($config);
+    $config->set('database.connections.unset', null);
 });

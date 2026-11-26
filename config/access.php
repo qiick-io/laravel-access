@@ -142,10 +142,10 @@ return [
     | Group member model
     |--------------------------------------------------------------------------
     |
-    | The Authenticatable class whose ids user_group_user.user_id holds. Only
-    | it (and its subclasses) gets group roles, so another guard's principal
-    | with the same id never inherits them. Null uses
-    | auth.providers.users.model.
+    | The Eloquent class whose ids user_group_user.user_id holds. Only users
+    | of exactly this class on the default connection get group roles (not
+    | its subclasses), so another guard's principal with the same id never
+    | inherits them. Null uses auth.providers.users.model.
     |
     */
 

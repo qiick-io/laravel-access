@@ -187,6 +187,45 @@ membership FK targets `access.users_table` when set, otherwise the table from
 group uses `is_instance = true` with `organisation_id` NULL; a CHECK forbids
 `is_instance = true` together with a non-null `organisation_id`.
 
+Group memberships are read from the default database connection. They
+count only for a user that is exactly the group member model
+(`access.group_member_model`, else `auth.providers.users.model`) and whose
+connection name is exactly the default connection's; the member model
+itself must use the default connection. The package compares the declared
+names and never resolves where a connection points. Everything else gets no
+group roles: a subclass (a product with single-table inheritance sets
+`access.group_member_model` to the subclass it authenticates), a user of
+another connection, even to the same database, and a non-Eloquent user such
+as `GenericUser`.
+
+Using more than one database is the product's explicit choice, and it keeps
+these invariants. The database configuration belongs to the operator and is
+trusted: the boot check below guards against configuration mistakes, not
+against an attacker, who could change the configuration or run code anyway.
+
+- A connection is known by its key. Eloquent stamps the connection's
+  reported name on the models it loads, and boot fails when a connection in
+  `database.connections` sets a `name` other than its key, at the top
+  level, in a URL's query (`?name=`) or in a read, write or direct variant.
+  This includes `name` options in the URL query (`?write[name]=`). A
+  `name` nested anywhere outside the read, write and direct variants, and a
+  dot in a connection key, fail boot too: Laravel resolves a dotted name
+  inside another connection's config, and parses a `url` it finds there,
+  so every `url` at any depth is read as well. A
+  connection registered at runtime (`config()->set()`,
+  `DB::connectUsing()`) never reuses another connection's name. The package
+  does not enforce this one: such a registration is the application's own
+  code, and whoever can run it has already run code in the application.
+- The default connection is one dataset: its read replicas, writers and
+  direct (pooled) endpoints hold the same data, and it is never repointed at
+  another database while the process runs. A product that switches tenants
+  gives each tenant database its own connection name, keeps the group
+  tables and the member model on the default connection, and discards
+  actors, relations and cached authorization decisions loaded before a
+  switch.
+- Group role ids are looked up through Spatie's role model, so that model
+  uses the default connection too.
+
 A group name is unique within its organisation, and among the groups without
 an organisation (instance groups and the legacy unscoped ones): two
 organisations can both have an "Editors" group. The migration indexes

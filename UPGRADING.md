@@ -30,6 +30,17 @@ events, and the migrations (see `docs/reference-contracts.md`). Code tagged
   database migrated with `0.1.0-beta.1` either runs `migrate:fresh` or adds
   the index once: `CREATE INDEX principals_created_by_index ON principals
   (created_by)` (MySQL and MariaDB already have one from the foreign key).
+- Boot fails when a database connection in `database.connections` reports
+  a name other than its key: a `name` option at the top level, in a read,
+  write or direct variant or in its URL's query. A `name` nested anywhere
+  else and a dot in a connection key fail as well. Remove that `name`, and
+  move a nested connection to its own key without a dot.
+- Group roles count only for exactly `access.group_member_model` (else
+  `auth.providers.users.model`) on the default connection. A product with
+  single-table inheritance sets `access.group_member_model` to the subclass
+  it authenticates. A non-Eloquent member model (`GenericUser`) gets no
+  group roles: bind your own `GroupRoleSource` for it. The multi-database
+  invariants are in `docs/adoption.md`.
 
 ## 0.1.0-beta.1 (first tagged pre-release)
 

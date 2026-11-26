@@ -6,6 +6,7 @@ namespace Qiick\Access\Laravel;
 
 use Illuminate\Contracts\Config\Repository as ConfigRepository;
 use Illuminate\Contracts\Foundation\Application;
+use Illuminate\Support\ConfigurationUrlParser;
 use Qiick\Access\Contracts\ActorResolver;
 use Qiick\Access\Contracts\AuthorizationResponder;
 use Qiick\Access\Contracts\LegacyGateBefore;
@@ -13,6 +14,7 @@ use Qiick\Access\Contracts\RoleCatalog;
 use Qiick\Access\Contracts\TwoFactorPolicy;
 use Qiick\Access\Contracts\TwoFactorResponder;
 use RuntimeException;
+use Stringable;
 
 /**
  * Fail-closed boot assertions for the package (AC12, R4, A1). Extracted from
@@ -37,6 +39,7 @@ final class AccessBootChecks
         $this->assertEveryGuardClassified($config);
         $this->assertNoLegacyMigrationsSwitch($config);
         $this->assertGateSelection($config);
+        $this->assertConnectionNamesMatchTheirKeys($config);
     }
 
     /**
@@ -79,6 +82,145 @@ final class AccessBootChecks
                 'access.use_package_gate = false or access.gate_shadow = true requires ['.LegacyGateBefore::class.'] to be bound before boot.',
             );
         }
+    }
+
+    /**
+     * Eloquent stamps a connection's reported name on every model it loads,
+     * and the group member check trusts that name. Laravel takes it from the
+     * `name` option after merging a URL's query options and the selected
+     * read, write or direct variant over the base config. It finds the config
+     * with Arr::get(), so a dotted name reaches a literal dotted key or a
+     * connection nested inside another. Boot fails on all of these, since
+     * each could let another database's users pass for a declared connection:
+     * a dotted key, a `name` other than the key at the top level or in a
+     * variant, and a `name` anywhere else (a nested connection).
+     *
+     * @throws RuntimeException naming the first connection that can report another name
+     */
+    public function assertConnectionNamesMatchTheirKeys(ConfigRepository $config): void
+    {
+        $connections = $config->get('database.connections', []);
+
+        foreach (is_array($connections) ? $connections : [] as $key => $connection) {
+            $key = (string) $key;
+
+            if (str_contains($key, '.')) {
+                throw new RuntimeException(
+                    "Database connection [{$key}] has a dot in its key; Laravel would also resolve that name inside another connection, so rename it.",
+                );
+            }
+
+            foreach ($this->connectionConfigurations($connection) as $configuration) {
+                $this->assertReportsItsKey($key, $configuration);
+            }
+        }
+    }
+
+    /**
+     * The connection's own options and, when it has a URL, the options
+     * Laravel parses from it (a Stringable URL included).
+     *
+     * @return list<array<array-key, mixed>>
+     */
+    private function connectionConfigurations(mixed $connection): array
+    {
+        if (is_string($connection) || $connection instanceof Stringable) {
+            $connection = ['url' => $connection];
+        }
+
+        if (! is_array($connection)) {
+            return [];
+        }
+
+        $url = $connection['url'] ?? null;
+
+        if (! is_string($url) && ! $url instanceof Stringable) {
+            return [$connection];
+        }
+
+        return [$connection, (new ConfigurationUrlParser)->parseConfiguration((string) $url)];
+    }
+
+    /**
+     * @param  array<array-key, mixed>  $configuration
+     *
+     * @throws RuntimeException when a reported name differs from the key or a name sits outside the variants
+     */
+    private function assertReportsItsKey(string $key, array $configuration): void
+    {
+        $reportedNames = array_key_exists('name', $configuration) ? [$configuration['name']] : [];
+        $nestedOptions = [];
+
+        foreach ($configuration as $option => $value) {
+            if (! is_array($value)) {
+                continue;
+            }
+
+            if (! in_array($option, ['read', 'write', 'direct'], true)) {
+                $nestedOptions[] = $value;
+
+                continue;
+            }
+
+            foreach (array_is_list($value) ? $value : [$value] as $variant) {
+                if (! is_array($variant)) {
+                    continue;
+                }
+
+                foreach ($this->connectionConfigurations($variant) as $variantConfiguration) {
+                    if (array_key_exists('name', $variantConfiguration)) {
+                        $reportedNames[] = $variantConfiguration['name'];
+                    }
+                }
+
+                $nestedOptions = [...$nestedOptions, ...array_filter($variant, is_array(...))];
+            }
+        }
+
+        foreach ($reportedNames as $reportedName) {
+            if ($reportedName !== $key) {
+                $shownName = is_string($reportedName) ? $reportedName : get_debug_type($reportedName);
+
+                throw new RuntimeException(
+                    "Database connection [{$key}] reports the name [{$shownName}]; remove that name so the connection is known by its key (see docs/adoption.md).",
+                );
+            }
+        }
+
+        foreach ($nestedOptions as $nestedOption) {
+            if ($this->containsName($nestedOption)) {
+                throw new RuntimeException(
+                    "Database connection [{$key}] nests a 'name' outside its read, write and direct variants; move that connection to its own key (see docs/adoption.md).",
+                );
+            }
+        }
+    }
+
+    /**
+     * A `name` at any depth, a URL's query options included: Laravel parses
+     * the `url` of whichever nested array a dotted connection name reaches.
+     *
+     * @param  array<array-key, mixed>  $options
+     */
+    private function containsName(array $options): bool
+    {
+        if (array_key_exists('name', $options)) {
+            return true;
+        }
+
+        $urlOptions = $this->connectionConfigurations($options)[1] ?? null;
+
+        if ($urlOptions !== null && $this->containsName($urlOptions)) {
+            return true;
+        }
+
+        foreach ($options as $value) {
+            if (is_array($value) && $this->containsName($value)) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     public function assertRequiredBindings(): void
