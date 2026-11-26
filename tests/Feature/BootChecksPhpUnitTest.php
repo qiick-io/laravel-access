@@ -188,6 +188,9 @@ it('fails when a database connection reports a name other than its key', functio
     'writer name' => fn (string $name): array => ['driver' => 'sqlite', 'database' => '/tmp/tenant.sqlite', 'read' => [], 'write' => ['name' => $name]],
     'one of several writers' => fn (string $name): array => ['driver' => 'sqlite', 'database' => '/tmp/tenant.sqlite', 'read' => [], 'write' => [['host' => 'a'], ['host' => 'b', 'name' => $name]]],
     'direct endpoint' => fn (string $name): array => ['driver' => 'pgsql', 'database' => 'tenant', 'direct' => ['name' => $name]],
+    'writer inside the URL query' => fn (string $name): array => ['url' => "sqlite:////tmp/tenant.sqlite?read[database]=/tmp/tenant.sqlite&write[database]=/tmp/central.sqlite&write[name]={$name}"],
+    'writer list inside a URL string' => fn (string $name): string => "sqlite:////tmp/tenant.sqlite?read[database]=/tmp/tenant.sqlite&write[0][host]=a&write[1][name]={$name}",
+    'direct inside the URL query' => fn (string $name): array => ['url' => "pgsql://tenant.internal/tenant?direct[name]={$name}"],
 ]);
 
 it('accepts connections that report their own key, including writer and replica lists', function (): void {
