@@ -206,10 +206,13 @@ final class EloquentPrincipalDirectory implements PrincipalDirectory
         }
 
         foreach ($principals as $principal) {
-            $hasChanged = $this->scrubPrincipal($principal, $userId, DeactivationReason::Erased, $isDryRun);
-            $anonymised += (int) $hasChanged;
+            if (! $this->scrubPrincipal($principal, $userId, DeactivationReason::Erased, $isDryRun)) {
+                continue;
+            }
 
-            if ($hasChanged && ! $isDryRun) {
+            $anonymised++;
+
+            if (! $isDryRun) {
                 $onErased?->__invoke($principal, $ownedIdsByPrincipal[$principal->id]);
             }
         }
@@ -221,7 +224,9 @@ final class EloquentPrincipalDirectory implements PrincipalDirectory
             ->orderBy('id')->lockForUpdate()->get();
 
         foreach ($ownedPrincipals as $principal) {
-            $anonymised += (int) $this->scrubPrincipal($principal, $userId, DeactivationReason::OwnerDeactivated, $isDryRun);
+            if ($this->scrubPrincipal($principal, $userId, DeactivationReason::OwnerDeactivated, $isDryRun)) {
+                $anonymised++;
+            }
         }
 
         // The person may have created principals they do not own. Preserve those

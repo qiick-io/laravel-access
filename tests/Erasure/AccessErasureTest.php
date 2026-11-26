@@ -8,6 +8,7 @@ use Illuminate\Support\Str;
 use Qiick\Access\EffectivePermissionResolver;
 use Qiick\Access\Erasure\AccessEraser;
 use Qiick\Access\Events\SubjectErasedEvent;
+use Qiick\Access\Principals\DeactivationReason;
 use Qiick\Access\Principals\Principal;
 use Qiick\Access\Principals\PrincipalDirectory;
 use Qiick\Access\Tests\Support\SpatieUser;
@@ -97,14 +98,23 @@ it('scrubs a snapshotted principal and a separate creator reference', function (
     $user = SpatieUser::query()->create(['email' => 'subject@example.test']);
     $organisationId = (string) Str::uuid();
     $directory = app(PrincipalDirectory::class);
-    $snapshotted = $directory->createService('agent', $organisationId, 'Subject agent', null, metadata: ['note' => 'Subject agent']);
+    $member = $directory->forMember($user, $organisationId);
+    $snapshotted = $directory->createService('agent', $organisationId, 'Subject agent', $member, metadata: ['note' => 'Subject agent']);
+    $owned = $directory->createService('agent', $organisationId, 'Inactive agent', $member);
+    $directory->deactivate($owned, DeactivationReason::Admin);
+    $deactivatedAt = $owned->refresh()->deactivated_at;
+    $this->travel(1)->minutes();
     $shared = $directory->createService('service', $organisationId, 'Shared service', null, $user);
 
     $report = app(AccessEraser::class)->erase((string) $user->getKey(), (string) Str::uuid(), AccessEraser::DELETE, [$snapshotted->id]);
 
-    expect($report->stores['principals']['anonymised'])->toBe(2)
+    expect($report->stores['principals']['anonymised'])->toBe(4)
         ->and($snapshotted->refresh()->metadata)->toBeNull()
+        ->and($snapshotted->deactivation_reason)->toBe(DeactivationReason::Erased)
         ->and($directory->isActive($snapshotted->id))->toBeFalse()
+        ->and($owned->refresh()->deactivation_reason)->toBe(DeactivationReason::Admin)
+        ->and($owned->deactivated_at->equalTo($deactivatedAt))->toBeTrue()
+        ->and($owned->owner_principal_id)->toBeNull()
         ->and($shared->refresh()->created_by)->toBeNull()
         ->and($shared->name)->toBe('Shared service')
         ->and($directory->isActive($shared->id))->toBeTrue();

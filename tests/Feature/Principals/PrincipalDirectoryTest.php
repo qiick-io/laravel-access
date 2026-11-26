@@ -599,7 +599,7 @@ it('erases a user: principals erased and unlinked, then the user deleted, in one
     $this->travel(5)->minutes();
     $other = directory()->forMember(member(2), $organisationId);
 
-    directory()->eraseUser(ErasableUser::query()->findOrFail(1), static function (ErasableUser $user): void {
+    directory()->eraseUser(ErasableUser::query()->findOrFail(1)->setKeyType('string'), static function (ErasableUser $user): void {
         $user->delete();
     });
 
