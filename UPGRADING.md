@@ -28,8 +28,10 @@ events, and the migrations (see `docs/reference-contracts.md`). Code tagged
 - Use `EffectivePermissionResolver::isActorSuperAdmin($actor)` for super-admin
   authority in policies. Replace acting-user role checks, including in policy
   `before()` methods. `SuperAdminGuard::canManageSuperAdmins()` and
-  `isProtectedFrom()` now apply the same actor-aware rule. Keep
-  `isSuperAdmin($target)` for subject membership checks. See
+  `isProtectedFrom()` now apply the same actor-aware rule. AC9 reports
+  role-only super-admin checks in policies. Use `isProtectedFrom()` for
+  protected accounts and `isSuperAdmin($target)` in domain services that read
+  subject role membership. See
   [adoption](docs/adoption.md) for the policy regression test setup.
 
 ## 0.1.0-beta.2

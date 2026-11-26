@@ -286,9 +286,9 @@ Product policies must use `EffectivePermissionResolver::isActorSuperAdmin($actor
 when granting super-admin authority, including in a policy's `before()` method.
 It uses the same actor resolution as `Gate::before` and returns `false` for API
 keys, OAuth grants and public API actors, even when their acting user has the
-role. `isSuperAdmin($target)` remains the role-membership check for the subject
-of a policy. For protected accounts, `SuperAdminGuard::isProtectedFrom($actor,
-$target)` combines these checks.
+role. For protected accounts, `SuperAdminGuard::isProtectedFrom($actor,
+$target)` combines actor authority with subject role membership. Use
+`isSuperAdmin($target)` in domain services that need role membership alone.
 
 Exercise each super-admin policy exception with the same user in a web session
 and behind a scoped API credential. Use `Gate::forUser($actor)->allows($ability,
@@ -373,7 +373,11 @@ It fails on any Gate ability call (`can`, `cannot`, `cant`, `canAny`,
 `allows`, `denies`, `authorize`, `inspect`) with a permission inside a Policy,
 on one whose ability it cannot read statically, and on dynamically named calls
 in Policies, and on any static `Gate::` method outside the known Gate API (a
-macro). Class attributes count as part of their class, and trait aliases of a
+macro). It also flags role-only `isSuperAdmin()` and `isDirectSuperAdmin()`
+calls and role predicates such as `hasRole()` with a `super-admin` literal
+or `SuperAdmin` enum case in Policies. Callable references to these predicates
+fail because their role arguments cannot be read at the call site. Class
+attributes count as part of their class, and trait aliases of a
 watched method (`use T { hasPermission as checkPermission; }`) count as that
 method. Outside Policies and the Inertia share (`share()` of
 `App\Http\Middleware\HandleInertiaRequests`, or the class passed as the
