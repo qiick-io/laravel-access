@@ -7,12 +7,16 @@ use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use Qiick\Access\Contracts\ActiveUsers;
+use Qiick\Access\Contracts\ActorContext;
+use Qiick\Access\Contracts\ActorKind;
 use Qiick\Access\Contracts\GroupRoleSource;
 use Qiick\Access\Contracts\PermissionVocabulary;
 use Qiick\Access\Contracts\RoleCatalog;
 use Qiick\Access\Contracts\TeamContext;
 use Qiick\Access\EffectivePermissionResolver;
+use Qiick\Access\Laravel\AccessContext;
 use Qiick\Access\SuperAdminGuard;
+use Qiick\Access\Testing\TrustApiGuardInConsole;
 use Qiick\Access\Tests\Support\FakeAuthenticatable;
 use Qiick\Access\Tests\Support\PermissionedFakeUser;
 use Qiick\Access\Tests\Support\StaleRoleSuperAdmin;
@@ -81,6 +85,40 @@ it('protects a super-admin target from a non-super-admin actor', function (): vo
     expect($guard->isProtectedFrom($member, $admin))->toBeTrue()
         ->and($guard->isProtectedFrom($admin, $admin))->toBeFalse()
         ->and($guard->isProtectedFrom(null, $admin))->toBeTrue();
+});
+
+it('protects a super-admin target from an API actor whose owner is a super-admin', function (ActorKind $kind): void {
+    $admin = new PermissionedFakeUser(1, ['super-admin']);
+    $guard = new SuperAdminGuard(resolverForGuardUsers(), activeUsersReturning([]), app('db'));
+    AccessContext::enter(new ActorContext($kind, $admin));
+
+    expect($guard->canManageSuperAdmins($admin))->toBeFalse()
+        ->and($guard->isProtectedFrom($admin, $admin))->toBeTrue();
+})->with([ActorKind::ApiKey, ActorKind::OAuthGrant, ActorKind::PublicApi]);
+
+it('honours the API guard signal even without a bound API context', function (): void {
+    $admin = new PermissionedFakeUser(1, ['super-admin']);
+    $guard = new SuperAdminGuard(resolverForGuardUsers(), activeUsersReturning([]), app('db'));
+    config(['access.api_guards' => ['token'], 'auth.defaults.guard' => 'token']);
+    TrustApiGuardInConsole::enable();
+
+    try {
+        expect($guard->canManageSuperAdmins($admin))->toBeFalse();
+    } finally {
+        TrustApiGuardInConsole::disable();
+    }
+});
+
+it('refuses super-admin authority when a different user is bound to the actor', function (): void {
+    $admin = new PermissionedFakeUser(1, ['super-admin']);
+    $guard = new SuperAdminGuard(resolverForGuardUsers(), activeUsersReturning([]), app('db'));
+    AccessContext::enter(new ActorContext(ActorKind::WebSession, new PermissionedFakeUser(2)));
+
+    expect($guard->canManageSuperAdmins($admin))->toBeFalse();
+
+    AccessContext::enter(new ActorContext(ActorKind::WebSession, new PermissionedFakeUser(1)));
+
+    expect($guard->canManageSuperAdmins($admin))->toBeTrue();
 });
 
 it('rolls back and reports when a change would leave no active super-admin', function (): void {

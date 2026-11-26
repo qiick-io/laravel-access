@@ -281,6 +281,21 @@ teams, bind `TeamContext` to `SpatieTeamContext` through the container
 the resolver flush its constructor requires. `isDirectSuperAdmin()` is the same filter-off check for a **direct**
 role only — products use it with `TwoFactorPolicy::hasUsableFactor()` for
 break-glass (P6); the OIDC break-glass seam stays outside this package (R7).
+
+Product policies must use `EffectivePermissionResolver::isActorSuperAdmin($actor)`
+when granting super-admin authority, including in a policy's `before()` method.
+It uses the same actor resolution as `Gate::before` and returns `false` for API
+keys, OAuth grants and public API actors, even when their acting user has the
+role. `isSuperAdmin($target)` remains the role-membership check for the subject
+of a policy. For protected accounts, `SuperAdminGuard::isProtectedFrom($actor,
+$target)` combines these checks.
+
+Exercise each super-admin policy exception with the same user in a web session
+and behind a scoped API credential. Use `Gate::forUser($actor)->allows($ability,
+$subject)` with the real policy subject and bind the verified API actor before
+the API check. Give the credential the ordinary scopes it needs to reach the
+policy so the test exercises the exception itself.
+
 Register `EnsureTwoFactorIsEnabled` on the web stack; exempt routes live in
 `access.two_factor.exempt_route_names`. Bind `ActiveUsers` and use
 `SuperAdminGuard` for super-admin grant/revoke and last-admin protection.

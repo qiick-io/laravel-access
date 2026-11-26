@@ -8,6 +8,7 @@ use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Support\Collection;
+use Qiick\Access\Contracts\ActorResolver;
 use Qiick\Access\Contracts\GroupRoleSource;
 use Qiick\Access\Contracts\PermissionVocabulary;
 use Qiick\Access\Contracts\RoleCatalog;
@@ -74,11 +75,32 @@ final class EffectivePermissionResolver
     }
 
     /**
+     * Super-admin authority for the current actor, for use in product policies.
+     * A verified credential never inherits this authority from its owner.
+     * A bound user must match the policy's actor, as it must for Gate::before.
+     *
+     * @api
+     */
+    public function isActorSuperAdmin(?Authenticatable $actor): bool
+    {
+        if ($actor === null) {
+            return false;
+        }
+
+        $context = app(ActorResolver::class)->current();
+
+        return ! $context->isApiActor()
+            && ($context->user === null || $this->isSamePrincipal($context->user, $actor))
+            && $this->isSuperAdmin($actor);
+    }
+
+    /**
      * Super-admin is instance-level: the role assignment counts in whichever
      * team it was made, so a zero-organisation admin still matches (C30).
      * Only a global role (no team id on the role) counts: a team-local role
      * named super-admin, which an organisation admin may be able to create,
      * never mints an instance super-admin. Direct and instance-group roles.
+     * Use isActorSuperAdmin() when deciding the current actor's authority.
      */
     public function isSuperAdmin(Authenticatable $user): bool
     {

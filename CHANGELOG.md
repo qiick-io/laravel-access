@@ -8,6 +8,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+
+- Product policies can use `EffectivePermissionResolver::isActorSuperAdmin()`
+  to deny super-admin authority to API actors. `SuperAdminGuard` now applies
+  this check when protecting super-admin accounts. See `UPGRADING.md`.
+
 ## [0.1.0-beta.2] - 2026-11-26
 
 Fixes group roles, which counted for nobody in `0.1.0-beta.1`, and makes
