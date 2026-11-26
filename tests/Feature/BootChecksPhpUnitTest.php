@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use Illuminate\Contracts\Config\Repository as ConfigRepository;
+use Illuminate\Support\Facades\DB;
 use Qiick\Access\Contracts\ActorResolver;
 use Qiick\Access\Contracts\AuthorizationResponder;
 use Qiick\Access\Contracts\RoleCatalog;
@@ -160,4 +161,56 @@ it('fails when the replaced access.migrations.load switch is still configured', 
         ->and(fn () => $checks->assert())->toThrow(RuntimeException::class, 'access.migrations.load was replaced');
 
     $config->set('access.migrations', ['groups' => true, 'principals' => true]);
+});
+
+it('fails when a database connection reports a name other than its key', function (Closure $connectionConfig): void {
+    $checks = app(AccessBootChecks::class);
+    $config = app(ConfigRepository::class);
+    $checks->assertConnectionNamesMatchTheirKeys($config);
+    $defaultConnection = $config->get('database.default');
+
+    // Eloquent stamps a connection's reported name on the models it loads, and
+    // Laravel takes that name from these options (URL query options and the
+    // read/write/direct variants are merged over the base config), so a
+    // second database could pass its users off as the default's.
+    $config->set('database.connections.secondary', $connectionConfig($defaultConnection));
+
+    expect(fn () => $checks->assertConnectionNamesMatchTheirKeys($config))
+        ->toThrow(RuntimeException::class, "Database connection [secondary] reports the name [{$defaultConnection}]");
+
+    $config->set('database.connections.secondary', null);
+})->with([
+    'top-level name' => fn () => fn (string $name): array => ['driver' => 'sqlite', 'database' => '/tmp/tenant.sqlite', 'name' => $name],
+    'URL query option' => fn () => fn (string $name): array => ['url' => "sqlite:////tmp/tenant.sqlite?name={$name}"],
+    'URL string' => fn () => fn (string $name): string => "sqlite:////tmp/tenant.sqlite?name={$name}",
+    'read endpoint of another database' => fn () => fn (string $name): array => ['driver' => 'sqlite', 'name' => $name, 'read' => ['database' => '/tmp/tenant.sqlite'], 'write' => ['database' => '/tmp/central.sqlite']],
+    'read variant name' => fn () => fn (string $name): array => ['driver' => 'sqlite', 'database' => '/tmp/tenant.sqlite', 'read' => ['name' => $name], 'write' => []],
+    'writer name' => fn () => fn (string $name): array => ['driver' => 'sqlite', 'database' => '/tmp/tenant.sqlite', 'read' => [], 'write' => ['name' => $name]],
+    'one of several writers' => fn () => fn (string $name): array => ['driver' => 'sqlite', 'database' => '/tmp/tenant.sqlite', 'read' => [], 'write' => [['host' => 'a'], ['host' => 'b', 'name' => $name]]],
+    'direct endpoint' => fn () => fn (string $name): array => ['driver' => 'pgsql', 'database' => 'tenant', 'direct' => ['name' => $name]],
+]);
+
+it('accepts connections that report their own key, including writer and replica lists', function (): void {
+    $checks = app(AccessBootChecks::class);
+    $config = app(ConfigRepository::class);
+    $database = tempnam(sys_get_temp_dir(), 'access-shared-');
+    $config->set('database.connections.failover', [
+        'driver' => 'sqlite',
+        'database' => $database,
+        'prefix' => '',
+        'name' => 'failover',
+        'read' => [['host' => 'replica-a'], ['host' => 'replica-b']],
+        'write' => [['host' => 'writer-a'], ['host' => 'writer-b', 'name' => 'failover']],
+    ]);
+    $config->set('database.connections.url', "sqlite:///{$database}?name=url");
+
+    $checks->assertConnectionNamesMatchTheirKeys($config);
+
+    // Two writers of one dataset on different hosts are a supported shape.
+    expect(DB::connection('failover')->select('select 1 as one'))->toHaveCount(1);
+
+    DB::purge('failover');
+    $config->set('database.connections.failover', null);
+    $config->set('database.connections.url', null);
+    unlink($database);
 });

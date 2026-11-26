@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use Illuminate\Auth\GenericUser;
 use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\DB;
@@ -412,43 +413,35 @@ it('never reads the default connection memberships for a user of another databas
     config()->set('access.group_member_model', null);
 })->group('engines');
 
-it('never lets a second database pass for the default connection through its effective name', function (string $nameSource): void {
+it('gives group roles only to exactly the member model class on the default connection', function (): void {
     config()->set('auth.providers.users.model', SpatieUser::class);
-    $defaultConnection = config('database.default');
 
     $connection = app('db')->connection();
     $connection->table('user_groups')->insert(['id' => 1, 'public_id' => '11111111-1111-7111-8111-111111111111', 'name' => 'instance-admins', 'organisation_id' => null, 'is_instance' => true, 'deleted_at' => null]);
     $connection->table('user_group_user')->insert(['user_id' => 1, 'user_group_id' => 1, 'expires_at' => null]);
     $connection->table('user_group_role')->insert(['user_group_id' => 1, 'role_id' => 1]);
-
-    // A second real database whose effective name is the default's: Laravel
-    // merges URL query options and the writer's options over the raw config,
-    // and Eloquent stamps the effective name on the users it loads.
-    $tenantDatabase = tempnam(sys_get_temp_dir(), 'access-tenant-');
-    $pdo = new PDO("sqlite:{$tenantDatabase}");
-    $pdo->exec('CREATE TABLE users (id INTEGER PRIMARY KEY, email VARCHAR)');
-    $pdo->exec("INSERT INTO users (id, email) VALUES (1, 'tenant@example.com')");
-    config()->set('database.connections.tenant', $nameSource === 'url'
-        ? ['url' => "sqlite:///{$tenantDatabase}?name={$defaultConnection}", 'prefix' => '']
-        : ['driver' => 'sqlite', 'database' => $tenantDatabase, 'prefix' => '', 'read' => ['database' => $tenantDatabase], 'write' => ['name' => $defaultConnection]]);
     $source = app(GroupRoleSource::class);
 
-    try {
-        $tenantUser = SpatieUser::on('tenant')->find(1);
-    } catch (RuntimeException $exception) {
-        $tenantUser = null;
-        expect($exception->getMessage())->toContain("[{$defaultConnection}]");
-    }
+    $member = (new SpatieUser)->forceFill(['id' => 1]);
+    $sameTableSubclass = (new class extends SpatieUser {})->forceFill(['id' => 1]);
+    $onDefaultByName = (new SpatieUser)->setConnection(config('database.default'))->forceFill(['id' => 1]);
 
-    // Before the connection identity guard the loaded tenant user was the
-    // default connection's member 1 and got its instance roles.
-    expect($tenantUser === null ? [] : $source->instanceRoleIdsFor($tenantUser))->toBe([])
-        ->and(fn () => SpatieUser::on('tenant')->find(1))->toThrow(RuntimeException::class)
-        ->and($source->instanceRoleIdsFor(SpatieUser::query()->make()->forceFill(['id' => 1])))->toBe([1]);
+    expect($source->instanceRoleIdsFor($member))->toBe([1])
+        ->and($source->instanceRoleIdsFor($onDefaultByName))->toBe([1])
+        // A subclass is configured as the member model itself (STI products).
+        ->and($source->instanceRoleIdsFor($sameTableSubclass))->toBe([]);
 
-    DB::purge('tenant');
-    unlink($tenantDatabase);
-})->with([
-    'URL query option' => ['url'],
-    'writer option' => ['write'],
-])->group('engines');
+    config()->set('access.group_member_model', $sameTableSubclass::class);
+
+    expect($source->instanceRoleIdsFor($sameTableSubclass))->toBe([1])
+        ->and($source->instanceRoleIdsFor($member))->toBe([]);
+
+    // A non-Eloquent member (two database auth providers both return
+    // GenericUser) has no connection to compare, so it gets nothing.
+    config()->set('access.group_member_model', GenericUser::class);
+
+    expect($source->instanceRoleIdsFor(new GenericUser(['id' => 1])))->toBe([])
+        ->and($source->roleIdsFor(new GenericUser(['id' => 1])))->toBe([]);
+
+    config()->set('access.group_member_model', null);
+})->group('engines');
