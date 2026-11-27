@@ -90,13 +90,16 @@ final class AccessServiceProvider extends ServiceProvider
         });
 
         // Scoped: it holds the TeamContext, which a product may bind scoped (#66).
-        $this->app->scoped(GroupRoleSource::class, function (Application $app): GroupRoleSource {
+        // An alias, so the boot checks can tell the package default from a
+        // product binding without building the product's (binding drops it).
+        $this->app->scoped(EloquentGroupRoleSource::class, function (Application $app): EloquentGroupRoleSource {
             return new EloquentGroupRoleSource(
                 $app->make(DatabaseManager::class),
                 $app->make(TeamContext::class),
                 $app->make(ConfigRepository::class),
             );
         });
+        $this->app->alias(EloquentGroupRoleSource::class, GroupRoleSource::class);
 
         $this->app->singleton(PermissionVocabulary::class, function (Application $app): PermissionVocabulary {
             $config = $app->make(ConfigRepository::class);
@@ -167,6 +170,9 @@ final class AccessServiceProvider extends ServiceProvider
         $config = $this->app->make(ConfigRepository::class);
 
         $this->app->make(AccessBootChecks::class)->assert();
+        $this->app->booted(function (): void {
+            $this->app->make(AccessBootChecks::class)->assertGroupMemberModelOnTheGroupConnection($this->app->make(ConfigRepository::class));
+        });
 
         foreach (['groups', 'principals'] as $migrationSet) {
             if ($config->get("access.migrations.{$migrationSet}", true) === true) {
