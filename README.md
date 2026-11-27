@@ -60,6 +60,8 @@ Products must bind `RoleCatalog`, `TwoFactorPolicy`, `TwoFactorResponder` and
 | Stale permissions after demotion | `fresh` use-time checks, event and lifecycle clears, scoped resolver; AC6, AC11 |
 | Soft-deleted group still grants | SQL `whereNull(deleted_at)`; C7 |
 | Organisation bleed | Team id in the cache key; `switchTo()` clears; C29 |
+| A group grant written in the same request not counting yet, or a removed one still counting | The resolver caches per request (scoped binding, cleared between requests and jobs) and only Spatie's events clear it; after writing `user_group_user` or `user_group_role` the product calls `EffectivePermissionResolver::forget($user)` for each member it changed, or `flush()` for a group-wide change, before checking again in the same request or job |
+| Spatie's team filter seen off by another request | The resolver turns `PermissionRegistrar::$teams` off only while it builds one `roles()` relation, with no query in between, and restores it in `finally`; one process serves one request or job at a time (PHP-FPM, queue workers, Octane on Swoole, RoadRunner or FrankenPHP), and no coroutine can run in a window without I/O. A product `roles()` relation that queries while it is built, or a runtime that serves two requests at once in one process, falls outside this model |
 | Super-admin overriding a Policy | Step 3 abstains when a Policy exists; AC3 |
 | 2FA skipped | API actors exempt but get no Gate pass; exempt list minimal; AC10 |
 | Missing binding failing open | Boot check; AC12 |
