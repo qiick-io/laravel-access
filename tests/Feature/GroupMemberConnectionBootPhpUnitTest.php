@@ -7,8 +7,10 @@ namespace Qiick\Access\Tests\Feature;
 use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Foundation\Bootstrap\HandleExceptions;
+use LogicException;
 use Qiick\Access\Contracts\GroupRoleSource;
 use Qiick\Access\Tests\Support\ArchiveConnectionUser;
+use Qiick\Access\Tests\Support\OtherTableUser;
 use Qiick\Access\Tests\Support\PackageTestCase;
 use RuntimeException;
 
@@ -20,6 +22,11 @@ use RuntimeException;
 final class GroupMemberConnectionBootPhpUnitTest extends PackageTestCase
 {
     private bool $isOwnGroupRoleSourceBound = false;
+
+    private bool $isLazyGroupRoleSourceBound = false;
+
+    /** @var class-string|null */
+    private ?string $memberModel = null;
 
     protected function setUp(): void
     {
@@ -37,7 +44,12 @@ final class GroupMemberConnectionBootPhpUnitTest extends PackageTestCase
     {
         parent::defineEnvironment($app);
         $app['config']->set('database.connections.archive', ['driver' => 'sqlite', 'database' => ':memory:']);
-        $app['config']->set('access.group_member_model', ArchiveConnectionUser::class);
+        $app['config']->set('access.group_member_model', $this->memberModel ?? ArchiveConnectionUser::class);
+
+        if ($this->isLazyGroupRoleSourceBound) {
+            // A product factory that needs a request or tenant context.
+            $app->bind(GroupRoleSource::class, static fn (): never => throw new LogicException('Resolved at boot.'));
+        }
 
         if ($this->isOwnGroupRoleSourceBound) {
             $app->instance(GroupRoleSource::class, new class implements GroupRoleSource
@@ -77,5 +89,26 @@ final class GroupMemberConnectionBootPhpUnitTest extends PackageTestCase
         parent::setUp();
 
         $this->assertTrue($this->app->isBooted());
+    }
+
+    public function test_a_product_group_role_source_is_not_built_at_boot(): void
+    {
+        $this->isLazyGroupRoleSourceBound = true;
+        parent::setUp();
+
+        $this->assertTrue($this->app->isBooted());
+    }
+
+    public function test_boot_fails_for_a_member_model_on_another_table_than_the_pivot(): void
+    {
+        $this->memberModel = OtherTableUser::class;
+
+        try {
+            parent::setUp();
+            $this->fail('Boot accepted a member model on another table than user_group_user.user_id.');
+        } catch (RuntimeException $exception) {
+            HandleExceptions::flushState($this);
+            $this->assertStringContainsString('uses the table [admins]', $exception->getMessage());
+        }
     }
 }

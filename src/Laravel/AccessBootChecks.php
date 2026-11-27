@@ -69,7 +69,9 @@ final class AccessBootChecks
             return;
         }
 
-        if (! $this->app->make(GroupRoleSource::class) instanceof EloquentGroupRoleSource) {
+        // The alias stays only while nothing rebinds GroupRoleSource; a
+        // product factory is never built here (it may need a request).
+        if (! $this->app->isAlias(GroupRoleSource::class) || $this->app->getAlias(GroupRoleSource::class) !== EloquentGroupRoleSource::class) {
             return;
         }
 
@@ -81,6 +83,15 @@ final class AccessBootChecks
 
             throw new RuntimeException(
                 "{$key} [{$memberModel}] uses the connection [{$shownConnectionName}], but the group tables are read from the default connection; group members must use the default connection (see docs/adoption.md).",
+            );
+        }
+
+        // Same connection, other table: a member id would name another account.
+        $memberTable = (new $memberModel)->getTable();
+
+        if ($memberTable !== MigrationSettings::usersTable()) {
+            throw new RuntimeException(
+                "{$key} [{$memberModel}] uses the table [{$memberTable}], but user_group_user.user_id points at [".MigrationSettings::usersTable().']; set access.users_table or the member model to the same table (see docs/adoption.md).',
             );
         }
     }
