@@ -2,14 +2,15 @@
 
 declare(strict_types=1);
 
+use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Database\Eloquent\Model;
-use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\QueryException;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
 use Qiick\Access\Contracts\GroupRoleSource;
+use Qiick\Access\Contracts\ListsAllGroupRoles;
 use Qiick\Access\Contracts\TeamContext;
 use Qiick\Access\EffectivePermissionResolver;
 use Qiick\Access\Laravel\NoTeamContext;
@@ -20,6 +21,7 @@ use Qiick\Access\Principals\PrincipalCeiling;
 use Qiick\Access\Principals\PrincipalDirectory;
 use Qiick\Access\Tests\Support\FakePermissionEnum;
 use Qiick\Access\Tests\Support\SpatieUser;
+use Qiick\Access\Tests\Support\UuidTeamPermissionMigration;
 use Spatie\Permission\Models\Permission;
 use Spatie\Permission\Models\Role;
 use Spatie\Permission\PermissionRegistrar;
@@ -27,8 +29,8 @@ use Spatie\Permission\PermissionRegistrar;
 /*
  * The owner ceiling behind an API key (design §15.4): the principal is active,
  * its nearest `user` principal up the owner chain, in the same organisation,
- * actually holds the permission in that organisation (read fresh, never through
- * super-admin). Services without a user owner and instance principals have an
+ * actually holds the permission in that organisation, or is an instance
+ * super-admin and the permission is in the vocabulary (read fresh). Services without a user owner and instance principals have an
  * empty ceiling: their powers come from the product's scopes only.
  */
 
@@ -50,7 +52,7 @@ beforeEach(function (): void {
         $table->string('email')->nullable();
     });
 
-    uuidTeamPermissionTables()->up();
+    UuidTeamPermissionMigration::make()->up();
     (require dirname(__DIR__, 3).'/database/migrations/principals/2026_11_24_100000_create_principals_table.php')->up();
 
     (new ReflectionProperty(Model::class, 'guardableColumns'))->setValue(null, []);
@@ -58,7 +60,9 @@ beforeEach(function (): void {
     $registrar->teams = true;
     $registrar->forgetCachedPermissions();
 
-    $groupRoles = Mockery::mock(GroupRoleSource::class);
+    $groupRoles = Mockery::mock(GroupRoleSource::class, ListsAllGroupRoles::class);
+    // Every group of the user: here the current-team and instance ones.
+    $groupRoles->shouldReceive('allRoleIdsFor')->andReturnUsing(fn (Authenticatable $user): array => [...$groupRoles->roleIdsFor($user), ...$groupRoles->instanceRoleIdsFor($user)]);
     $groupRoles->shouldReceive('instanceRoleIdsFor')->andReturn([]);
     $groupRoles->shouldReceive('roleIdsFor')->andReturn([]);
     $this->app->instance(GroupRoleSource::class, $groupRoles);
@@ -100,19 +104,6 @@ function editorIn(string $organisationId, string $email = 'editor@example.com'):
     $registrar->setPermissionsTeamId($previousTeamId);
 
     return $user;
-}
-
-/**
- * Spatie's tables with uuid team columns, as the fleet schema requires (A3):
- * the stock stub declares bigint team ids, which real engines refuse for uuids.
- */
-function uuidTeamPermissionTables(): Migration
-{
-    $stub = (string) file_get_contents(dirname(__DIR__, 3).'/vendor/spatie/laravel-permission/database/migrations/create_permission_tables.php.stub');
-    $path = sys_get_temp_dir().'/qiick-access-uuid-team-permission-tables-'.md5($stub).'.php';
-    file_put_contents($path, str_replace("\$table->unsignedBigInteger(\$columnNames['team_foreign_key'])", "\$table->uuid(\$columnNames['team_foreign_key'])", $stub));
-
-    return require $path;
 }
 
 function ceiling(): PrincipalCeiling
@@ -185,7 +176,11 @@ it('fails closed on an owner chain that crosses organisations or loops', functio
         ->and(ceiling()->allows($second->id, FakePermissionEnum::CanShowUsers->value))->toBeFalse();
 });
 
-it('never grants through the owner\'s super-admin role', function (): void {
+it('gives a super-admin owner the permission vocabulary, never more', function (): void {
+    // Decision 2026-11-26: a super-admin's key ceiling is every explicit
+    // permission; a permission only the super-admin role row carries is not one.
+    Permission::create(['name' => 'can-purge-everything', 'guard_name' => 'web']);
+    Role::findByName('super-admin')->givePermissionTo('can-purge-everything');
     $organisationId = (string) Str::uuid();
     $superAdmin = SpatieUser::query()->create(['email' => 'admin@example.com']);
     app(PermissionRegistrar::class)->setPermissionsTeamId($organisationId);
@@ -193,8 +188,14 @@ it('never grants through the owner\'s super-admin role', function (): void {
     app(PermissionRegistrar::class)->setPermissionsTeamId(null);
     $principal = principals()->forMember($superAdmin, $organisationId);
 
-    expect(app(EffectivePermissionResolver::class)->isSuperAdmin($superAdmin))->toBeTrue()
-        ->and(ceiling()->allows($principal->id, FakePermissionEnum::CanShowUsers->value))->toBeFalse();
+    expect(ceiling()->allows($principal->id, FakePermissionEnum::CanShowUsers->value))->toBeTrue()
+        ->and(ceiling()->allows($principal->id, FakePermissionEnum::CanEditUsers->value))->toBeTrue()
+        ->and(ceiling()->allows($principal->id, 'can-purge-everything'))->toBeFalse();
+
+    // A demotion that fires no Spatie event: the fresh read catches it.
+    DB::table('model_has_roles')->delete();
+
+    expect(ceiling()->allows($principal->id, FakePermissionEnum::CanShowUsers->value))->toBeFalse();
 });
 
 it('works without organisations, as in a single-tenant product', function (): void {

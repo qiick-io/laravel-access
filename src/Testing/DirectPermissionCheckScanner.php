@@ -8,6 +8,7 @@ use BackedEnum;
 use DateTimeImmutable;
 use InvalidArgumentException;
 use PhpToken;
+use Qiick\Access\Contracts\RoleCatalog;
 use RecursiveDirectoryIterator;
 use RecursiveIteratorIterator;
 use SplFileInfo;
@@ -20,9 +21,10 @@ use SplFileInfo;
  *   `denies`, `authorize`, `inspect`) may take a permission: Policies check
  *   permissions through the resolver (R5). An ability that cannot be read
  *   statically (a variable, a constant, a spread) and any dynamically named
- *   call fail too;
- * - outside Policies and the Inertia share, every direct `hasPermission()` /
- *   `hasAssignedPermission()` must be listed by site (`Class::method`, or the
+ *   call fail too. Role-only super-admin predicates and super-admin role
+ *   checks fail because policies must account for the verified actor;
+ * - outside Policies and the Inertia share, every direct `hasPermission()`,
+ *   `hasAssignedPermission()` or `isWithinOwnerCeiling()` must be listed by site (`Class::method`, or the
  *   file path outside classes) in `access.direct_checks` of
  *   qiick-standards.json, with a reason, a decision link and a `review_by`
  *   date that has not passed. A listed site with no check left fails, so the
@@ -48,6 +50,8 @@ final class DirectPermissionCheckScanner
 
     /** @var list<string> */
     private readonly array $permissionNames;
+
+    private readonly string $superAdminRoleName;
 
     private readonly DateTimeImmutable $today;
 
@@ -86,6 +90,7 @@ final class DirectPermissionCheckScanner
 
         $this->permissionEnumClass = strtolower(ltrim($permissionEnumClass, '\\'));
         $this->permissionNames = $permissionNames;
+        $this->superAdminRoleName = strtolower(trim(app(RoleCatalog::class)->superAdminRoleName()));
         $this->today = $today ?? new DateTimeImmutable('today');
         $this->inertiaShareSite = strtolower(ltrim($inertiaShareClass, '\\')).'::share';
     }
@@ -367,7 +372,10 @@ final class DirectPermissionCheckScanner
 
             $originalName = strtolower($tokens[$index - 1]->text);
             $aliasToken = ($tokens[$index + 1] ?? $token)->is([T_PUBLIC, T_PROTECTED, T_PRIVATE]) ? ($tokens[$index + 2] ?? $token) : ($tokens[$index + 1] ?? $token);
-            $isWatched = $this->isPolicyAbilityMethod($originalName) || $this->judgeDirectCheck($originalName, false) === null;
+            $isWatched = $this->isPolicyAbilityMethod($originalName)
+                || $this->isSuperAdminPredicate($originalName)
+                || $this->isRolePredicate($originalName)
+                || $this->judgeDirectCheck($originalName, false) === null;
 
             if ($isWatched && $aliasToken->is(T_STRING)) {
                 $aliases[strtolower($aliasToken->text)] = $originalName;
@@ -403,6 +411,10 @@ final class DirectPermissionCheckScanner
             $methodName = strtolower(substr($token->text, 1, -1));
             $methodName = $this->methodAliases[$methodName] ?? $methodName;
 
+            if ($isPolicy && ($this->isSuperAdminPredicate($methodName) || $this->isRolePredicate($methodName))) {
+                return "'{$methodName}' as a callable in a Policy cannot verify super-admin authority; use isActorSuperAdmin() (AC9).";
+            }
+
             return $this->isPolicyAbilityMethod($methodName) && $isPolicy
                 ? "'{$methodName}' as a callable in a Policy cannot be verified statically (AC9)."
                 : $this->judgeDirectCheck($methodName, $isPolicy);
@@ -427,6 +439,18 @@ final class DirectPermissionCheckScanner
         $methodName = strtolower($nameToken->text);
         $methodName = $this->methodAliases[$methodName] ?? $methodName;
 
+        if ($isPolicy) {
+            $isRoleCollectionCheck = in_array($methodName, ['contains', 'containsstrict'], true)
+                && ($tokens[$index - 1] ?? null)?->text === 'roles'
+                && ($tokens[$index - 2] ?? null)?->is([T_OBJECT_OPERATOR, T_NULLSAFE_OBJECT_OPERATOR]) === true;
+            $isRoleCheck = $this->isRolePredicate($methodName) || $methodName === 'role' || $isRoleCollectionCheck;
+
+            if ($this->isSuperAdminPredicate($methodName)
+                || ($isRoleCheck && $this->hasSuperAdminRoleArgument($this->argumentTokens($tokens, $openIndex, shouldReadAll: true)))) {
+                return "{$methodName}() with role-only super-admin authority in a Policy; use isActorSuperAdmin() or isProtectedFrom() (AC9).";
+            }
+        }
+
         if ($isPolicy && $token->is(T_DOUBLE_COLON) && $this->isGateFacade($tokens[$index - 1] ?? $token, $namespace, $imports)
             && ! $this->isPolicyAbilityMethod($methodName) && ! in_array($methodName, ['has', 'foruser', 'getpolicyfor'], true)) {
             return "Gate::{$methodName}() is not a known Gate method, so a macro cannot be verified statically in a Policy (AC9).";
@@ -436,7 +460,7 @@ final class DirectPermissionCheckScanner
             return $this->judgeDirectCheck($methodName, $isPolicy);
         }
 
-        $argument = $this->firstArgument($tokens, $openIndex);
+        $argument = $this->argumentTokens($tokens, $openIndex);
 
         foreach ($argument as $argumentIndex => $argumentToken) {
             if (($argument[$argumentIndex + 1] ?? null)?->text === '::'
@@ -454,9 +478,21 @@ final class DirectPermissionCheckScanner
             : false;
     }
 
-    private function judgeDirectCheck(string $methodName, bool $isPolicy): ?false
+    private function judgeDirectCheck(string $methodName, bool $isPolicy): string|false|null
     {
-        return in_array($methodName, ['haspermission', 'hasassignedpermission'], true) && ! $isPolicy ? null : false;
+        if (! in_array($methodName, ['haspermission', 'hasassignedpermission', 'iswithinownerceiling'], true)) {
+            return false;
+        }
+
+        if (! $isPolicy) {
+            return null;
+        }
+
+        // The owner ceiling ignores the credential's scopes: a Policy using it
+        // would let a key act beyond them (review of PR #58).
+        return $methodName === 'iswithinownerceiling'
+            ? 'isWithinOwnerCeiling() in a Policy ignores the credential scopes; check permissions through hasPermission() (AC9).'
+            : false;
     }
 
     /**
@@ -471,6 +507,52 @@ final class DirectPermissionCheckScanner
     private function isPolicyAbilityMethod(string $methodName): bool
     {
         return in_array($methodName, ['can', 'cannot', 'cant', 'canany', 'allows', 'denies', 'authorize', 'inspect'], true);
+    }
+
+    private function isSuperAdminPredicate(string $methodName): bool
+    {
+        return in_array($methodName, ['issuperadmin', 'isdirectsuperadmin'], true);
+    }
+
+    private function isRolePredicate(string $methodName): bool
+    {
+        return in_array($methodName, ['hasrole', 'hasanyrole', 'hasallroles', 'hasexactroles'], true);
+    }
+
+    /** @param list<PhpToken> $arguments */
+    private function hasSuperAdminRoleArgument(array $arguments): bool
+    {
+        if (count($arguments) === 1 && $arguments[0]->is(T_ELLIPSIS)) {
+            return true;
+        }
+
+        foreach ($arguments as $index => $token) {
+            if ($token->is(T_CONSTANT_ENCAPSED_STRING)) {
+                $roleNames = array_map(trim(...), explode('|', strtolower(substr($token->text, 1, -1))));
+
+                if (in_array($this->superAdminRoleName, $roleNames, true)) {
+                    return true;
+                }
+            }
+
+            if (! $token->is(T_STRING)) {
+                continue;
+            }
+
+            $symbol = strtolower($token->text);
+            $previousToken = $arguments[$index - 1] ?? null;
+
+            if ($previousToken?->is(T_DOUBLE_COLON) === true && str_replace('_', '', $symbol) === 'superadmin') {
+                return true;
+            }
+
+            if ($symbol === 'superadminrolename' && ($arguments[$index + 1] ?? null)?->text === '('
+                && $previousToken?->is([T_OBJECT_OPERATOR, T_NULLSAFE_OBJECT_OPERATOR, T_DOUBLE_COLON]) === true) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**
@@ -512,13 +594,13 @@ final class DirectPermissionCheckScanner
     }
 
     /**
-     * Tokens of the first argument after `(` at $openIndex, without a
-     * named-argument label.
+     * Read call arguments after `(` at $openIndex. The default returns only
+     * the first argument, without a named-argument label.
      *
      * @param  list<PhpToken>  $tokens
      * @return list<PhpToken>
      */
-    private function firstArgument(array $tokens, int $openIndex): array
+    private function argumentTokens(array $tokens, int $openIndex, bool $shouldReadAll = false): array
     {
         $argument = [];
         $nesting = 0;
@@ -528,14 +610,14 @@ final class DirectPermissionCheckScanner
                 $nesting++;
             } elseif (in_array($token->text, [')', ']', '}'], true) && $nesting-- === 0) {
                 break;
-            } elseif ($token->text === ',' && $nesting === 0) {
+            } elseif ($token->text === ',' && $nesting === 0 && ! $shouldReadAll) {
                 break;
             }
 
             $argument[] = $token;
         }
 
-        return ($argument[1]->text ?? '') === ':' ? array_slice($argument, 2) : $argument;
+        return ! $shouldReadAll && ($argument[1]->text ?? '') === ':' ? array_slice($argument, 2) : $argument;
     }
 
     /**

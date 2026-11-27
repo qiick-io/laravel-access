@@ -8,11 +8,14 @@ use Closure;
 use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Contracts\Config\Repository as ConfigRepository;
 use Illuminate\Contracts\Events\Dispatcher;
+use Illuminate\Database\Connection;
 use Illuminate\Database\DatabaseManager;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use InvalidArgumentException;
 use LogicException;
+use Qiick\Access\Events\PrincipalCreatedEvent;
+use Qiick\Access\Events\PrincipalDeactivatedEvent;
 use Qiick\Access\Laravel\MigrationSettings;
 
 /**
@@ -117,26 +120,57 @@ final class EloquentPrincipalDirectory implements PrincipalDirectory
         return $this->announceIfCreated($principal);
     }
 
+    public function markErased(Principal $principal): void
+    {
+        $this->deactivatePrincipal($principal, DeactivationReason::Erased, shouldMarkErased: true);
+    }
+
     public function deactivate(Principal $principal, DeactivationReason $reason): void
+    {
+        $this->deactivatePrincipal($principal, $reason, shouldMarkErased: false);
+    }
+
+    /** Apply the state transition and ownership cascade on the same connection. */
+    private function deactivatePrincipal(Principal $principal, DeactivationReason $reason, bool $shouldMarkErased): void
     {
         // On the principal model's connection, so the cascade is atomic where
         // the rows live, not on the default connection.
-        $ownedIds = $this->database->connection($this->query()->getModel()->getConnectionName())->transaction(function () use ($principal, $reason): array {
-            // An already deactivated principal keeps its reason and time, so an
-            // erased tombstone is never rewritten (review B3).
-            $this->query()->whereKey($principal->id)->whereNull('deactivated_at')
-                ->update(['deactivated_at' => now(), 'deactivation_reason' => $reason->value]);
+        $ownedIds = $this->database->connection($this->query()->getModel()->getConnectionName())->transaction(function () use ($principal, $reason, $shouldMarkErased): array {
+            $principalQuery = $this->query()->whereKey($principal->id);
+            $deactivatedAt = null;
+
+            if ($shouldMarkErased) {
+                // Lock against reactivation while reading the original cutoff.
+                $storedPrincipal = (clone $principalQuery)->lockForUpdate()->firstOrFail();
+
+                if ($storedPrincipal->type !== 'user') {
+                    throw new InvalidArgumentException('markErased() requires a principal of type [user].');
+                }
+
+                $deactivatedAt = $storedPrincipal->deactivated_at;
+                $principalQuery->where(function (Builder $query): void {
+                    $query->whereNull('deactivation_reason')->orWhere('deactivation_reason', '!=', DeactivationReason::Erased->value);
+                });
+            } else {
+                $principalQuery->whereNull('deactivated_at');
+            }
+
+            $principalQuery->update(['deactivated_at' => $deactivatedAt ?? now(), 'deactivation_reason' => $reason->value]);
 
             return $this->deactivateOwned($principal->id);
         });
 
-        $this->events->dispatch(new PrincipalDeactivated($principal->refresh(), $reason, $ownedIds));
+        $this->events->dispatch(new PrincipalDeactivatedEvent($principal->refresh(), $reason, $ownedIds));
     }
 
     public function eraseUser(Authenticatable $user, Closure $deleteUser): void
     {
-        $principalModel = $this->query()->getModel();
-        $connection = $this->database->connection($principalModel->getConnectionName());
+        $connection = $this->erasureConnection();
+        $userId = $user->getAuthIdentifier();
+
+        if (! is_int($userId) && ! is_string($userId)) {
+            throw new InvalidArgumentException('A persisted user is required for erasure.');
+        }
 
         // The user delete waits on the principal rows this transaction locks:
         // on a second connection it would wait for itself (review R5).
@@ -144,20 +178,12 @@ final class EloquentPrincipalDirectory implements PrincipalDirectory
             throw new LogicException('eraseUser() needs the users model and the principal model on one database connection.');
         }
 
-        $erased = $connection->transaction(function () use ($connection, $user, $deleteUser): array {
+        $erased = $connection->transaction(function () use ($connection, $user, $userId, $deleteUser): array {
             $erased = [];
 
-            foreach ($this->query()->where('user_id', $user->getAuthIdentifier())->lockForUpdate()->get() as $principal) {
-                $isErasedAlready = $principal->deactivation_reason === DeactivationReason::Erased;
-                $principal->forceFill([
-                    'user_id' => null,
-                    'name' => 'Erased user',
-                    'deactivated_at' => $isErasedAlready ? $principal->deactivated_at : now(),
-                    'deactivation_reason' => DeactivationReason::Erased,
-                ])->save();
-
-                $erased[] = [$principal, $this->deactivateOwned($principal->id)];
-            }
+            $this->erasePrincipals($userId, [], null, false, static function (Principal $principal, array $ownedIds) use (&$erased): void {
+                $erased[] = [$principal, $ownedIds];
+            });
 
             $deleteUser($user);
 
@@ -165,7 +191,7 @@ final class EloquentPrincipalDirectory implements PrincipalDirectory
             // place behind an "erased" audit trail, and a restore would let
             // forMember() mint a fresh principal past the tombstone (C17).
             // The raw query ignores soft-delete scopes.
-            if ($connection->table(MigrationSettings::usersTable())->where((new (MigrationSettings::userModel()))->getKeyName(), $user->getAuthIdentifier())->exists()) {
+            if ($connection->table(MigrationSettings::usersTable())->where((new (MigrationSettings::userModel()))->getKeyName(), $userId)->exists()) {
                 throw new LogicException('The user row still exists after the erasure callback; erasure needs a hard delete (forceDelete() on a soft-deleting model).');
             }
 
@@ -173,8 +199,104 @@ final class EloquentPrincipalDirectory implements PrincipalDirectory
         });
 
         foreach ($erased as [$principal, $ownedIds]) {
-            $this->events->dispatch(new PrincipalDeactivated($principal, DeactivationReason::Erased, $ownedIds));
+            $this->events->dispatch(new PrincipalDeactivatedEvent($principal, DeactivationReason::Erased, $ownedIds));
         }
+    }
+
+    /** @internal The fleet eraser shares the directory's configured model and transaction. */
+    public function erasureConnection(): Connection
+    {
+        return $this->database->connection($this->query()->getModel()->getConnectionName());
+    }
+
+    /**
+     * Scrubs principal data while retaining its UUID for the audit and credential foreign keys.
+     * Call within the transaction that owns the erasure. The callback supports the legacy
+     * directory event and is never supplied by the fleet eraser.
+     *
+     * @internal
+     *
+     * @param  list<string>  $publicIds
+     * @param  (Closure(Principal, list<string>): void)|null  $onErased
+     * @return array{anonymised: int, tombstones: int}
+     */
+    public function erasePrincipals(int|string $userId, array $publicIds, ?string $organisationId, bool $isDryRun, ?Closure $onErased = null): array
+    {
+        $principals = $this->query()
+            ->when($organisationId !== null, fn (Builder $query) => $query->where('organisation_id', $organisationId))
+            ->where(fn (Builder $query) => $query->where('user_id', $userId)->orWhereIn('id', $publicIds))
+            ->orderBy('id')->lockForUpdate()->get();
+        $principalIds = $principals->modelKeys();
+        $ownedIdsByPrincipal = [];
+        $anonymised = 0;
+
+        foreach ($principals as $principal) {
+            $ownedIdsByPrincipal[$principal->id] = $this->ownedIds($principal->id, $organisationId);
+        }
+
+        foreach ($principals as $principal) {
+            if (! $this->scrubPrincipal($principal, $userId, DeactivationReason::Erased, $isDryRun)) {
+                continue;
+            }
+
+            $anonymised++;
+
+            if (! $isDryRun) {
+                $onErased?->__invoke($principal, $ownedIdsByPrincipal[$principal->id]);
+            }
+        }
+
+        // The ownership links identify the erased person. Scrub the entire subtree
+        // in this transaction so retries need no copy of the old owner graph.
+        $ownedIds = array_merge(...array_values($ownedIdsByPrincipal));
+        $ownedPrincipals = $this->query()->whereIn('id', array_diff($ownedIds, $principalIds))
+            ->orderBy('id')->lockForUpdate()->get();
+
+        foreach ($ownedPrincipals as $principal) {
+            if ($this->scrubPrincipal($principal, $userId, DeactivationReason::OwnerDeactivated, $isDryRun)) {
+                $anonymised++;
+            }
+        }
+
+        // The person may have created principals they do not own. Preserve those
+        // accounts and explicitly unlink their creator before the user is deleted.
+        $creatorReferences = $this->query()->where('created_by', $userId)
+            ->when($organisationId !== null, fn (Builder $query) => $query->where('organisation_id', $organisationId))
+            ->whereNotIn('id', [...$principalIds, ...$ownedIds]);
+        $anonymised += $isDryRun ? $creatorReferences->count() : $creatorReferences->toBase()->update(['created_by' => null]);
+
+        return ['anonymised' => $anonymised, 'tombstones' => $principals->count()];
+    }
+
+    /** Writes a tombstone without model events that could expose the original fields. */
+    private function scrubPrincipal(Principal $principal, int|string $userId, DeactivationReason $reason, bool $isDryRun): bool
+    {
+        $isSubject = $reason === DeactivationReason::Erased;
+        $principal->forceFill([
+            'owner_principal_id' => null,
+            'name' => $isSubject ? 'Erased user' : 'Erased owner',
+            'metadata' => null,
+            'deactivated_at' => $principal->deactivated_at ?? now(),
+            'deactivation_reason' => $isSubject ? $reason : ($principal->deactivation_reason ?? $reason),
+        ]);
+
+        if ($isSubject) {
+            $principal->user_id = null;
+        }
+
+        if ((string) $principal->created_by === (string) $userId) {
+            $principal->created_by = null;
+        }
+
+        if (! $principal->isDirty()) {
+            return false;
+        }
+
+        if (! $isDryRun) {
+            $principal->saveQuietly();
+        }
+
+        return true;
     }
 
     public function isActive(string $principalId): bool
@@ -304,14 +426,16 @@ final class EloquentPrincipalDirectory implements PrincipalDirectory
      *
      * @return list<string>
      */
-    private function ownedIds(string $principalId): array
+    private function ownedIds(string $principalId, ?string $organisationId = null): array
     {
         $ownedIds = [];
         $frontier = [$principalId];
 
         while ($frontier !== []) {
             $children = array_values(array_filter(
-                $this->query()->whereIn('owner_principal_id', $frontier)->orderBy('created_at')->orderBy('id')->pluck('id')->all(),
+                $this->query()->whereIn('owner_principal_id', $frontier)
+                    ->when($organisationId !== null, fn (Builder $query) => $query->where('organisation_id', $organisationId))
+                    ->orderBy('created_at')->orderBy('id')->pluck('id')->all(),
                 'is_string',
             ));
             $frontier = array_values(array_diff($children, $ownedIds, [$principalId]));
@@ -324,7 +448,7 @@ final class EloquentPrincipalDirectory implements PrincipalDirectory
     private function announceIfCreated(Principal $principal): Principal
     {
         if ($principal->wasRecentlyCreated) {
-            $this->events->dispatch(new PrincipalCreated($principal));
+            $this->events->dispatch(new PrincipalCreatedEvent($principal));
         }
 
         return $principal;

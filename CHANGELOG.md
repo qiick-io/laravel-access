@@ -8,6 +8,109 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.0-beta.3] - 2026-11-27
+
+The 1.0 release-candidate groundwork: the frozen public API inventory and
+security checklist, the exclusive super-admin rule on read and write, Octane
+request isolation, `access:check`, nested config defaults and the shared CI
+gates. Public APIs may still change in any 0.x minor. Migrations are
+unchanged since `0.1.0-beta.2`.
+
+### Upgrade notes
+
+Behaviour changes that can affect a product (details in `UPGRADING.md`):
+
+- A holder of super-admin and any other role gets no super-admin bypass:
+  clean up mixed accounts (`php artisan access:check` lists them) and route
+  role and group writes through `ExclusiveSuperAdmin::write()`.
+- The principal events are renamed to `Events\PrincipalCreatedEvent` and
+  `Events\PrincipalDeactivatedEvent`.
+- Boot refuses an invalid `access.*` value, an explicitly null section, a
+  group member model that is no class, on another connection or on another
+  table than the group pivot.
+- `GateBefore` takes no constructor argument.
+- The erasure orchestrator revokes credentials itself.
+
+### CI
+
+- The shared app-ui package matrix (PHP 8.3–8.5 × Laravel 12/13 ×
+  lowest/stable; PostgreSQL 17, MySQL 8.4, MariaDB 11.4) replaces the local
+  one; MariaDB 10.11 leaves the matrix. Mutation covers every class in
+  `src/` at ≥ 95% per class, the erasure suite has its own job, and a
+  nightly run audits dependencies and opens an issue when it fails.
+
+### Added
+
+- A published `config/access.php` missing a nested key takes the package
+  default for it (F1); lists stay the product's own. A present but invalid
+  `access.*` value stops the boot with the key in the message
+  (`AccessBootChecks::assertConfigValues()`).
+- `php artisan access:check` (F2) for the deploy pipeline and the product's
+  `<app>:upgrade`: runs the boot checks, builds the permission resolver and
+  checks that the default database answers and has the Spatie and package
+  tables; one line per problem, exit 1 on any.
+- `EffectivePermissionResolver::isWithinOwnerCeiling()`: the owner ceiling
+  behind an API key. A super-admin alone can now issue working keys: their
+  ceiling is every permission of the vocabulary, never the Gate bypass
+  (decision `docs/decisions/2026-11-26-super-admin-key-ceiling.md`).
+- `Rules\ExclusiveSuperAdminRoleRule` rejects super-admin combined with any
+  other role on a user's role list; other roles combine freely.
+- Super-admin is exclusive on read and on write (Excubia #474): a holder of
+  super-admin and another role (any team, direct or group) gets no bypass
+  and `SuperAdminBypassWithheldEvent` is dispatched;
+  `ExclusiveSuperAdmin::write()` runs a role or group write atomically and
+  rolls it back when it breaks the rule;
+  `EffectivePermissionResolver::holdsMixedSuperAdmin()` and the optional
+  `Contracts\ListsAllGroupRoles` read every team.
+- `PrincipalDirectory::markErased()` lets product soft-delete flows write a
+  permanent membership tombstone for a principal of type `user`. Custom
+  directory implementations must add the new interface method.
+
+### Deprecated
+
+- `PrincipalDirectory::eraseUser()`, removed in 2.0.0: products delete users
+  only through their erasure orchestrator, which runs `Erasure\AccessEraser`.
+
+### Changed
+
+- `docs/public-api.md` is the frozen 1.0 inventory (classes, config keys,
+  environment variables, commands, events, tables, frozen behaviour and the
+  deprecation policy, moved from `UPGRADING.md`), checked by
+  `tests/Arch/PublicApiTest.php`; `docs/security-checklist.md` maps every
+  numbered security property to its test (F12).
+- **Breaking:** `Principals\PrincipalCreated` and
+  `Principals\PrincipalDeactivated` are now `Events\PrincipalCreatedEvent`
+  and `Events\PrincipalDeactivatedEvent` (fleet convention F5). Same
+  properties and dispatch rules.
+
+### Security
+
+- `SuperAdminGuard` is bound scoped, like the resolver it holds. As a
+  singleton it kept the first scope's resolver in an Octane worker or a
+  queue worker, so a cached super-admin verdict could outlive a demotion in
+  `isProtectedFrom()` and `canManageSuperAdmins()`.
+- Boot fails when the group member model (`access.group_member_model`, else
+  `auth.providers.users.model`) uses a connection other than the default
+  one, where the group tables are read. Before, every group silently
+  granted nothing to its members.
+- Under Octane, `GateBefore` and the package's listeners use the container
+  of the current request, so a role change or `forget()` reaches the
+  resolver the request reads (#69). `GateBefore` takes no constructor
+  argument any more.
+- Product policies can use `EffectivePermissionResolver::isActorSuperAdmin()`
+  to deny super-admin authority to API actors. `SuperAdminGuard` now applies
+  this check when protecting super-admin accounts. See `UPGRADING.md`.
+- The AC9 scanner reports role-only super-admin checks in policies.
+- `EnsureUserHasPermission`, `AuthorizesWithPermission` and
+  `PrincipalCeiling::allows()` now give an API key owned by a super-admin
+  the vocabulary within its scopes (before: nothing), for every API actor
+  with an owner. The Gate bypass and any permission outside the vocabulary
+  stay out for a super-admin owner, even one assigned to them; a demoted owner's keys lose the grant on the next
+  request. The AC9 scanner watches `isWithinOwnerCeiling()` too and rejects
+  it in Policies, where it would ignore the credential's scopes.
+  `ExclusiveSuperAdminRoleRule` compares names case-insensitively and
+  rejects entries that are not role names.
+
 ## [0.1.0-beta.2] - 2026-11-26
 
 Fixes group roles, which counted for nobody in `0.1.0-beta.1`, and makes
@@ -330,6 +433,7 @@ first-install requirements (details in `docs/adoption.md` and `UPGRADING.md`):
   `composer.json` `require` entry with constraint rationale, usage,
   maintainer, license, known risk and an in-package exit plan.
 
-[Unreleased]: https://github.com/qiick-io/laravel-access/compare/v0.1.0-beta.2...HEAD
+[Unreleased]: https://github.com/qiick-io/laravel-access/compare/v0.1.0-beta.3...HEAD
+[0.1.0-beta.3]: https://github.com/qiick-io/laravel-access/compare/v0.1.0-beta.2...v0.1.0-beta.3
 [0.1.0-beta.2]: https://github.com/qiick-io/laravel-access/compare/v0.1.0-beta.1...v0.1.0-beta.2
 [0.1.0-beta.1]: https://github.com/qiick-io/laravel-access/releases/tag/v0.1.0-beta.1

@@ -36,12 +36,14 @@ final class SuperAdminGuard
 
     public function canManageSuperAdmins(?Authenticatable $actor): bool
     {
-        return $actor !== null && $this->resolver->isSuperAdmin($actor);
+        return $this->resolver->isActorSuperAdmin($actor);
     }
 
     public function isProtectedFrom(?Authenticatable $actor, Authenticatable $target): bool
     {
-        return ! $this->canManageSuperAdmins($actor) && $this->resolver->isSuperAdmin($target);
+        // The assignment, not the bypass: a mixed holder whose bypass is
+        // withheld stays out of an ordinary admin's reach.
+        return ! $this->canManageSuperAdmins($actor) && $this->resolver->holdsSuperAdminRole($target);
     }
 
     /**

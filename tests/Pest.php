@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use Qiick\Access\Tests\Support\ErasureTestCase;
 use Qiick\Access\Tests\Support\PackageTestCase;
 
 /*
@@ -10,3 +11,4 @@ use Qiick\Access\Tests\Support\PackageTestCase;
  * synced suite stays for drift-check without running here.
  */
 pest()->extend(PackageTestCase::class)->in('Feature', 'Unit', 'Http');
+pest()->extend(ErasureTestCase::class)->in('Erasure');

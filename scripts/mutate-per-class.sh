@@ -1,179 +1,131 @@
 #!/usr/bin/env bash
-# Enforce pest --mutate --min=95 per design §11 class (no --covered-only).
-# One invocation per class so a weak class cannot hide behind a high overall score.
-# Pest's --class is a prefix match and --ignore takes comma-separated filesystem
-# paths (repeated --ignore flags keep only the last), so we ignore every other
-# target file when mutating one class.
-# Never `|| true`.
+# Per-class mutation gate (1.0 checklist item 3): every class in src/ scores
+# at least 95% on its own, so a weak class cannot hide behind a high overall
+# score. No --covered-only, never `|| true`.
+#
+# MUTATE_SCOPE=all (push, nightly) mutates every file in src/, the test
+# helpers in src/Testing/ included: products run them as conformance checks.
+# MUTATE_SCOPE=changed (pull requests) mutates the files in MUTATE_CLASSES,
+# the JSON list the shared package matrix exports. MUTATE_SHARD of
+# MUTATE_SHARDS splits the files across parallel jobs.
+#
+# Only the files listed in DECLARATION_ONLY_FILES (interfaces, plain enums,
+# data-only events and exceptions) may yield no mutation; any other file
+# with no mutation fails, so a class cannot escape the gate by accident.
+# On a pull request the shared plan leaves src/Testing/ out; MUTATE_DIFF_BASE
+# (the base commit) adds the test helpers the pull request changed.
 set -euo pipefail
 
-ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-cd "$ROOT"
+cd "$(dirname "$0")/.."
 
-# Parallel arrays: class FQCN and its source file.
-# Populated as feature PRs land (design §11 mutation targets).
-CLASSES=(
-  'Qiick\Access\Contracts\ActorContext'
-  'Qiick\Access\Laravel\AccessContext'
-  'Qiick\Access\Laravel\ContainerActorResolver'
-  'Qiick\Access\Laravel\CarriesActorContext'
-  'Qiick\Access\Laravel\ActorPayloadStamper'
-  'Qiick\Access\Laravel\NoTeamContext'
-  'Qiick\Access\Laravel\SpatiePermissionVocabulary'
-  'Qiick\Access\Laravel\EloquentGroupRoleSource'
-  'Qiick\Access\Laravel\SpatieTeamContext'
-  'Qiick\Access\Laravel\SpatieTeamQueueBoundary'
-  'Qiick\Access\Testing\AssertsSpatieTeamSchema'
-  'Qiick\Access\GateBefore'
-  'Qiick\Access\EffectivePermissionResolver'
-  'Qiick\Access\Laravel\AccessBootChecks'
-  'Qiick\Access\Laravel\GateBeforeSelector'
-  'Qiick\Access\Http\EnsureTwoFactorIsEnabled'
-  'Qiick\Access\SuperAdminGuard'
-  'Qiick\Access\Laravel\ReservedRoleNameGuard'
-  'Qiick\Access\Http\EnsureUserHasPermission'
-  'Qiick\Access\Http\Concerns\AuthorizesWithPermission'
-  'Qiick\Access\Testing\ProbeAbility'
-  'Qiick\Access\Testing\DirectPermissionCheckScanner'
-  'Qiick\Access\Laravel\MigrationSettings'
-  'Qiick\Access\Laravel\AccessSchema'
-  'Qiick\Access\Principals\EloquentPrincipalDirectory'
-  'Qiick\Access\Principals\Principal'
-  'Qiick\Access\Principals\UserDeletionGuard'
-  'Qiick\Access\Testing\AssertsPrincipalsSchema'
-  'Qiick\Access\Testing\AssertsRolesSchema'
-  'Qiick\Access\Principals\PrincipalCeiling'
-)
-
-CLASS_FILES=(
-  'src/Contracts/ActorContext.php'
-  'src/Laravel/AccessContext.php'
-  'src/Laravel/ContainerActorResolver.php'
-  'src/Laravel/CarriesActorContext.php'
-  'src/Laravel/ActorPayloadStamper.php'
-  'src/Laravel/NoTeamContext.php'
-  'src/Laravel/SpatiePermissionVocabulary.php'
-  'src/Laravel/EloquentGroupRoleSource.php'
-  'src/Laravel/SpatieTeamContext.php'
-  'src/Laravel/SpatieTeamQueueBoundary.php'
-  'src/Testing/AssertsSpatieTeamSchema.php'
-  'src/GateBefore.php'
-  'src/EffectivePermissionResolver.php'
-  'src/Laravel/AccessBootChecks.php'
-  'src/Laravel/GateBeforeSelector.php'
-  'src/Http/EnsureTwoFactorIsEnabled.php'
-  'src/SuperAdminGuard.php'
-  'src/Laravel/ReservedRoleNameGuard.php'
-  'src/Http/EnsureUserHasPermission.php'
-  'src/Http/Concerns/AuthorizesWithPermission.php'
-  'src/Testing/ProbeAbility.php'
-  'src/Testing/DirectPermissionCheckScanner.php'
-  'src/Laravel/MigrationSettings.php'
-  'src/Laravel/AccessSchema.php'
-  'src/Principals/EloquentPrincipalDirectory.php'
-  'src/Principals/Principal.php'
-  'src/Principals/UserDeletionGuard.php'
-  'src/Testing/AssertsPrincipalsSchema.php'
-  'src/Testing/AssertsRolesSchema.php'
-  'src/Principals/PrincipalCeiling.php'
-)
-
-# Other mutation-target siblings ignored while mutating one class.
-SIBLING_FILES=(
-  'src/Contracts/ActorKind.php'
-  'src/Contracts/ActorResolver.php'
-  'src/Contracts/AuthorizationResponder.php'
-  'src/Contracts/GroupRoleSource.php'
-  'src/Contracts/PermissionVocabulary.php'
-  'src/Contracts/RoleCatalog.php'
-  'src/Contracts/TeamContext.php'
-  'src/Contracts/TwoFactorPolicy.php'
-  'src/Contracts/TwoFactorResponder.php'
-  'src/Contracts/ActiveUsers.php'
-  'src/Contracts/ApiActorScopeCheck.php'
-  'src/Laravel/AccessServiceProvider.php'
-  'src/Principals/PrincipalDirectory.php'
-  'src/Principals/DeactivationReason.php'
-  'src/Principals/PrincipalCreated.php'
-  'src/Principals/PrincipalDeactivated.php'
-  'src/Principals/UserHasPrincipalsException.php'
-)
-
-MIN="${MUTATE_MIN:-95}"
-
-if [[ "${#CLASSES[@]}" -eq 0 ]]; then
-  echo "No mutation target classes yet (scaffold). Skipping."
-  exit 0
-fi
-
-FAILED=0
-declare -a TABLE_ROWS=()
-
-for index in "${!CLASSES[@]}"; do
-  class="${CLASSES[$index]}"
-  target_file="${CLASS_FILES[$index]}"
-
-  echo "::group::mutate ${class}"
-  echo "==> mutate --class=${class} (min=${MIN}, no covered-only)"
-
-  ignore_files=()
-  for other_index in "${!CLASS_FILES[@]}"; do
-    other_file="${CLASS_FILES[$other_index]}"
-    if [[ "$other_file" != "$target_file" ]]; then
-      ignore_files+=("${other_file}")
+case "${MUTATE_SCOPE:-all}" in
+  all)
+    files=$(find src -type f -name '*.php' | LC_ALL=C sort)
+    ;;
+  changed)
+    files=$(node -e '
+      const files = JSON.parse(process.env.MUTATE_CLASSES ?? "[]");
+      if (!Array.isArray(files) || files.some(file => typeof file !== "string" || !/^src\/[\w/]+\.php$/.test(file))) {
+        throw new Error("MUTATE_CLASSES must be an array of package source paths");
+      }
+      for (const file of files) {
+        console.log(file);
+      }
+    ')
+    if [[ -n "${MUTATE_DIFF_BASE:-}" ]]; then
+      files="$(printf '%s\n%s\n' "${files}" "$(git diff --name-only --diff-filter=ACMR "${MUTATE_DIFF_BASE}...HEAD" -- 'src/Testing/*.php')" | sed '/^$/d' | LC_ALL=C sort -u)"
     fi
-  done
-  for sibling in "${SIBLING_FILES[@]}"; do
-    ignore_files+=("${sibling}")
-  done
-  ignore_csv="$(IFS=','; echo "${ignore_files[*]}")"
+    ;;
+  *)
+    echo "::error::MUTATE_SCOPE must be all or changed."
+    exit 1
+    ;;
+esac
 
-  output="$(mktemp)"
-  set +e
-  vendor/bin/pest --mutate --min="${MIN}" --class="${class}" --ignore="${ignore_csv}" | tee "${output}"
-  status=${PIPESTATUS[0]}
-  set -e
+DECLARATION_ONLY_FILES=(
+  src/Contracts/ActiveUsers.php
+  src/Contracts/ActorKind.php
+  src/Contracts/ActorResolver.php
+  src/Contracts/ApiActorScopeCheck.php
+  src/Contracts/AuthorizationResponder.php
+  src/Contracts/GroupRoleSource.php
+  src/Contracts/LegacyGateBefore.php
+  src/Contracts/ListsAllGroupRoles.php
+  src/Contracts/PermissionVocabulary.php
+  src/Contracts/RoleCatalog.php
+  src/Contracts/TeamContext.php
+  src/Contracts/TwoFactorPolicy.php
+  src/Contracts/TwoFactorResponder.php
+  src/Events/PrincipalCreatedEvent.php
+  src/Events/PrincipalDeactivatedEvent.php
+  src/Events/SubjectErasedEvent.php
+  src/Events/SuperAdminBypassWithheldEvent.php
+  src/Laravel/NoTeamContext.php
+  src/Principals/DeactivationReason.php
+  src/Principals/PrincipalDirectory.php
+  src/Principals/UserHasPrincipalsException.php
+)
 
-  # Strip ANSI before parsing — pest colours the Score line.
-  plain="$(sed $'s/\x1b\\[[0-9;]*m//g' "${output}")"
-  score="$(printf '%s\n' "${plain}" | grep -oE 'Score:[[:space:]]+[0-9.]+%' | tail -1 | grep -oE '[0-9.]+' | head -1 || true)"
+minimum="${MUTATE_MIN:-95}"
+shard="${MUTATE_SHARD:-1}"
+shards="${MUTATE_SHARDS:-1}"
 
-  # Only NoTeamContext is allowlisted for "No mutations created" (empty body).
-  # Any other class with no mutants is a mis-path or empty target and must fail.
-  if printf '%s\n' "${plain}" | grep -q 'No mutations created'; then
-    if [[ "${class}" == 'Qiick\Access\Laravel\NoTeamContext' ]]; then
-      score='100.00'
-      status=0
-    else
-      echo "::error::No mutations created for ${class} (expected mutants; mis-pathed class?)"
-      score='0'
-      status=1
-    fi
-  fi
-
-  if [[ -z "${score}" ]]; then
-    score='?'
-  fi
-  TABLE_ROWS+=("| \`${class}\` | ${score}% |")
-
-  if [[ "${status}" -ne 0 ]]; then
-    echo "::error::Mutation score below ${MIN}% for ${class}"
-    FAILED=1
-  fi
-  rm -f "${output}"
-  echo "::endgroup::"
-done
-
-echo "## Per-class mutation scores"
-echo "| Class | Score |"
-echo "| --- | --- |"
-for row in "${TABLE_ROWS[@]}"; do
-  echo "${row}"
-done
-
-if [[ "${FAILED}" -ne 0 ]]; then
-  echo "One or more classes scored below ${MIN}%."
+if ! [[ "${shard}" =~ ^[0-9]+$ && "${shards}" =~ ^[0-9]+$ ]] || (( shards < 1 || shard < 1 || shard > shards )); then
+  echo "::error::MUTATE_SHARD must be between 1 and MUTATE_SHARDS."
   exit 1
 fi
+position=0
+failed=0
+summary_rows=()
 
-echo "All ${#CLASSES[@]} classes scored >= ${MIN}%."
+while IFS= read -r file; do
+  # The pull request plan lists deleted paths too; only surviving files are mutated.
+  if [[ -z "$file" || ! -f "$file" ]]; then
+    continue
+  fi
+
+  position=$((position + 1))
+  if (( (position - 1) % shards != shard - 1 )); then
+    continue
+  fi
+
+  echo "::group::Mutate ${file}"
+  output="$(mktemp)"
+  set +e
+  zero_mutations_flag=()
+  for declaration_only_file in "${DECLARATION_ONLY_FILES[@]}"; do
+    if [[ "${file}" == "${declaration_only_file}" ]]; then
+      zero_mutations_flag=(--ignore-min-score-on-zero-mutations)
+    fi
+  done
+
+  vendor/bin/pest --mutate --min="${minimum}" --path="${file}" "${zero_mutations_flag[@]+"${zero_mutations_flag[@]}"}" --parallel | tee "${output}"
+  status=${PIPESTATUS[0]}
+  set -e
+  echo "::endgroup::"
+
+  # Strip ANSI before parsing: Pest colours the score line.
+  plain="$(sed $'s/\x1b\\[[0-9;]*m//g' "${output}")"
+  rm -f "${output}"
+  score="$(printf '%s\n' "${plain}" | grep -oE 'Score:[[:space:]]+[0-9.]+%' | tail -1 | grep -oE '[0-9.]+' || true)"
+
+  if printf '%s\n' "${plain}" | grep -q 'No mutations created'; then
+    score='no mutations'
+  fi
+
+  summary_rows+=("| \`${file}\` | ${score:-?} |")
+
+  if [[ "${status}" -ne 0 ]]; then
+    echo "::error file=${file}::Mutation score below ${minimum}% (or the run failed) for ${file}"
+    failed=1
+  fi
+done <<< "${files}"
+
+{
+  echo "## Per-class mutation scores (shard ${shard}/${shards})"
+  echo "| File | Score |"
+  echo "| --- | --- |"
+  printf '%s\n' "${summary_rows[@]+"${summary_rows[@]}"}"
+} | tee -a "${GITHUB_STEP_SUMMARY:-/dev/null}"
+
+exit "${failed}"

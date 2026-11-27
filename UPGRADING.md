@@ -6,24 +6,109 @@ tagged release.
 
 ## Deprecation policy
 
-From `1.0.0` the public API is everything tagged `@api` in `src/`, the
-`access.*` config keys and their `ACCESS_*` environment variables, the
-events, and the migrations (see `docs/reference-contracts.md`). Code tagged
-`@internal` carries no promise.
-
-- A public name or behaviour is removed only in a major release.
-- It is first deprecated in a minor: `@deprecated` with the major that
-  removes it and the replacement, a `Deprecated` entry in the CHANGELOG and
-  a note here. It keeps working for at least one minor release before the
-  major that removes it.
-- A security fix may tighten behaviour in a patch or minor (a boot check
-  that now fails, a check that now denies). It is listed under `Security` in
-  the CHANGELOG with the steps to adopt it here.
-- Migrations are forward-only after `1.0.0`: a schema change is a new
-  migration, never an edit.
-- Before `1.0.0` (`0.x`), a minor may break; each break is recorded here.
+See [docs/public-api.md](docs/public-api.md#deprecation-policy).
 
 ## Unreleased
+
+Nothing yet.
+
+## 0.1.0-beta.3
+
+No schema change: a database migrated with `0.1.0-beta.2` needs no refresh.
+
+- `PrincipalDirectory::eraseUser()` is deprecated (removed in 2.0.0). Delete
+  users only through the product's erasure orchestrator. It writes the
+  resumable `erasure_requests` row, runs `Erasure\AccessEraser` with the
+  other erasers and deletes the user row itself. `AccessEraser` dispatches
+  only `SubjectErasedEvent` after commit, never `PrincipalDeactivatedEvent`,
+  so a revocation listener on that event is not reached on this path.
+  Revoke credentials as an orchestrator step of its own. Before the erasers
+  run, take the ids of the user's principals and all their descendants from
+  the snapshot, while the ownership links still exist. Then revoke every
+  credential of those principals, idempotently, so a resumed request does
+  it again safely. Use-time checks already refuse keys of an inactive
+  principal, but the keys are not revoked until this step runs. Prove it in
+  the product's C17 test.
+- `GateBefore` takes no constructor argument any more: resolve it from the
+  container (`app(GateBefore::class)`) or build it with `new GateBefore`.
+
+- Rename the principal event listeners' types:
+  `Qiick\Access\Principals\PrincipalCreated` →
+  `Qiick\Access\Events\PrincipalCreatedEvent` and
+  `Qiick\Access\Principals\PrincipalDeactivated` →
+  `Qiick\Access\Events\PrincipalDeactivatedEvent` (listeners,
+  `Event::listen()`, `Event::fake()` and `$listen` maps). Deploy it as a
+  cutover: drain queued listeners of the old events under the old code
+  first (their payloads name the old classes), then run `event:cache` again
+  if the product caches events, and restart queue workers and Octane, so
+  the API-key revocation listener is never skipped.
+- Add `php artisan access:check` to the deploy pipeline and to the
+  product's `<app>:upgrade`, after the migrations.
+
+- API keys of a super-admin owner: `EnsureUserHasPermission`,
+  `AuthorizesWithPermission` and `PrincipalCeiling::allows()` now allow
+  every permission of the vocabulary that the key's scopes cover (decision
+  [2026-11-26](docs/decisions/2026-11-26-super-admin-key-ceiling.md)).
+  Replace `hasAssignedPermission()` with `isWithinOwnerCeiling()` wherever
+  the product computes a key ceiling (grantable scopes, key authorizers), so
+  issuance and use agree. Rename the site in `access.direct_checks` too.
+- Add `new ExclusiveSuperAdminRoleRule` to the role field of user create and
+  update requests; super-admin combined with another role is then a 422.
+  Accounts that already hold super-admin and other roles keep working; clean
+  them up in the product's upgrade command if you want the new rule to hold
+  for old rows.
+- Super-admin stands alone across every team, directly and through groups
+  (Excubia #474). It is fail-closed on read: a user holding super-admin
+  together with any other role gets no super-admin bypass, only the other
+  roles' permissions. The resolver logs a warning and dispatches
+  `Events\SuperAdminBypassWithheldEvent`. Listen to it to notify your
+  security log or the other super-admins. Such an account stays protected:
+  `SuperAdminGuard::isProtectedFrom()` now follows
+  `holdsSuperAdminRole()`, the assignment, not the bypass. Clean up mixed
+  accounts before deploying: `php artisan access:check` lists them.
+- Route every role and group write (forms, OIDC role sync, API, your
+  commands) through `app(ExclusiveSuperAdmin::class)->write($users, fn ()
+  => ..., $actor)`. Pass every user the write affects: for a group change,
+  every member before and after. One transaction locks them, checks the
+  result and rolls back with `ExclusiveSuperAdminException`. Pass the acting
+  user: a write that makes someone an effective super-admin is refused
+  unless that actor may manage super-admins. Pass `null` only for trusted
+  system writes, such as OIDC sync or your commands. The actor's authority
+  is read before the write, so a write never grants the authority that
+  allows it. Do not open a transaction around `write()`, except one whose
+  first statement locks these users
+  (`SuperAdminGuard::wouldLeaveNoActiveSuperAdmin()` does that). On InnoDB
+  an earlier plain read would fix an older snapshot. `access:check` fails
+  when the bound `GroupRoleSource` is not the package one, because it
+  cannot list super-admins through the product's groups.
+- With teams on, a custom `GroupRoleSource` must implement
+  `Contracts\ListsAllGroupRoles`. Without it the package cannot see other
+  organisations' groups, so it withholds every super-admin bypass.
+
+
+- Use `EffectivePermissionResolver::isActorSuperAdmin($actor)` for super-admin
+  authority in policies. Replace acting-user role checks, including in policy
+  `before()` methods. `SuperAdminGuard::canManageSuperAdmins()` and
+  `isProtectedFrom()` now apply the same actor-aware rule. AC9 reports
+  role-only super-admin checks in policies. Use `isProtectedFrom()` for
+  protected accounts and `isSuperAdmin($target)` in domain services that read
+  subject role membership. See
+  [adoption](docs/adoption.md) for the policy regression test setup.
+- `PrincipalDirectory` adds `markErased(Principal $principal): void`. Custom
+  implementations must add it. Call it for each principal of type `user` in
+  the product's soft-delete transaction. The tombstone retains the user link
+  and keeps the original deactivation time if the principal was already
+  inactive. Use the separate erasure flow for permanent user deletion.
+- A published `config/access.php` that lacks a nested key now gets the
+  package default for it, at every depth; a list the product sets (guards,
+  principal types, exempt routes) still replaces the default whole. Boot now
+  fails on a present but invalid value, naming the key: guard, type and
+  route lists must be lists of strings, `principals.types` non-empty, the
+  migration switches, `trust_api_guard_in_console` and
+  `principals.organisation_required` real booleans (`"1"` in `.env` is a
+  string), `users_table`, `group_member_model` and `gate_shadow_log_channel`
+  null or a non-empty string, `permission_enum` null, empty or a backed enum
+  class, and `principals.model` a `Principal` subclass.
 
 ## 0.1.0-beta.2
 

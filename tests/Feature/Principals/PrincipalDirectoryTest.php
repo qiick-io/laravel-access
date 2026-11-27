@@ -13,10 +13,10 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
+use Qiick\Access\Events\PrincipalCreatedEvent;
+use Qiick\Access\Events\PrincipalDeactivatedEvent;
 use Qiick\Access\Principals\DeactivationReason;
 use Qiick\Access\Principals\Principal;
-use Qiick\Access\Principals\PrincipalCreated;
-use Qiick\Access\Principals\PrincipalDeactivated;
 use Qiick\Access\Principals\PrincipalDirectory;
 use Qiick\Access\Principals\UserDeletionGuard;
 use Qiick\Access\Principals\UserHasPrincipalsException;
@@ -81,7 +81,7 @@ function member(int $id = 1): SpatieUser
 
 it('creates one membership principal per user and organisation, idempotently', function (): void {
     migratePrincipals();
-    Event::fake([PrincipalCreated::class]);
+    Event::fake([PrincipalCreatedEvent::class]);
     $organisationId = (string) Str::uuid();
 
     $principal = directory()->forMember(member(), $organisationId);
@@ -95,7 +95,7 @@ it('creates one membership principal per user and organisation, idempotently', f
         ->and(directory()->forMember(member(), null)->id)->not->toBe($principal->id)
         ->and(Principal::query()->count())->toBe(2);
 
-    Event::assertDispatchedTimes(PrincipalCreated::class, 2);
+    Event::assertDispatchedTimes(PrincipalCreatedEvent::class, 2);
 })->group('engines');
 
 it('refuses an organisation-less membership when organisations are required (P2)', function (): void {
@@ -126,7 +126,7 @@ it('reactivates a deactivated membership principal unless it was erased', functi
 
 it('creates services and agents with owner, creator and metadata', function (): void {
     migratePrincipals(true, ['instance_service']);
-    Event::fake([PrincipalCreated::class]);
+    Event::fake([PrincipalCreatedEvent::class]);
     $organisationId = (string) Str::uuid();
     $owner = directory()->forMember(member(), $organisationId);
 
@@ -141,7 +141,7 @@ it('creates services and agents with owner, creator and metadata', function (): 
         ->and($agent->owner->is($owner))->toBeTrue()
         ->and($owner->owned->pluck('id')->all())->toBe([$agent->id]);
 
-    Event::assertDispatched(PrincipalCreated::class, fn (PrincipalCreated $event): bool => $event->principal->is($agent));
+    Event::assertDispatched(PrincipalCreatedEvent::class, fn (PrincipalCreatedEvent $event): bool => $event->principal->is($agent));
 });
 
 it('refuses service principals that would escape the organisation or the type list (P2)', function (string $type, ?string $organisationId, string $message): void {
@@ -183,7 +183,7 @@ it('refuses an owner whose chain is cyclic or deeper than eight (P8)', function 
 
 it('keeps instance principals singletons and only for declared types (P3)', function (): void {
     migratePrincipals(true, ['instance_service']);
-    Event::fake([PrincipalCreated::class]);
+    Event::fake([PrincipalCreatedEvent::class]);
 
     $instance = directory()->instance('instance_service', 'Instance Admin API');
 
@@ -192,7 +192,7 @@ it('keeps instance principals singletons and only for declared types (P3)', func
         ->and(directory()->instance('instance_service', 'Other name')->id)->toBe($instance->id)
         ->and(fn () => directory()->instance('service', 'Not declared'))->toThrow(InvalidArgumentException::class, 'instance_types');
 
-    Event::assertDispatchedTimes(PrincipalCreated::class, 1);
+    Event::assertDispatchedTimes(PrincipalCreatedEvent::class, 1);
 });
 
 it('returns the instance principal another worker created concurrently (P3)', function (): void {
@@ -354,7 +354,7 @@ it('gives concurrent processes one instance principal and one membership princip
 
 it('deactivates a principal and everything it owns, in one transaction', function (): void {
     migratePrincipals();
-    Event::fake([PrincipalDeactivated::class]);
+    Event::fake([PrincipalDeactivatedEvent::class]);
     $owner = directory()->forMember(member(), null);
     $agent = directory()->createService('agent', null, 'Agent', $owner);
     $subAgent = directory()->createService('agent', null, 'Sub-agent', $agent);
@@ -371,7 +371,7 @@ it('deactivates a principal and everything it owns, in one transaction', functio
         ->and($rows[$agent->id]->deactivated_at)->not->toBeNull()
         ->and(Principal::query()->active()->pluck('id')->all())->toBe([$unrelated->id]);
 
-    Event::assertDispatched(PrincipalDeactivated::class, fn (PrincipalDeactivated $event): bool => $event->principal->is($owner)
+    Event::assertDispatched(PrincipalDeactivatedEvent::class, fn (PrincipalDeactivatedEvent $event): bool => $event->principal->is($owner)
         && $event->reason === DeactivationReason::Offboarded
         && $event->ownedIds === [$agent->id, $subAgent->id]);
 });
@@ -454,7 +454,7 @@ it('refuses instance principals unless organisations are required (review B5 / N
 
 it('deactivates owned principals once even when ownership loops back', function (): void {
     migratePrincipals();
-    Event::fake([PrincipalDeactivated::class]);
+    Event::fake([PrincipalDeactivatedEvent::class]);
     $first = directory()->createService('agent', null, 'First');
     $second = directory()->createService('agent', null, 'Second', $first);
     DB::table('principals')->where('id', $first->id)->update(['owner_principal_id' => $second->id]);
@@ -464,7 +464,7 @@ it('deactivates owned principals once even when ownership loops back', function 
     expect(Principal::query()->findOrFail($second->id)->deactivation_reason)->toBe(DeactivationReason::OwnerDeactivated)
         ->and(Principal::query()->findOrFail($first->id)->deactivated_at)->toBeInstanceOf(CarbonInterface::class);
 
-    Event::assertDispatched(PrincipalDeactivated::class, fn (PrincipalDeactivated $event): bool => $event->ownedIds === [$second->id]);
+    Event::assertDispatched(PrincipalDeactivatedEvent::class, fn (PrincipalDeactivatedEvent $event): bool => $event->ownedIds === [$second->id]);
 });
 
 it('excludes expired principals from the active scope', function (): void {
@@ -587,19 +587,20 @@ it('keeps the model guarded against mass assignment (review N1)', function (): v
 it('erases a user: principals erased and unlinked, then the user deleted, in one transaction (decision 2026-11-24)', function (): void {
     config()->set('auth.providers.users.model', ErasableUser::class);
     migratePrincipals();
-    Event::fake([PrincipalDeactivated::class]);
+    Event::fake([PrincipalDeactivatedEvent::class]);
     $organisationId = (string) Str::uuid();
     $member = directory()->forMember(member(), $organisationId);
     $instanceLevel = directory()->forMember(member(), null);
     $agent = directory()->createService('agent', $organisationId, 'Agent', $member);
     directory()->deactivate($instanceLevel, DeactivationReason::Offboarded);
+    $offboardedAt = $instanceLevel->refresh()->deactivated_at;
     $erasedEarlier = directory()->forMember(member(), (string) Str::uuid());
     directory()->deactivate($erasedEarlier, DeactivationReason::Erased);
     $erasedEarlierAt = Principal::query()->findOrFail($erasedEarlier->id)->deactivated_at;
     $this->travel(5)->minutes();
     $other = directory()->forMember(member(2), $organisationId);
 
-    directory()->eraseUser(ErasableUser::query()->findOrFail(1), static function (ErasableUser $user): void {
+    directory()->eraseUser(ErasableUser::query()->findOrFail(1)->setKeyType('string'), static function (ErasableUser $user): void {
         $user->delete();
     });
 
@@ -614,11 +615,11 @@ it('erases a user: principals erased and unlinked, then the user deleted, in one
         ->and($rows[$agent->id]->deactivation_reason)->toBe(DeactivationReason::OwnerDeactivated)
         ->and($rows[$erasedEarlier->id]->deactivated_at->equalTo($erasedEarlierAt))->toBeTrue()
         ->and($rows[$erasedEarlier->id]->user_id)->toBeNull()
-        ->and($rows[$instanceLevel->id]->deactivated_at->greaterThan($erasedEarlierAt))->toBeTrue()
+        ->and($rows[$instanceLevel->id]->deactivated_at->equalTo($offboardedAt))->toBeTrue()
         ->and($rows[$other->id]->deactivated_at)->toBeNull()
         ->and(directory()->isActive($member->id))->toBeFalse();
 
-    Event::assertDispatched(PrincipalDeactivated::class, fn (PrincipalDeactivated $event): bool => $event->principal->is($member)
+    Event::assertDispatched(PrincipalDeactivatedEvent::class, fn (PrincipalDeactivatedEvent $event): bool => $event->principal->is($member)
         && $event->reason === DeactivationReason::Erased && $event->ownedIds === [$agent->id]);
 })->group('engines');
 
@@ -651,7 +652,7 @@ it('dispatches the deactivation event only after the surrounding transaction com
     migratePrincipals();
     $principal = directory()->forMember(member(), null);
     $dispatched = [];
-    Event::listen(PrincipalDeactivated::class, static function (PrincipalDeactivated $event) use (&$dispatched): void {
+    Event::listen(PrincipalDeactivatedEvent::class, static function (PrincipalDeactivatedEvent $event) use (&$dispatched): void {
         $dispatched[] = $event->principal->id;
     });
 
@@ -710,6 +711,63 @@ class SoftDeletingUser extends ErasableUser
 {
     use SoftDeletes;
 }
+
+it('preserves the membership tombstone when a product soft-deletes and restores a user', function (bool $wasAlreadyInactive): void {
+    Schema::table('users', function (Blueprint $table): void {
+        $table->softDeletes();
+    });
+    config()->set('auth.providers.users.model', SoftDeletingUser::class);
+    migratePrincipals();
+    Event::fake([PrincipalDeactivatedEvent::class]);
+    $user = SoftDeletingUser::query()->findOrFail(1);
+    $principal = directory()->forMember($user, null);
+    $agent = directory()->createService('agent', null, 'Agent', $principal);
+    $deactivatedAt = now()->startOfSecond();
+    $this->travelTo($deactivatedAt);
+
+    if ($wasAlreadyInactive) {
+        directory()->deactivate($principal, DeactivationReason::Offboarded);
+        $this->travel(5)->minutes();
+        directory()->deactivate($principal, DeactivationReason::Admin);
+
+        expect($principal->deactivation_reason)->toBe(DeactivationReason::Offboarded);
+    }
+
+    DB::transaction(function () use ($user, $principal): void {
+        $user->delete();
+        directory()->markErased($principal);
+        Event::assertNotDispatched(PrincipalDeactivatedEvent::class, fn (PrincipalDeactivatedEvent $event): bool => $event->reason === DeactivationReason::Erased);
+    });
+
+    Event::assertDispatched(PrincipalDeactivatedEvent::class, fn (PrincipalDeactivatedEvent $event): bool => $event->principal->id === $principal->id
+        && $event->reason === DeactivationReason::Erased && $event->ownedIds === [$agent->id]);
+    $markedAt = $principal->refresh()->updated_at;
+
+    $this->travel(5)->minutes();
+    directory()->markErased($principal);
+    $user->restore();
+
+    $storedPrincipal = $principal->refresh();
+
+    expect($storedPrincipal->user_id)->toBe(1)
+        ->and($storedPrincipal->deactivation_reason)->toBe(DeactivationReason::Erased)
+        ->and($storedPrincipal->deactivated_at?->equalTo($deactivatedAt))->toBeTrue()
+        ->and($storedPrincipal->updated_at?->equalTo($markedAt))->toBeTrue()
+        ->and(directory()->isActive($principal->id))->toBeFalse()
+        ->and(directory()->isActive($agent->id))->toBeFalse()
+        ->and(fn () => directory()->forMember($user, null))->toThrow(LogicException::class, 'erased');
+})->with(['active' => [false], 'offboarded' => [true]])->group('engines');
+
+it('refuses to mark a stored service principal erased through the membership tombstone API', function (): void {
+    migratePrincipals();
+    Event::fake([PrincipalDeactivatedEvent::class]);
+    $service = directory()->createService('service', null, 'Service');
+    $service->forceFill(['type' => 'user']);
+
+    expect(fn () => directory()->markErased($service))->toThrow(InvalidArgumentException::class, 'type [user]')
+        ->and(directory()->isActive($service->id))->toBeTrue();
+    Event::assertNotDispatched(PrincipalDeactivatedEvent::class);
+})->group('engines');
 
 it('refuses an erasure that leaves the user row in place, and rolls it back (review R1)', function (Closure $deleteUser): void {
     Schema::table('users', function (Blueprint $table): void {
@@ -781,7 +839,7 @@ class UsersOnAnotherConnection extends ErasableUser
 it('announces a new principal only once the surrounding transaction commits (AC-c)', function (): void {
     migratePrincipals();
     $announcedPrincipalIds = [];
-    Event::listen(PrincipalCreated::class, static function (PrincipalCreated $event) use (&$announcedPrincipalIds): void {
+    Event::listen(PrincipalCreatedEvent::class, static function (PrincipalCreatedEvent $event) use (&$announcedPrincipalIds): void {
         $announcedPrincipalIds[] = $event->principal->id;
     });
 

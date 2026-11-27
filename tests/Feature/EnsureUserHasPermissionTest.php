@@ -7,6 +7,7 @@ use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Http\Exceptions\HttpResponseException;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\Schema;
 use Qiick\Access\Contracts\ActorContext;
 use Qiick\Access\Contracts\ActorKind;
@@ -26,9 +27,9 @@ use Symfony\Component\HttpFoundation\Response;
 
 /*
  * Design §6 route middleware and FormRequest trait. Web actors: the resolver,
- * super-admin included. API actors: credential scopes ∩ the owner's currently
- * assigned permissions, never super-admin, and denied when no scope check is
- * bound.
+ * super-admin included. API actors: credential scopes ∩ the owner ceiling
+ * (assigned permissions, or the vocabulary for a super-admin owner; never the
+ * Gate bypass), and denied when no scope check is bound.
  */
 
 /**
@@ -166,17 +167,47 @@ it('limits an API actor whose owner is super-admin to its scopes', function (): 
         ->and($scopeCheck->calls[0])->toBe([$actor, FakePermissionEnum::CanShowUsers->value]);
 });
 
-it('never grants an API actor through the owner super-admin role', function (): void {
+it('gives an API actor of a super-admin owner the permission vocabulary within its scopes', function (): void {
+    // Decision 2026-11-26: a super-admin's key ceiling is every explicit
+    // permission, so a super-admin alone can create a working key.
     $owner = userWithPermissions();
     $owner->assignRole('super-admin');
     enterApiActor($owner);
     $this->app->instance(ApiActorScopeCheck::class, new ListedScopeCheck([FakePermissionEnum::CanShowUsers->value]));
 
-    expect(passThroughPermissionMiddleware(requestAs($owner), FakePermissionEnum::CanShowUsers->value)->getContent())
+    expect(passThroughPermissionMiddleware(requestAs(null), FakePermissionEnum::CanShowUsers->value)->getContent())->toBe('next')
+        ->and(passThroughPermissionMiddleware(requestAs(null), FakePermissionEnum::CanEditUsers->value)->getContent())->toBe('forbidden:can-edit-users');
+});
+
+it('never gives a super-admin owner\'s API actor a permission outside the vocabulary', function (): void {
+    Permission::create(['name' => 'can-purge-everything', 'guard_name' => 'web']);
+    Role::findByName('super-admin')->givePermissionTo('can-purge-everything');
+    $owner = userWithPermissions();
+    $owner->assignRole('super-admin');
+    enterApiActor($owner);
+    $this->app->instance(ApiActorScopeCheck::class, new ListedScopeCheck(['can-purge-everything']));
+
+    expect(passThroughPermissionMiddleware(requestAs(null), 'can-purge-everything')->getContent())
+        ->toBe('forbidden:can-purge-everything');
+});
+
+it('denies an API actor as soon as its owner stops being super-admin', function (): void {
+    $owner = userWithPermissions();
+    $owner->assignRole('super-admin');
+    enterApiActor($owner);
+    $this->app->instance(ApiActorScopeCheck::class, new ListedScopeCheck([FakePermissionEnum::CanShowUsers->value]));
+
+    expect(passThroughPermissionMiddleware(requestAs(null), FakePermissionEnum::CanShowUsers->value)->getContent())->toBe('next');
+
+    // A demotion that fires no Spatie event: only the fresh read catches it.
+    DB::table('model_has_roles')->delete();
+    app(PermissionRegistrar::class)->forgetCachedPermissions();
+
+    expect(passThroughPermissionMiddleware(requestAs(null), FakePermissionEnum::CanShowUsers->value)->getContent())
         ->toBe('forbidden:can-show-users');
 });
 
-it('denies an API actor as soon as its owner loses the permission', function (): void {
+it('denies an API actor as soon as its owner loses the permission (AC6)', function (): void {
     $owner = userWithPermissions(FakePermissionEnum::CanShowUsers->value);
     enterApiActor($owner);
     $this->app->instance(ApiActorScopeCheck::class, new ListedScopeCheck([FakePermissionEnum::CanShowUsers->value]));
@@ -276,26 +307,84 @@ it('denies a web request whose user is not the bound actor', function (): void {
         ->toBe('next');
 });
 
-it('never counts the super-admin role\'s own permissions for an API actor', function (): void {
-    $superAdminRole = Role::findByName('super-admin');
-    $superAdminRole->givePermissionTo(FakePermissionEnum::CanEditUsers->value);
-    $editorRole = Role::create(['name' => 'editor', 'guard_name' => 'web']);
-    $editorRole->givePermissionTo(FakePermissionEnum::CanShowUsers->value);
-
+it('never counts the super-admin role\'s own permissions beyond the vocabulary for an API actor', function (): void {
     Permission::create(['name' => 'can-delete-users', 'guard_name' => 'web']);
+    Permission::create(['name' => 'can-purge-everything', 'guard_name' => 'web']);
+    $superAdminRole = Role::findByName('super-admin');
+    $superAdminRole->givePermissionTo('can-purge-everything');
+
     $owner = userWithPermissions('can-delete-users');
-    $owner->assignRole($superAdminRole, $editorRole);
+    $owner->assignRole($superAdminRole);
     enterApiActor($owner);
     $this->app->instance(ApiActorScopeCheck::class, new ListedScopeCheck([
         FakePermissionEnum::CanShowUsers->value,
         FakePermissionEnum::CanEditUsers->value,
         'can-delete-users',
+        'can-purge-everything',
     ]));
 
+    // The vocabulary exactly: nothing outside it, whether assigned directly
+    // or on the super-admin role row.
     expect(passThroughPermissionMiddleware(requestAs(null), FakePermissionEnum::CanEditUsers->value)->getContent())
-        ->toBe('forbidden:can-edit-users')
+        ->toBe('next')
         ->and(passThroughPermissionMiddleware(requestAs(null), FakePermissionEnum::CanShowUsers->value)->getContent())
         ->toBe('next')
         ->and(passThroughPermissionMiddleware(requestAs(null), 'can-delete-users')->getContent())
-        ->toBe('next');
+        ->toBe('forbidden:can-delete-users')
+        ->and(passThroughPermissionMiddleware(requestAs(null), 'can-purge-everything')->getContent())
+        ->toBe('forbidden:can-purge-everything');
+});
+
+/**
+ * A user who holds can-show-users only through a group role.
+ */
+function userWithGroupOnlyPermission(): SpatieUser
+{
+    $groupRole = Role::create(['name' => 'group-viewers', 'guard_name' => 'web']);
+    $groupRole->givePermissionTo(FakePermissionEnum::CanShowUsers->value);
+    $user = SpatieUser::query()->create(['email' => 'group-member@example.com']);
+
+    $groupRoles = Mockery::mock(GroupRoleSource::class);
+    $groupRoles->shouldReceive('instanceRoleIdsFor')->andReturn([]);
+    $groupRoles->shouldReceive('roleIdsFor')->andReturn([$groupRole->id]);
+    app()->instance(GroupRoleSource::class, $groupRoles);
+    app()->forgetInstance(EffectivePermissionResolver::class);
+
+    return $user;
+}
+
+it('shows a group-only permission through can() in a web session (AC7)', function (): void {
+    $user = userWithGroupOnlyPermission();
+    AccessContext::enter(new ActorContext(ActorKind::WebSession, $user));
+
+    expect(Gate::forUser($user)->allows(FakePermissionEnum::CanShowUsers->value))->toBeTrue()
+        ->and(Gate::forUser($user)->allows(FakePermissionEnum::CanEditUsers->value))->toBeFalse();
+});
+
+it('lets a group-only permission of the owner through on an API path, within the scopes (AC8)', function (): void {
+    $owner = userWithGroupOnlyPermission();
+    enterApiActor($owner);
+    $this->app->instance(ApiActorScopeCheck::class, new ListedScopeCheck([FakePermissionEnum::CanShowUsers->value]));
+
+    expect(passThroughPermissionMiddleware(requestAs(null), FakePermissionEnum::CanShowUsers->value)->getContent())->toBe('next')
+        ->and(app(EffectivePermissionResolver::class)->isWithinOwnerCeiling($owner, FakePermissionEnum::CanShowUsers->value))->toBeTrue();
+
+    // The same group grant outside the credential's scopes stays refused.
+    $this->app->instance(ApiActorScopeCheck::class, new ListedScopeCheck([]));
+
+    expect(passThroughPermissionMiddleware(requestAs(null), FakePermissionEnum::CanShowUsers->value)->getContent())->toBe('forbidden:can-show-users');
+});
+
+it('clears the cached permission of a user whose role is detached in the same request (AC13)', function (): void {
+    $viewers = Role::create(['name' => 'viewers', 'guard_name' => 'web']);
+    $viewers->givePermissionTo(FakePermissionEnum::CanShowUsers->value);
+    $user = SpatieUser::query()->create(['email' => 'viewer@example.com']);
+    $user->assignRole($viewers);
+    $resolver = app(EffectivePermissionResolver::class);
+
+    expect($resolver->hasPermission($user, FakePermissionEnum::CanShowUsers->value))->toBeTrue();
+
+    $user->removeRole($viewers);
+
+    expect($resolver->hasPermission($user, FakePermissionEnum::CanShowUsers->value))->toBeFalse();
 });

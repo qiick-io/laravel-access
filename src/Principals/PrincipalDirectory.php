@@ -55,9 +55,22 @@ interface PrincipalDirectory
     public function instance(string $type, string $name): Principal;
 
     /**
+     * Write an irreversible membership tombstone in the product's soft-delete
+     * transaction. Keeps the user link so restoring or rejoining cannot
+     * reactivate the principal, and retains the original deactivation time.
+     * Deactivates owned principals and dispatches PrincipalDeactivatedEvent after
+     * commit so the product can revoke their credentials.
+     *
+     * @throws \InvalidArgumentException when the stored principal is not type `user`
+     *
+     * @api
+     */
+    public function markErased(Principal $principal): void;
+
+    /**
      * Sets deactivated_at and the reason unless the principal is already
      * deactivated (an erased tombstone stays erased), deactivates every active
-     * owned principal (one transaction), then dispatches PrincipalDeactivated
+     * owned principal (one transaction), then dispatches PrincipalDeactivatedEvent
      * after the surrounding transaction commits.
      */
     public function deactivate(Principal $principal, DeactivationReason $reason): void;
@@ -68,12 +81,18 @@ interface PrincipalDirectory
      * principals it owns are deactivated, then $deleteUser deletes the user
      * row with a hard delete (forceDelete() on a soft-deleting model).
      * principals.user_id is ON DELETE RESTRICT, so this is the only way a user
-     * with principals can be deleted. PrincipalDeactivated is dispatched per
+     * with principals can be deleted. PrincipalDeactivatedEvent is dispatched per
      * erased principal after the commit.
+     * The fleet eraser shares the principal scrub and lets the product's
+     * orchestrator own the user deletion and completion event.
      *
      * @param  \Closure(Authenticatable): void  $deleteUser  the product's hard user deletion
      *
      * @throws \LogicException when the user row still exists afterwards (everything is rolled back)
+     *
+     * @deprecated 1.0.0 removed in 2.0.0: products delete users only through
+     *             their erasure orchestrator, which runs Erasure\AccessEraser
+     *             (fleet erasure decision 2026-11-24).
      */
     public function eraseUser(Authenticatable $user, \Closure $deleteUser): void;
 

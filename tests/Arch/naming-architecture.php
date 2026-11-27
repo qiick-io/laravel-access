@@ -36,6 +36,8 @@ return [
             'Qiick\Access\Contracts\ApiActorScopeCheck',
             // Design §9.2 step 6: the externa legacy callback seam, removed in v2.
             'Qiick\Access\Contracts\LegacyGateBefore',
+            // Optional capability of a GroupRoleSource (exclusive super-admin, all teams).
+            'Qiick\Access\Contracts\ListsAllGroupRoles',
         ],
         'traits' => [
             // Design §2.1 / §13.1: the FormRequest trait is AuthorizesWithPermission.

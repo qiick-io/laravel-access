@@ -11,8 +11,10 @@ Thanks for helping. A few rules keep the codebase consistent:
    `develop` or `main` directly; never tag from a contributor branch; never
    touch Packagist.
 5. Before pushing run `composer test` (Pest), `composer lint` (Pint) and
-   `composer analyse` (PHPStan level max). Security-critical classes also need
-   `pest --mutate` coverage (design §11 mutation targets; per-class MSI ≥ 95%).
+   `composer analyse` (PHPStan level max). Every class in `src/` needs
+   `pest --mutate` at per-class MSI ≥ 95% (`MUTATE_SCOPE=changed
+   MUTATE_CLASSES='["src/…"]' bash scripts/mutate-per-class.sh` for the files
+   you touched).
 6. Red-first: every security-checklist item becomes a failing test first.
    Tests are deterministic (fakes for every contract; no network or `.env`).
    Middleware that speaks HTTP is exercised through a local `php -S` Testbench

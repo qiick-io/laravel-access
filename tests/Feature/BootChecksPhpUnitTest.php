@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use Illuminate\Auth\GenericUser;
 use Illuminate\Contracts\Config\Repository as ConfigRepository;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
@@ -11,6 +12,9 @@ use Qiick\Access\Contracts\RoleCatalog;
 use Qiick\Access\Contracts\TwoFactorPolicy;
 use Qiick\Access\Contracts\TwoFactorResponder;
 use Qiick\Access\Laravel\AccessBootChecks;
+use Qiick\Access\Tests\Support\ArchiveConnectionUser;
+use Qiick\Access\Tests\Support\DefaultConnectionNameUser;
+use Qiick\Access\Tests\Support\SpatieUser;
 
 it('fails when register_permission_check_method is true (R4)', function (): void {
     $checks = app(AccessBootChecks::class);
@@ -49,7 +53,7 @@ it('fails when register_permission_check_method is anything but boolean false (R
     $config->set('permission.register_permission_check_method', false);
 })->with('non_false_permission_check_method_values');
 
-it('fails when permission.events_enabled is not true (A1 / N3)', function (): void {
+it('fails when permission.events_enabled is not true (A1 / N3 / AC13)', function (): void {
     $checks = app(AccessBootChecks::class);
     $config = app(ConfigRepository::class);
     $config->set('permission.events_enabled', false);
@@ -279,4 +283,40 @@ it('fails when a connection key or a connection nested in another can stand for 
     $config->set('database.connections.unset', 42);
     $checks->assertConnectionNamesMatchTheirKeys($config);
     $config->set('database.connections.unset', null);
+});
+
+it('fails when the group member model uses another connection than the group tables (#27)', function (): void {
+    $checks = app(AccessBootChecks::class);
+    $config = app(ConfigRepository::class);
+    $config->set('database.connections.archive', ['driver' => 'sqlite', 'database' => ':memory:']);
+
+    // The configured member model, then the auth provider model as fallback.
+    $config->set('access.group_member_model', ArchiveConnectionUser::class);
+
+    expect(fn () => $checks->assertGroupMemberModelOnTheGroupConnection($config))
+        ->toThrow(RuntimeException::class, 'access.group_member_model ['.ArchiveConnectionUser::class.'] uses the connection [archive]');
+
+    $config->set('access.group_member_model', null);
+    $config->set('auth.providers.users.model', ArchiveConnectionUser::class);
+
+    expect(fn () => $checks->assertGroupMemberModelOnTheGroupConnection($config))
+        ->toThrow(RuntimeException::class, 'auth.providers.users.model ['.ArchiveConnectionUser::class.'] uses the connection [archive]');
+
+    // The default connection, left null or named on every instance, boots.
+    $config->set('auth.providers.users.model', SpatieUser::class);
+    $checks->assertGroupMemberModelOnTheGroupConnection($config);
+
+    $config->set('access.group_member_model', DefaultConnectionNameUser::class);
+    $checks->assertGroupMemberModelOnTheGroupConnection($config);
+
+    // No Eloquent member model (a database auth provider, or none) leaves
+    // groups empty at runtime and has nothing to compare here.
+    $config->set('access.group_member_model', GenericUser::class);
+    $checks->assertGroupMemberModelOnTheGroupConnection($config);
+
+    $config->set('access.group_member_model', null);
+    $config->set('auth.providers.users.model', null);
+    $checks->assertGroupMemberModelOnTheGroupConnection($config);
+
+    $config->set('database.connections.archive', null);
 });

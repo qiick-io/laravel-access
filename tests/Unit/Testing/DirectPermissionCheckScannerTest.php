@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use Qiick\Access\Contracts\RoleCatalog;
 use Qiick\Access\Testing\DirectPermissionCheckScanner;
 use Qiick\Access\Tests\Support\FakeIntPermissionEnum;
 use Qiick\Access\Tests\Support\FakePermissionEnum;
@@ -84,7 +85,7 @@ it('accepts a clean product', function (): void {
     ]))->toBe([]);
 });
 
-it('flags ->can() with the permission enum inside a Policy, however the enum is named', function (string $import, string $reference): void {
+it('flags ->can() with the permission enum inside a Policy, however the enum is named (AC9)', function (string $import, string $reference): void {
     $violations = scanProduct([
         'app/Policies/PostPolicy.php' => "<?php\n\nnamespace App\\Policies;\n\n{$import}\n\nfinal class PostPolicy\n{\n    public function view(\$actor): bool\n    {\n        return \$actor->can({$reference});\n    }\n}\n",
     ]);
@@ -237,6 +238,7 @@ it('flags an unlisted direct hasPermission() outside Policies with its site', fu
 })->with([
     'method call' => ["\$resolver->hasPermission(\$user, 'can-show-users')"],
     'assigned permission' => ["\$resolver->hasAssignedPermission(\$user, 'can-show-users', true)"],
+    'owner ceiling' => ["\$resolver->isWithinOwnerCeiling(\$user, 'can-show-users', true)"],
     'nullsafe' => ["\$resolver?->hasPermission(\$user, 'x')"],
     'static call' => ["Resolver::hasPermission(\$user, 'x')"],
     'mixed case' => ["\$resolver->HasPermission(\$user, 'x')"],
@@ -458,6 +460,97 @@ function scanPolicyBody(string $body, string $header = POLICY_HEADER): array
 
 const ENUM_MESSAGE = 'with the permission enum in a Policy';
 const UNVERIFIABLE_MESSAGE = 'with an ability that cannot be verified statically';
+
+it('reports role-only super-admin checks in Policies', function (string $body): void {
+    $violations = scanPolicyBody($body);
+
+    expect($violations)->toHaveCount(1)
+        ->and($violations[0])->toContain('super-admin', 'AC9');
+})->with([
+    'model predicate' => ['return $actor->isSuperAdmin();'],
+    'resolver predicate' => ['return $this->resolver->isSuperAdmin($actor);'],
+    'direct role predicate' => ['return $this->resolver->isDirectSuperAdmin($actor);'],
+    'role name' => ["return \$actor->hasRole('super-admin');"],
+    'catalog lookup' => ['return $actor->hasRole($catalog->superAdminRoleName());'],
+    'nullsafe catalog lookup' => ['return $actor->hasRole($catalog?->superAdminRoleName());'],
+    'catalog facade lookup' => ['return $actor->hasRole(RoleCatalogFacade::superAdminRoleName());'],
+    'uppercase enum case' => ['return $actor->hasRole(RoleEnum::SUPER_ADMIN);'],
+    'case variation' => ["return \$actor->hasRole('Super-Admin');"],
+    'pipe separators with spaces' => ["return \$actor->hasRole('admin | Super-Admin | auditor');"],
+    'roles collection' => ["return \$actor->roles->contains('name', 'super-admin');"],
+    'nullsafe roles property' => ["return \$actor?->roles->contains('name', 'super-admin');"],
+    'strict roles collection' => ["return \$actor->roles?->containsStrict('name', 'super-admin');"],
+    'static role scope' => ["return User::role('super-admin')->exists();"],
+    'chained role scope' => ['return User::query()->role($catalog->superAdminRoleName())->exists();'],
+    'role enum after named guard' => ["return \$actor?->hasRole(guard: 'web', roles: RoleEnum::SuperAdmin->value);"],
+    'pipe list' => ["return \$actor->hasRole('admin|super-admin');"],
+    'array argument' => ["return \$actor->hasAllRoles(['admin', 'super-admin']);"],
+    'exact role list' => ["return \$actor->hasExactRoles(['admin', 'super-admin']);"],
+    'later variadic argument' => ["return \$actor->hasAnyRole('admin', 'super-admin');"],
+    'first-class role callable' => ['return $actor->hasRole(...);'],
+    'callable string' => ["return [\$actor, 'isSuperAdmin'];"],
+]);
+
+it('resolves a super-admin role predicate through a trait alias', function (): void {
+    expect(scanProduct([
+        'app/Policies/UserPolicy.php' => <<<'PHP'
+            <?php
+
+            final class UserPolicy
+            {
+                use HasRoles { hasRole as hasMembershipRole; }
+
+                public function update($actor): bool
+                {
+                    return $actor->hasMembershipRole('super-admin');
+                }
+            }
+            PHP,
+    ]))->toHaveCount(1);
+});
+
+it('allows role membership checks in domain services', function (): void {
+    expect(scanProduct([
+        'app/Services/RoleService.php' => <<<'PHP'
+            <?php
+
+            final class RoleService
+            {
+                public function check($target): bool
+                {
+                    return $this->resolver->isSuperAdmin($target) && $target->hasRole('super-admin');
+                }
+            }
+            PHP,
+    ]))->toBe([]);
+});
+
+it('allows actor-aware authority, protected targets and ordinary roles in Policies', function (): void {
+    expect(scanPolicyBody(<<<'PHP'
+        return $this->resolver->isActorSuperAdmin($actor)
+            && !$this->guard->isProtectedFrom($actor, $target)
+            && $membership->hasRole(OrganizationRoleEnum::Owner)
+            && $actor->hasRole('admin')
+            && $actor->hasRole($catalog->defaultRoleName())
+            && $actor->roles->contains('name', 'admin')
+            && $actor->roles->pluck('super-admin')->isNotEmpty()
+            && User::role('admin')->exists()
+            && $labels->contains('super-admin');
+        PHP))->toBe([]);
+});
+
+it('reads the configured super-admin role name from the product catalog', function (): void {
+    app()->instance(RoleCatalog::class, new class implements RoleCatalog
+    {
+        public function superAdminRoleName(): string
+        {
+            return ' Root-Operator ';
+        }
+    });
+
+    expect(scanPolicyBody("return \$actor->hasRole('admin | ROOT-OPERATOR');"))->toHaveCount(1)
+        ->and(scanPolicyBody("return \$actor->hasRole('super-admin');"))->toBe([]);
+});
 
 it('reads calls across whitespace and comments', function (): void {
     expect(scanPolicyBody("return \$actor -> /* note */ can ( // why\n FakePermissionEnum::CanShowUsers );"))
@@ -837,4 +930,10 @@ it('reads every trait alias form and ignores aliases of unwatched methods', func
 it('applies the Gate macro rule only inside Policies', function (): void {
     expect(scanProduct(['app/Http/Controllers/PostController.php' => "<?php\nnamespace App\\Http\\Controllers;\nuse Illuminate\\Support\\Facades\\Gate;\nfinal class PostController\n{\n    public function index(\$a)\n    {\n        return Gate::checkPermission(\$a, 'x');\n    }\n}\n"]))
         ->toBe([]);
+});
+
+it('rejects the owner ceiling in a Policy, which would ignore the credential scopes', function (): void {
+    expect(scanPolicyBody("return \$this->resolver->isWithinOwnerCeiling(\$actor, 'can-show-users', true);"))->toHaveCount(1)
+        ->and(scanPolicyBody("return [\$this->resolver, 'isWithinOwnerCeiling'];"))->toHaveCount(1)
+        ->and(scanPolicyBody("return \$this->resolver->hasPermission(\$actor, 'can-show-users');"))->toBe([]);
 });

@@ -22,8 +22,10 @@ use Qiick\Access\Laravel\MigrationSettings;
  * - the nearest `user` principal of that chain (the principal itself for a
  *   membership principal) exists, every principal up to it in the
  *   principal's organisation;
- * - that user holds the permission in that organisation, read fresh and never
- *   through super-admin (EffectivePermissionResolver::hasAssignedPermission).
+ * - that user holds the permission in that organisation, read fresh
+ *   (EffectivePermissionResolver::isWithinOwnerCeiling): assigned to them, or
+ *   in the vocabulary when they are an instance super-admin (decision
+ *   2026-11-26). Never the super-admin Gate bypass itself.
  *
  * A service or agent without a user owner, and any instance principal (a
  * declared instance type, refused by its type wherever it appears in the
@@ -57,7 +59,7 @@ final class PrincipalCeiling
         $teams->switchTo($organisationId);
 
         try {
-            return $this->app->make(EffectivePermissionResolver::class)->hasAssignedPermission($user, $permission, true);
+            return $this->app->make(EffectivePermissionResolver::class)->isWithinOwnerCeiling($user, $permission, true);
         } finally {
             $teams->switchTo($previousTeamId);
         }

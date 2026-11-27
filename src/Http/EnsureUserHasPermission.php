@@ -25,9 +25,9 @@ use Symfony\Component\HttpFoundation\Response;
  * other guard (a token guard missing from `access.api_guards`) is denied, so
  * it never reaches the web super-admin grant.
  * An API actor needs both the credential's scopes (ApiActorScopeCheck) and the
- * owner's currently assigned permission, read fresh and without the
- * super-admin grant, so a key owned by a super-admin reaches only its scopes
- * ∩ what its owner really holds. With no ApiActorScopeCheck bound, API actors
+ * owner ceiling, read fresh (EffectivePermissionResolver::isWithinOwnerCeiling):
+ * the owner's assigned permissions, or the vocabulary for a super-admin owner,
+ * never the super-admin Gate bypass. With no ApiActorScopeCheck bound, API actors
  * are denied. Denials use the product's AuthorizationResponder body.
  *
  * Not a singleton: the resolver and actor resolver are scoped per request.
@@ -99,7 +99,7 @@ final class EnsureUserHasPermission
         $scopeCheck = $this->container->make(ApiActorScopeCheck::class);
 
         return $scopeCheck->allows($actor, $permission)
-            && $this->permissions->hasAssignedPermission($actor->user, $permission, true);
+            && $this->permissions->isWithinOwnerCeiling($actor->user, $permission, true);
     }
 
     /**

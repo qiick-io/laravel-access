@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Qiick\Access\Laravel;
 
+use Illuminate\Container\Container;
 use Illuminate\Contracts\Auth\Access\Gate;
 use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Contracts\Auth\Factory as AuthFactory;
@@ -18,6 +19,7 @@ use Illuminate\Queue\Events\JobProcessing;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\ServiceProvider;
+use Qiick\Access\Console\CheckAccessCommand;
 use Qiick\Access\Contracts\ActiveUsers;
 use Qiick\Access\Contracts\ActorResolver;
 use Qiick\Access\Contracts\GroupRoleSource;
@@ -60,7 +62,7 @@ final class AccessServiceProvider extends ServiceProvider
 {
     public function register(): void
     {
-        $this->mergeConfigFrom(__DIR__.'/../../config/access.php', 'access');
+        $this->mergeConfigDefaults();
 
         $this->app->scoped(AccessContext::class, AccessContext::class);
         $this->app->singleton(ActorPayloadStamper::class, ActorPayloadStamper::class);
@@ -83,19 +85,25 @@ final class AccessServiceProvider extends ServiceProvider
             return new SpatieTeamContext(
                 $app->make(PermissionRegistrar::class),
                 $app->make(AuthFactory::class),
-                function () use ($app): void {
-                    $app->make(EffectivePermissionResolver::class)->flush();
+                // The current container: a singleton adapter built at boot is
+                // copied into each Octane sandbox (#69).
+                static function (): void {
+                    Container::getInstance()->make(EffectivePermissionResolver::class)->flush();
                 },
             );
         });
 
-        $this->app->singleton(GroupRoleSource::class, function (Application $app): GroupRoleSource {
+        // Scoped: it holds the TeamContext, which a product may bind scoped (#66).
+        // An alias, so the boot checks can tell the package default from a
+        // product binding without building the product's (binding drops it).
+        $this->app->scoped(EloquentGroupRoleSource::class, function (Application $app): EloquentGroupRoleSource {
             return new EloquentGroupRoleSource(
                 $app->make(DatabaseManager::class),
                 $app->make(TeamContext::class),
                 $app->make(ConfigRepository::class),
             );
         });
+        $this->app->alias(EloquentGroupRoleSource::class, GroupRoleSource::class);
 
         $this->app->singleton(PermissionVocabulary::class, function (Application $app): PermissionVocabulary {
             $config = $app->make(ConfigRepository::class);
@@ -124,7 +132,7 @@ final class AccessServiceProvider extends ServiceProvider
         // on each invoke (B1). Closing over concrete scoped instances at boot
         // would pin a warm resolver across requests.
         $this->app->singleton(GateBefore::class, function (Application $app): GateBefore {
-            return new GateBefore($app);
+            return new GateBefore;
         });
 
         $this->app->singleton(PrincipalDirectory::class, function (Application $app): PrincipalDirectory {
@@ -139,7 +147,8 @@ final class AccessServiceProvider extends ServiceProvider
             return new AccessBootChecks($app);
         });
 
-        $this->app->singleton(EnsureTwoFactorIsEnabled::class, function (Application $app): EnsureTwoFactorIsEnabled {
+        // Scoped: it holds the scoped ActorResolver and the product's policy (#66).
+        $this->app->scoped(EnsureTwoFactorIsEnabled::class, function (Application $app): EnsureTwoFactorIsEnabled {
             return new EnsureTwoFactorIsEnabled(
                 $app->make(ActorResolver::class),
                 $app->make(TwoFactorPolicy::class),
@@ -149,7 +158,9 @@ final class AccessServiceProvider extends ServiceProvider
         });
 
         // ActiveUsers is product-bound; resolving SuperAdminGuard fails closed until then.
-        $this->app->singleton(SuperAdminGuard::class, function (Application $app): SuperAdminGuard {
+        // Scoped like the resolver it holds: a singleton would keep the first
+        // scope's resolver and its cached verdicts in a long-lived worker (#66).
+        $this->app->scoped(SuperAdminGuard::class, function (Application $app): SuperAdminGuard {
             return new SuperAdminGuard(
                 $app->make(EffectivePermissionResolver::class),
                 $app->make(ActiveUsers::class),
@@ -163,6 +174,9 @@ final class AccessServiceProvider extends ServiceProvider
         $config = $this->app->make(ConfigRepository::class);
 
         $this->app->make(AccessBootChecks::class)->assert();
+        $this->app->booted(function (): void {
+            $this->app->make(AccessBootChecks::class)->assertGroupMemberModelOnTheGroupConnection($this->app->make(ConfigRepository::class));
+        });
 
         foreach (['groups', 'principals'] as $migrationSet) {
             if ($config->get("access.migrations.{$migrationSet}", true) === true) {
@@ -174,6 +188,8 @@ final class AccessServiceProvider extends ServiceProvider
             $this->publishes([
                 __DIR__.'/../../config/access.php' => config_path('access.php'),
             ], 'access-config');
+
+            $this->commands([CheckAccessCommand::class]);
         }
 
         $this->registerGateBefore();
@@ -198,6 +214,27 @@ final class AccessServiceProvider extends ServiceProvider
                 AccessSchema::ensureConstraints();
             }
         });
+    }
+
+    /**
+     * mergeConfigFrom() at every depth (F1). Unlike mergeConfigFrom() it also
+     * runs on a cached configuration: a cache built before an upgrade, with
+     * the old shallow merge, can lack a new nested key, and a boot error
+     * there would keep Artisan from reaching config:clear. Merging again
+     * changes nothing the product set.
+     *
+     * @throws RuntimeException when config/access.php or one of its sections is not a map
+     */
+    private function mergeConfigDefaults(): void
+    {
+        $config = $this->app->make(ConfigRepository::class);
+        $defaults = require __DIR__.'/../../config/access.php';
+
+        if (! is_array($defaults)) {
+            throw new RuntimeException('The shipped config/access.php must return an array.');
+        }
+
+        $config->set('access', ConfigDefaultsMerger::merge($defaults, $config->get('access', [])));
     }
 
     private function registerGateBefore(): void
@@ -245,12 +282,12 @@ final class AccessServiceProvider extends ServiceProvider
         // Do not call createPayloadUsing(null): that would wipe other packages'
         // hooks (including illuminate:log:context).
         Queue::createPayloadUsing(function (mixed $connection, mixed $queue, array $payload): array {
-            return $this->app->make(ActorPayloadStamper::class)->stamp();
+            return Container::getInstance()->make(ActorPayloadStamper::class)->stamp();
         });
 
         $events = $this->app->make('events');
-        $stamper = fn (): ActorPayloadStamper => $this->app->make(ActorPayloadStamper::class);
-        $teamBoundary = fn (): SpatieTeamQueueBoundary => $this->app->make(SpatieTeamQueueBoundary::class);
+        $stamper = fn (): ActorPayloadStamper => Container::getInstance()->make(ActorPayloadStamper::class);
+        $teamBoundary = fn (): SpatieTeamQueueBoundary => Container::getInstance()->make(SpatieTeamQueueBoundary::class);
 
         $events->listen(JobProcessing::class, function (JobProcessing $event) use ($stamper, $teamBoundary): void {
             $this->flushResolver();
@@ -273,7 +310,7 @@ final class AccessServiceProvider extends ServiceProvider
         $forget = function (object $event): void {
             $model = $event->model ?? null;
             if ($model instanceof Authenticatable) {
-                $this->app->make(EffectivePermissionResolver::class)->forget($model);
+                Container::getInstance()->make(EffectivePermissionResolver::class)->forget($model);
             }
         };
 
@@ -294,14 +331,18 @@ final class AccessServiceProvider extends ServiceProvider
         }
 
         Event::listen("eloquent.saving: {$roleClass}", function (Model $role): void {
-            $this->app->make(ReservedRoleNameGuard::class)->assertAllowed($role);
+            Container::getInstance()->make(ReservedRoleNameGuard::class)->assertAllowed($role);
         });
     }
 
     private function flushResolver(): void
     {
-        if ($this->app->bound(EffectivePermissionResolver::class)) {
-            $this->app->make(EffectivePermissionResolver::class)->flush();
+        // The current container: under Octane each request runs in a clone of
+        // the boot container, with its own scoped resolver (#69).
+        $container = Container::getInstance();
+
+        if ($container->bound(EffectivePermissionResolver::class)) {
+            $container->make(EffectivePermissionResolver::class)->flush();
         }
     }
 

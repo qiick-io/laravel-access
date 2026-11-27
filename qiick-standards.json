@@ -1,5 +1,19 @@
 {
-    "$comment": "qiick standards pack: https://github.com/qiick-io/app-ui/tree/v0.12.0/standards. Sync: node <app-ui>/scripts/sync-standards.mjs --target .",
-    "ref": "v0.12.0",
-    "php": true
+    "$comment": "qiick standards pack: https://github.com/qiick-io/app-ui/tree/v0.15.0/standards. Sync: node <app-ui>/scripts/sync-standards.mjs --target .",
+    "ref": "v0.15.0",
+    "php": true,
+    "erasure": true,
+    "requiredChecks": [
+        "Databases (MariaDB 11.4)",
+        "Databases (MySQL 8.4)",
+        "Databases (PostgreSQL 17)",
+        "Erasure (E1–E14)",
+        "migrations-frozen / migrations-frozen",
+        "Mutation (per-class ≥95%)",
+        "PHP 8.5 Laravel 13 stable",
+        "Pint and PHPStan",
+        "pr-title / commitlint",
+        "standards / standards"
+    ],
+    "package": true
 }

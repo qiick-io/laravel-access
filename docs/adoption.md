@@ -1,6 +1,6 @@
 # Adoption
 
-Product adoption order (design §10): package `0.1.0-beta.2` → **excubia-app** →
+Product adoption order (design §10): package `0.1.0-beta.3` → **excubia-app** →
 signaculum-core → instituta-core → **externa-core** last → then
 `qiick/laravel-api-keys` in each product.
 
@@ -103,24 +103,23 @@ by writing rows directly; the `Principal` model is fully guarded.
 - `instance($type, $name)`: the singleton of a declared instance type (only
   with `organisation_required`). It is returned even when deactivated: check
   `isActive()` before use;
+- `markErased($principal)`: in the product's soft-delete transaction, call
+  this for each principal of type `user` linked to the user. It records an
+  `erased` tombstone even for an inactive principal, preserves the original
+  deactivation time and keeps the user link so `forMember()` refuses to
+  reactivate it after a restore. It deactivates owned principals and emits
+  `PrincipalDeactivatedEvent` after commit so listeners can revoke credentials.
+  Products with a custom `PrincipalDirectory` implement the same transition;
 - `deactivate($principal, DeactivationReason)`: deactivates the principal,
   unless it already is (an erased tombstone is never rewritten), and every
-  active principal it owns, in one transaction. `PrincipalDeactivated` (with
+  active principal it owns, in one transaction. `PrincipalDeactivatedEvent` (with
   the owned ids) is dispatched after the surrounding transaction commits.
   **Revoke their API keys in a listener** (qiick/laravel-api-keys reason
   `owner`);
-- `eraseUser($user, fn ($user) => $user->forceDelete())`: GDPR erasure in
-  one transaction. Every principal of the user becomes an `erased` tombstone
-  (user unlinked, name anonymised), the principals it owns are deactivated,
-  then the closure hard-deletes the user. If the user row still exists
-  afterwards (a soft delete, or no delete), `eraseUser()` throws and rolls
-  everything back: an erasure that keeps the person's data, or lets a restore
-  mint a fresh principal past the tombstone, never commits.
-  `principals.user_id` is `ON DELETE RESTRICT`, so deleting a user who still
-  has principals any other way throws `UserHasPrincipalsException` (a soft
-  delete is allowed, since it keeps the row). The users model and the
-  principal model must use one database connection: `eraseUser()` refuses
-  otherwise, because the user delete would wait on its own locks;
+- `eraseUser($user, $deleteUser)`: the existing directory entry point for
+  products that use its hard-delete callback. It shares the principal
+  scrub with the fleet eraser and keeps the `PrincipalDeactivatedEvent` events.
+  If the callback leaves the user row in place, the transaction rolls back;
 - `isActive($principalId)`: the use-time check behind a key: not deactivated,
   not expired, a `user` principal still has its user, an instance-level row
   is one the organisation rule allows, and every owner up the chain is active.
@@ -131,14 +130,37 @@ The directory reads `access.principals.organisation_required` and
 migration ran: keep them unchanged after migrating, or the database refuses
 what the directory allows with a driver error.
 
+### Fleet erasure
+
+The product's erasure job resolves `Qiick\Access\Erasure\AccessEraser` from
+the container and calls `erase()` with the subject snapshot. For a full
+erasure, call it in the users connection transaction immediately before
+hard-deleting the user. Both operations commit together. For offboarding,
+pass `organisationId` and keep the user row. Principals and group memberships
+are scoped to that organisation, as are Spatie grants when teams are enabled.
+Instance-level grants stay in effect during organisation offboarding.
+
+Both modes scrub subject principals, unlink their creator and ownership
+references, deactivate owned accounts and remove membership and grant rows.
+The principal UUIDs remain as tombstones for audit and credential references.
+The result reports counts only. `dryRun: true` previews those counts. After
+commit Access drops the subject's process-local permission and super-admin
+verdicts and emits `Qiick\Access\Events\SubjectErasedEvent` with the report.
+Access evaluates the product's `TwoFactorPolicy` on each check. The product
+owns any cache its policy maintains, its activity records, and credential
+revocation. Keep the users, principals, group tables and Spatie grants on the
+default connection for the fleet eraser.
+
 **The owner ceiling behind a key** (design §15.4): the product's key
 authorizer checks the credential's own scopes, then
 `Qiick\Access\Principals\PrincipalCeiling::allows($ownerPrincipalId,
 $permission)`. It is true only when the principal and every owner up its chain
 are active, the nearest `user` principal up that chain (the principal itself
 for a membership) is in the same organisation, and that user holds the
-permission in that organisation right now (read fresh, never through
-super-admin). The team context is switched for the check and always restored.
+permission in that organisation right now (read fresh). An instance
+super-admin's ceiling is every permission of the vocabulary (decision
+[2026-11-26](decisions/2026-11-26-super-admin-key-ceiling.md)), never the
+super-admin Gate bypass. The team context is switched for the check and always restored.
 A service or agent with no user owner, and any instance principal, gets
 `false`: its powers come from the product's scopes alone.
 
@@ -187,11 +209,30 @@ membership FK targets `access.users_table` when set, otherwise the table from
 group uses `is_instance = true` with `organisation_id` NULL; a CHECK forbids
 `is_instance = true` together with a non-null `organisation_id`.
 
+The resolver caches each decision for the request or job (C29 / AC6). It is
+cleared between requests and jobs, by `TeamContext::switchTo()`, by fresh
+checks, and for one user by Spatie's role and permission attach and detach
+events on that user. After the product writes `user_group_user` or
+`user_group_role`, soft-deletes or restores a group, or changes a role's
+permissions (`Role::givePermissionTo()` fires no event on a user), it calls
+`app(EffectivePermissionResolver::class)->forget($user)` for every member it
+changed, or `flush()` for a group- or role-wide change, before it checks
+permissions again in the same request or job. A membership that expires
+while a job runs counts until then; the next request or job starts clean.
+
+Under Octane the Gate (package, legacy and shadow), the Spatie event
+clears and `switchTo()` use the container of the current request, so they
+reach the resolver the request reads (#69).
+
 Group memberships are read from the default database connection. They
 count only for a user that is exactly the group member model
 (`access.group_member_model`, else `auth.providers.users.model`) and whose
 connection name is exactly the default connection's; the member model
-itself must use the default connection. The package compares the declared
+itself must use the default connection, or boot fails
+(`AccessBootChecks::assertGroupMemberModelOnTheGroupConnection()`), and its
+table must be the one `user_group_user.user_id` points at (`access.users_table`,
+else the user model's table), or boot fails too. A product that binds its own
+`GroupRoleSource` is not checked, and its factory is not built at boot. The package compares the declared
 names and never resolves where a connection points. Everything else gets no
 group roles: a subclass (a product with single-table inheritance sets
 `access.group_member_model` to the subclass it authenticates), a user of
@@ -274,6 +315,21 @@ teams, bind `TeamContext` to `SpatieTeamContext` through the container
 the resolver flush its constructor requires. `isDirectSuperAdmin()` is the same filter-off check for a **direct**
 role only — products use it with `TwoFactorPolicy::hasUsableFactor()` for
 break-glass (P6); the OIDC break-glass seam stays outside this package (R7).
+
+Product policies must use `EffectivePermissionResolver::isActorSuperAdmin($actor)`
+when granting super-admin authority, including in a policy's `before()` method.
+It uses the same actor resolution as `Gate::before` and returns `false` for API
+keys, OAuth grants and public API actors, even when their acting user has the
+role. For protected accounts, `SuperAdminGuard::isProtectedFrom($actor,
+$target)` combines actor authority with subject role membership. Use
+`isSuperAdmin($target)` in domain services that need role membership alone.
+
+Exercise each super-admin policy exception with the same user in a web session
+and behind a scoped API credential. Use `Gate::forUser($actor)->allows($ability,
+$subject)` with the real policy subject and bind the verified API actor before
+the API check. Give the credential the ordinary scopes it needs to reach the
+policy so the test exercises the exception itself.
+
 Register `EnsureTwoFactorIsEnabled` on the web stack; exempt routes live in
 `access.two_factor.exempt_route_names`. Bind `ActiveUsers` and use
 `SuperAdminGuard` for super-admin grant/revoke and last-admin protection.
@@ -309,8 +365,10 @@ A web actor passes with the permission from the resolver, super-admin
 included, only when the request's guard is in `access.web_guards` (default
 `web`) and its user is the bound `AccessContext` user, if one is bound. An API
 actor passes only when the credential's scopes allow the permission **and** its
-owner currently holds it (read fresh, never through super-admin: neither the
-vocabulary grant nor permissions attached to the super-admin role count). The
+owner ceiling covers it (`isWithinOwnerCeiling()`, read fresh): the owner's
+assigned permissions, or the vocabulary for an instance super-admin owner.
+Never the Gate bypass, and never permissions only attached to the
+super-admin role row. The
 scope half is the product's (or `qiick/laravel-api-keys`'s)
 `ApiActorScopeCheck` binding; with none bound, every API actor is denied.
 
@@ -351,12 +409,18 @@ It fails on any Gate ability call (`can`, `cannot`, `cant`, `canAny`,
 `allows`, `denies`, `authorize`, `inspect`) with a permission inside a Policy,
 on one whose ability it cannot read statically, and on dynamically named calls
 in Policies, and on any static `Gate::` method outside the known Gate API (a
-macro). Class attributes count as part of their class, and trait aliases of a
-watched method (`use T { hasPermission as checkPermission; }`) count as that
-method. Outside Policies and the Inertia share (`share()` of
+macro). It also flags role-only `isSuperAdmin()` and `isDirectSuperAdmin()`
+calls in Policies. For `hasRole()` and related methods, `roles->contains()`
+and the `role()` scope, it recognises the role name from `RoleCatalog`
+case-insensitively, including pipe lists with spaces, as well as catalog
+lookups and enum cases such as `SuperAdmin` or `SUPER_ADMIN`. Callable
+references to role predicates fail because the scanner cannot read the role
+arguments at the call site. Class attributes count as part of their class,
+and trait aliases of a watched method (`use T { hasPermission as checkPermission; }`)
+count as that method. Outside Policies and the Inertia share (`share()` of
 `App\Http\Middleware\HandleInertiaRequests`, or the class passed as the
-scanner's third argument), each direct `hasPermission()` /
-`hasAssignedPermission()` site must be listed:
+scanner's third argument), each direct `hasPermission()`,
+`hasAssignedPermission()` or `isWithinOwnerCeiling()` site must be listed:
 
 ```json
 "access": {
