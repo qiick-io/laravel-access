@@ -113,29 +113,37 @@ test named in [security-checklist.md](security-checklist.md).
   With `access.use_package_gate = false` (externa, until v2) the product's
   `LegacyGateBefore` is the one registered callback instead; with
   `access.gate_shadow` the other one also runs and only logs.
-- **Owner ceiling of an API actor** (`isWithinOwnerCeiling()`): the owner's
-  assigned permissions (direct and group); for a super-admin owner the whole
-  vocabulary, never the Gate bypass and never a permission outside the
-  vocabulary (decision
-  [2026-11-26](decisions/2026-11-26-super-admin-key-ceiling.md)). It is
-  cached for the scope unless called with `fresh: true`; the package's use
-  sites (`EnsureUserHasPermission`, `AuthorizesWithPermission`,
-  `PrincipalCeiling::allows()`) always read it fresh and intersect it with
-  the credential's scopes.
-- **`PrincipalCeiling::allows()`**: the ceiling of the user behind the
-  nearest `user` principal of an active owner chain in one organisation,
-  read in that organisation; an unowned service, a chain that leaves the
-  organisation or reaches an instance type first, and a missing user give an
-  empty ceiling.
+- **Owner ceiling of an API actor** (`isWithinOwnerCeiling()`): for an
+  ordinary owner, the permissions assigned to them (direct and group). For a
+  super-admin owner, the whole vocabulary: never the Gate bypass, and never
+  a permission outside the vocabulary. That last exclusion belongs to the
+  super-admin ceiling only (decision
+  [2026-11-26](decisions/2026-11-26-super-admin-key-ceiling.md)). The
+  ceiling is cached for the scope unless called with `fresh: true`. The
+  package's use sites (`EnsureUserHasPermission`,
+  `AuthorizesWithPermission`, `PrincipalCeiling::allows()`) always read it
+  fresh. The two middleware sites also intersect it with the credential's
+  scopes.
+- **`PrincipalCeiling::allows($principal, $permission)`** checks the ceiling
+  only. It takes no scopes, so the product's key authorizer checks the key's
+  scopes itself. The ceiling is the one of the user behind the nearest
+  `user` principal of an active owner chain in one organisation, read in
+  that organisation. An unowned service, a chain that leaves the
+  organisation or reaches an instance type first, and a missing user give
+  an empty ceiling.
 - **Group memberships** count only for exactly the member model class on the
   default connection, skip soft-deleted groups (C7) and memberships whose
   `expires_at` has passed (AC15); super-admin through a group counts only
   `is_instance` groups (C30).
 - **Principals:** `principals.user_id` is `ON DELETE RESTRICT`, so a user
-  with principals is deleted only through erasure. `deactivate()` and
-  `markErased()` never rewrite an inactive principal's reason or cutoff, and
-  `markErased()` keeps the user link (a soft-delete tombstone); erasure
-  itself anonymises the row and clears that link. `isActive()` follows at
+  with principals is deleted only through erasure. `deactivate()` changes
+  an active principal only and never rewrites an inactive one's reason or
+  cutoff. `markErased()` (type `user` only) sets the reason to `Erased` on
+  an active or inactive principal and keeps the cutoff of one that was
+  already inactive. It leaves an `Erased` tombstone unchanged, and it keeps
+  the user link (a soft-delete tombstone). No call reactivates an `Erased`
+  principal, so restoring the user does not bring its principals back.
+  Erasure itself anonymises the row and clears that link. `isActive()` follows at
   most eight principals, the subject included.
 - **`PrincipalDirectory::eraseUser()`** is deprecated and stays until 2.0:
   products erase users through their erasure orchestrator, which calls

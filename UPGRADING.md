@@ -11,10 +11,18 @@ See [docs/public-api.md](docs/public-api.md#deprecation-policy).
 ## Unreleased
 
 - `PrincipalDirectory::eraseUser()` is deprecated (removed in 2.0.0). Delete
-  users only through the product's erasure orchestrator: it writes the
+  users only through the product's erasure orchestrator. It writes the
   resumable `erasure_requests` row, runs `Erasure\AccessEraser` with the
-  other erasers, deletes the user row itself and revokes the user's
-  credentials in its `PrincipalDeactivatedEvent` listener, as before.
+  other erasers and deletes the user row itself. `AccessEraser` dispatches
+  only `SubjectErasedEvent` after commit, never `PrincipalDeactivatedEvent`,
+  so a revocation listener on that event is not reached on this path.
+  Revoke credentials as an orchestrator step of its own. Before the erasers
+  run, take the ids of the user's principals and all their descendants from
+  the snapshot, while the ownership links still exist. Then revoke every
+  credential of those principals, idempotently, so a resumed request does
+  it again safely. Use-time checks already refuse keys of an inactive
+  principal, but the keys are not revoked until this step runs. Prove it in
+  the product's C17 test.
 
 - Rename the principal event listeners' types:
   `Qiick\Access\Principals\PrincipalCreated` →
