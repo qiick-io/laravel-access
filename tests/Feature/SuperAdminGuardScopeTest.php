@@ -38,7 +38,7 @@ beforeEach(function (): void {
     $groupRoles = Mockery::mock(GroupRoleSource::class);
     $groupRoles->shouldReceive('instanceRoleIdsFor')->andReturn([]);
     $groupRoles->shouldReceive('roleIdsFor')->andReturn([]);
-    app()->instance(GroupRoleSource::class, $groupRoles);
+    app()->scoped(GroupRoleSource::class, fn (): GroupRoleSource => $groupRoles);
 
     app()->instance(ActiveUsers::class, new class implements ActiveUsers
     {
