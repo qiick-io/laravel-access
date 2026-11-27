@@ -2,11 +2,13 @@
 
 declare(strict_types=1);
 
+use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
+use Qiick\Access\Contracts\GroupRoleSource;
 use Qiick\Access\Contracts\PermissionVocabulary;
 
 /*
@@ -142,4 +144,67 @@ it('reports an unreachable default database (F2)', function (): void {
     } finally {
         DB::setDefaultConnection($defaultConnection);
     }
+});
+
+it('reads the tables on the primary, not on a replica that has them (F2)', function (): void {
+    // Codex review of #62: hasTable() selects through the read PDO.
+    $defaultConnection = DB::getDefaultConnection();
+    $primaryDatabase = tempnam(sys_get_temp_dir(), 'access-primary');
+    $replicaDatabase = tempnam(sys_get_temp_dir(), 'access-replica');
+    $replica = new PDO('sqlite:'.$replicaDatabase);
+
+    foreach (['roles', 'permissions', 'model_has_roles', 'model_has_permissions', 'role_has_permissions', 'user_groups', 'user_group_user', 'user_group_role', 'principals'] as $table) {
+        $replica->exec("CREATE TABLE {$table} (id INTEGER)");
+    }
+
+    config()->set('database.connections.split', [
+        'driver' => 'sqlite',
+        'read' => ['database' => $replicaDatabase],
+        'write' => ['database' => $primaryDatabase],
+    ]);
+    DB::setDefaultConnection('split');
+
+    try {
+        $this->artisan('access:check')
+            ->expectsOutputToContain('Table [roles] is missing on the default connection')
+            ->assertFailed();
+    } finally {
+        DB::setDefaultConnection($defaultConnection);
+        DB::purge('split');
+        unlink($primaryDatabase);
+        unlink($replicaDatabase);
+    }
+});
+
+it('does not require the group tables for a product group source with the group migrations off (F2)', function (): void {
+    config()->set('access.migrations.groups', false);
+    app()->forgetScopedInstances();
+    app()->instance(GroupRoleSource::class, new class implements GroupRoleSource
+    {
+        public function roleIdsFor(Authenticatable $user): array
+        {
+            return [];
+        }
+
+        public function instanceRoleIdsFor(Authenticatable $user): array
+        {
+            return [];
+        }
+    });
+
+    foreach (['user_group_role', 'user_group_user', 'user_groups'] as $table) {
+        Schema::drop($table);
+    }
+
+    $this->artisan('access:check')->assertSuccessful();
+});
+
+it('still requires the group tables when the package source reads product-owned tables (F2)', function (): void {
+    // Externa 1.x: group migrations off, the same tables owned by the product.
+    config()->set('access.migrations.groups', false);
+    Schema::drop('user_group_role');
+
+    $this->artisan('access:check')
+        ->expectsOutputToContain('Table [user_group_role] is missing on the default connection')
+        ->assertFailed();
 });

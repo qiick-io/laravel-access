@@ -7,8 +7,10 @@ namespace Qiick\Access\Console;
 use Illuminate\Console\Command;
 use Illuminate\Contracts\Config\Repository as ConfigRepository;
 use Illuminate\Database\DatabaseManager;
+use Qiick\Access\Contracts\GroupRoleSource;
 use Qiick\Access\EffectivePermissionResolver;
 use Qiick\Access\Laravel\AccessBootChecks;
+use Qiick\Access\Laravel\EloquentGroupRoleSource;
 use Symfony\Component\Console\Formatter\OutputFormatter;
 use Throwable;
 
@@ -75,8 +77,12 @@ final class CheckAccessCommand extends Command
             }
         }
 
-        // Externa 1.x switches the group migrations off and owns the same tables.
-        $tables = [...$tables, 'user_groups', 'user_group_user', 'user_group_role'];
+        // Required when the package migrates them or its own source reads
+        // them (Externa 1.x owns the same tables with the migrations off);
+        // a product GroupRoleSource keeps its own store.
+        if ($config->get('access.migrations.groups', true) === true || $this->readsPackageGroupTables()) {
+            $tables = [...$tables, 'user_groups', 'user_group_user', 'user_group_role'];
+        }
 
         // The provider's default: the principals migration loads unless switched off.
         if ($config->get('access.migrations.principals', true) === true) {
@@ -85,19 +91,39 @@ final class CheckAccessCommand extends Command
 
         try {
             $connection = $database->connection();
-            // hasTable() reads through a replica; the package writes through the primary.
+            // The package writes through the primary, and hasTable() selects
+            // through the read PDO, so the metadata is read on the writer.
             $connection->getPdo();
-            $schema = $connection->getSchemaBuilder();
+            $connection->useWriteConnectionWhenReading();
 
-            foreach ($tables as $table) {
-                if (! $schema->hasTable($table)) {
-                    $problems[] = "Table [{$table}] is missing on the default connection; run the migrations.";
+            try {
+                $schema = $connection->getSchemaBuilder();
+
+                foreach ($tables as $table) {
+                    if (! $schema->hasTable($table)) {
+                        $problems[] = "Table [{$table}] is missing on the default connection; run the migrations.";
+                    }
                 }
+            } finally {
+                $connection->useWriteConnectionWhenReading(false);
             }
         } catch (Throwable) {
             return [...$problems, 'The default database connection ['.$database->getDefaultConnection().'] is unreachable.'];
         }
 
         return $problems;
+    }
+
+    /**
+     * A product source that cannot be built here is reported by the resolver
+     * check above; its tables are its own.
+     */
+    private function readsPackageGroupTables(): bool
+    {
+        try {
+            return $this->getLaravel()->make(GroupRoleSource::class) instanceof EloquentGroupRoleSource;
+        } catch (Throwable) {
+            return false;
+        }
     }
 }
