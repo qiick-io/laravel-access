@@ -9,6 +9,7 @@ use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Contracts\Auth\Factory as AuthFactory;
 use Illuminate\Contracts\Config\Repository as ConfigRepository;
 use Illuminate\Contracts\Foundation\Application;
+use Illuminate\Contracts\Foundation\CachesConfiguration;
 use Illuminate\Database\DatabaseManager;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Events\MigrationsEnded;
@@ -60,7 +61,7 @@ final class AccessServiceProvider extends ServiceProvider
 {
     public function register(): void
     {
-        $this->mergeConfigFrom(__DIR__.'/../../config/access.php', 'access');
+        $this->mergeConfigDefaults();
 
         $this->app->scoped(AccessContext::class, AccessContext::class);
         $this->app->singleton(ActorPayloadStamper::class, ActorPayloadStamper::class);
@@ -208,6 +209,27 @@ final class AccessServiceProvider extends ServiceProvider
                 AccessSchema::ensureConstraints();
             }
         });
+    }
+
+    /**
+     * mergeConfigFrom() at every depth (F1). Skipped when the configuration is
+     * cached, like mergeConfigFrom(): the cache already holds the merged values.
+     */
+    private function mergeConfigDefaults(): void
+    {
+        if ($this->app instanceof CachesConfiguration && $this->app->configurationIsCached()) {
+            return;
+        }
+
+        $config = $this->app->make(ConfigRepository::class);
+        $defaults = require __DIR__.'/../../config/access.php';
+        $published = $config->get('access', []);
+
+        if (! is_array($defaults)) {
+            throw new RuntimeException('config/access.php must return an array.');
+        }
+
+        $config->set('access', ConfigDefaultsMerger::merge($defaults, is_array($published) ? $published : []));
     }
 
     private function registerGateBefore(): void
