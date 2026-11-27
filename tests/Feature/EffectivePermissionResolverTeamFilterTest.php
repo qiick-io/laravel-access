@@ -288,3 +288,22 @@ it('ignores the team filter for a global super-admin assigned in no current team
         ->and($resolver->roleNamesFor($user))->toBe(['super-admin'])
         ->and($registrar->teams)->toBeTrue();
 });
+
+it('withholds the bypass for a direct role in another organisation than the current one (C31)', function (): void {
+    $registrar = app(PermissionRegistrar::class);
+    $registrar->setPermissionsTeamId('org-2');
+    $user = SpatieUser::query()->create(['email' => 'mixed@example.com']);
+    $user->assignRole(Role::create(['name' => 'org-editor', 'guard_name' => 'web', 'organisation_id' => 'org-2']));
+    $registrar->setPermissionsTeamId('org-1');
+    $user->assignRole(Role::create(['name' => 'super-admin', 'guard_name' => 'web', 'organisation_id' => null]));
+
+    $groupRoles = Mockery::mock(GroupRoleSource::class, ListsAllGroupRoles::class);
+    $groupRoles->shouldReceive('roleIdsFor', 'instanceRoleIdsFor', 'allRoleIdsFor')->andReturn([]);
+    $this->app->instance(GroupRoleSource::class, $groupRoles);
+    $this->app->forgetInstance(EffectivePermissionResolver::class);
+    $resolver = app(EffectivePermissionResolver::class);
+
+    expect($resolver->holdsMixedSuperAdmin($user))->toBeTrue()
+        ->and($resolver->isSuperAdmin($user))->toBeFalse()
+        ->and($registrar->teams)->toBeTrue();
+});

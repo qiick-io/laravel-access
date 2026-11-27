@@ -58,7 +58,7 @@ final class EffectivePermissionResolver
      * scope. Not cleared by forget() or flush(): a fresh read must not
      * report the same subject again.
      *
-     * @var array<string, true>
+     * @var array<string, array<string, array<class-string, bool>>>
      */
     private array $withheldReported = [];
 
@@ -134,10 +134,8 @@ final class EffectivePermissionResolver
         // reads the verdict instead of dispatching once more.
         $this->superAdminVerdicts[$principalType][$identifier][$user::class] = $holdsRole && ! $isWithheld;
 
-        $reportKey = json_encode([$principalType, $identifier, $user::class], JSON_THROW_ON_ERROR);
-
-        if ($isWithheld && ! isset($this->withheldReported[$reportKey])) {
-            $this->withheldReported[$reportKey] = true;
+        if ($isWithheld && ! ($this->withheldReported[$principalType][$identifier][$user::class] ?? false)) {
+            $this->withheldReported[$principalType][$identifier][$user::class] = true;
             // No user id in the log line (design §9.4); access:check lists them.
             Container::getInstance()->make('log')->warning('qiick/laravel-access: a super-admin also holds other roles, so the super-admin bypass is withheld; run access:check.');
             Container::getInstance()->make('events')->dispatch(new SuperAdminBypassWithheldEvent($user));
@@ -155,8 +153,7 @@ final class EffectivePermissionResolver
      */
     public function holdsMixedSuperAdmin(Authenticatable $user): bool
     {
-        $this->forget($user);
-
+        // Both reads drop the loaded roles relation and use no cache.
         return $this->holdsSuperAdminRole($user) && $this->holdsOtherRoles($user);
     }
 
@@ -359,7 +356,9 @@ final class EffectivePermissionResolver
 
         $groupRoleIds = $this->groupRoles instanceof ListsAllGroupRoles
             ? $this->groupRoles->allRoleIdsFor($user)
-            : [...$this->groupRoles->roleIdsFor($user), ...$this->groupRoles->instanceRoleIdsFor($user)];
+            // Without teams there are no organisation groups: the current
+            // context already includes the instance ones.
+            : $this->groupRoles->roleIdsFor($user);
 
         $names = [
             ...$this->directRoleNamesInEveryTeam($user),
@@ -376,20 +375,14 @@ final class EffectivePermissionResolver
      */
     private function directRoleNamesInEveryTeam(Authenticatable $user): array
     {
-        if (! $this->registrar->teams) {
-            if ($user instanceof Model) {
-                $user->unsetRelation('roles');
-            }
-
-            return $this->pluckRoleNames($user);
-        }
-
+        // Spatie applies the team filter when it builds the relation.
+        $isTeamFiltered = $this->registrar->teams;
         $this->registrar->teams = false;
 
         try {
             $relation = method_exists($user, 'roles') ? $user->roles() : null;
         } finally {
-            $this->registrar->teams = true;
+            $this->registrar->teams = $isTeamFiltered;
         }
 
         if (! $relation instanceof BelongsToMany) {

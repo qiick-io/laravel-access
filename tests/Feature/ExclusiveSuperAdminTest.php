@@ -7,6 +7,7 @@ use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
 use Qiick\Access\Contracts\ActiveUsers;
@@ -367,6 +368,22 @@ it('reports a withheld bypass once per scope, even after the verdict is forgotte
     $resolver->isSuperAdmin($user);
 
     Event::assertDispatchedTimes(SuperAdminBypassWithheldEvent::class, 1);
+
+    // Another subject is reported on its own.
+    $resolver->isSuperAdmin(exclusiveUser('super-admin', 'admin'));
+    Event::assertDispatchedTimes(SuperAdminBypassWithheldEvent::class, 2);
+});
+
+it('logs a withheld bypass once, without the user id', function (): void {
+    Log::spy();
+    $user = exclusiveUser('super-admin', 'reader');
+    $resolver = app(EffectivePermissionResolver::class);
+
+    $resolver->isSuperAdmin($user);
+    $resolver->flush();
+    $resolver->isSuperAdmin($user);
+
+    Log::shouldHaveReceived('warning')->once()->withArgs(fn (string $message): bool => str_contains($message, 'bypass is withheld') && ! str_contains($message, (string) $user->id));
 });
 
 it('serialises two overlapping writes so the second sees the first (InnoDB, PostgreSQL)', function (): void {
