@@ -213,7 +213,8 @@ Group memberships are read from the default database connection. They
 count only for a user that is exactly the group member model
 (`access.group_member_model`, else `auth.providers.users.model`) and whose
 connection name is exactly the default connection's; the member model
-itself must use the default connection. The package compares the declared
+itself must use the default connection, or boot fails
+(`AccessBootChecks::assertGroupMemberModelOnTheGroupConnection()`). The package compares the declared
 names and never resolves where a connection points. Everything else gets no
 group roles: a subclass (a product with single-table inheritance sets
 `access.group_member_model` to the subclass it authenticates), a user of

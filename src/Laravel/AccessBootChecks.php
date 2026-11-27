@@ -6,6 +6,7 @@ namespace Qiick\Access\Laravel;
 
 use Illuminate\Contracts\Config\Repository as ConfigRepository;
 use Illuminate\Contracts\Foundation\Application;
+use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\ConfigurationUrlParser;
 use Qiick\Access\Contracts\ActorResolver;
 use Qiick\Access\Contracts\AuthorizationResponder;
@@ -40,6 +41,39 @@ final class AccessBootChecks
         $this->assertNoLegacyMigrationsSwitch($config);
         $this->assertGateSelection($config);
         $this->assertConnectionNamesMatchTheirKeys($config);
+        $this->assertGroupMemberModelOnTheGroupConnection($config);
+    }
+
+    /**
+     * user_group_user.user_id holds ids of the member model's table on the
+     * group tables' connection, the default one. A member model on another
+     * connection would get no group roles at runtime (EloquentGroupRoleSource
+     * fails closed), so the misconfiguration is refused at boot instead of
+     * silently emptying every group (issue #27). A member model that is not
+     * an Eloquent model gets no group roles either and has no connection to
+     * compare.
+     *
+     * @throws RuntimeException naming the key, the model and its connection
+     */
+    public function assertGroupMemberModelOnTheGroupConnection(ConfigRepository $config): void
+    {
+        $key = $config->get('access.group_member_model') !== null ? 'access.group_member_model' : 'auth.providers.users.model';
+        $memberModel = $config->get($key);
+
+        if (! is_string($memberModel) || ! is_subclass_of($memberModel, Model::class)) {
+            return;
+        }
+
+        $groupConnectionName = $config->get('database.default');
+        $memberConnectionName = (new $memberModel)->getConnectionName() ?? $groupConnectionName;
+
+        if ($memberConnectionName !== $groupConnectionName) {
+            $shownConnectionName = is_string($memberConnectionName) ? $memberConnectionName : get_debug_type($memberConnectionName);
+
+            throw new RuntimeException(
+                "{$key} [{$memberModel}] uses the connection [{$shownConnectionName}], but the group tables are read from the default connection; group members must use the default connection (see docs/adoption.md).",
+            );
+        }
     }
 
     /**
