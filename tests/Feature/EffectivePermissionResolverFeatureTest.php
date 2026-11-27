@@ -240,7 +240,8 @@ it('leaves the super-admin role\'s own permissions out of the assigned ceiling, 
 
     expect($resolver->isSuperAdmin($directAdmin))->toBeTrue()
         ->and($resolver->hasAssignedPermission($directAdmin, FakePermissionEnum::CanEditUsers->value))->toBeFalse()
-        ->and($resolver->isSuperAdmin($groupAdmin))->toBeTrue()
+        // Super-admin next to viewer: no bypass (fail-closed, decision 2026-11-26).
+        ->and($resolver->isSuperAdmin($groupAdmin))->toBeFalse()
         ->and($resolver->hasAssignedPermission($groupAdmin, FakePermissionEnum::CanEditUsers->value))->toBeFalse()
         ->and($resolver->hasAssignedPermission($groupAdmin, FakePermissionEnum::CanShowUsers->value))->toBeTrue();
 });
@@ -397,7 +398,8 @@ it('never lets a morph sibling class reuse the cached group grants of another cl
     $this->app->forgetInstance(EffectivePermissionResolver::class);
     $resolver = app(EffectivePermissionResolver::class);
 
-    expect($resolver->isSuperAdmin($user))->toBeTrue()
+    // Super-admin next to the group viewer: no bypass for either class (fail-closed).
+    expect($resolver->isSuperAdmin($user))->toBeFalse()
         ->and($resolver->hasAssignedPermission($user, FakePermissionEnum::CanShowUsers->value))->toBeTrue()
         ->and($resolver->isSuperAdmin($sibling))->toBeFalse()
         ->and($resolver->hasAssignedPermission($sibling, FakePermissionEnum::CanShowUsers->value))->toBeFalse()

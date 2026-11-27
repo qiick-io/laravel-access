@@ -241,9 +241,11 @@ it('detects super-admin when the global role arrives only through an instance gr
 
     $resolver = app(EffectivePermissionResolver::class);
 
-    expect($resolver->isSuperAdmin($user))->toBeTrue()
+    // With org roles next to it the bypass is withheld (fail-closed); the
+    // super-admin role still arrives through the instance group (C30).
+    expect($resolver->isSuperAdmin($user))->toBeFalse()
+        ->and($resolver->holdsMixedSuperAdmin($user))->toBeTrue()
         ->and($registrar->teams)->toBeTrue()
-        ->and($resolver->hasPermission($user, FakePermissionEnum::CanShowUsers->value))->toBeTrue()
         ->and($resolver->roleNamesFor($user))->toBe(['org-editor', 'org-viewer', 'super-admin']);
 });
 

@@ -4,15 +4,18 @@ declare(strict_types=1);
 
 namespace Qiick\Access;
 
+use Illuminate\Container\Container;
 use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Support\Collection;
 use Qiick\Access\Contracts\ActorResolver;
 use Qiick\Access\Contracts\GroupRoleSource;
+use Qiick\Access\Contracts\ListsAllGroupRoles;
 use Qiick\Access\Contracts\PermissionVocabulary;
 use Qiick\Access\Contracts\RoleCatalog;
 use Qiick\Access\Contracts\TeamContext;
+use Qiick\Access\Events\SuperAdminBypassWithheldEvent;
 use Spatie\Permission\PermissionRegistrar;
 
 /**
@@ -101,17 +104,32 @@ final class EffectivePermissionResolver
      * named super-admin, which an organisation admin may be able to create,
      * never mints an instance super-admin. Direct and instance-group roles.
      * Use isActorSuperAdmin() when deciding the current actor's authority.
+     *
+     * Fail-closed (decision 2026-11-26, Excubia #474): super-admin stands
+     * alone, so a holder who also has another role in any team, directly or
+     * through a live group, gets no super-admin authority, only the other
+     * roles' permissions. SuperAdminBypassWithheldEvent reports it.
      */
     public function isSuperAdmin(Authenticatable $user): bool
     {
         $principalType = $this->principalType($user);
         $identifier = $this->identifierKey($user);
 
-        return $this->superAdminVerdicts[$principalType][$identifier][$user::class] ??= in_array(
-            $this->roleCatalog->superAdminRoleName(),
-            $this->globalRoleNamesIgnoringTeamFilter($user),
-            true,
-        );
+        return $this->superAdminVerdicts[$principalType][$identifier][$user::class] ??= $this->decideSuperAdmin($user);
+    }
+
+    /**
+     * Whether the user holds super-admin together with another role in any
+     * team, directly or through a live group: the state isSuperAdmin()
+     * refuses. Read fresh. ExclusiveSuperAdmin and access:check use it.
+     *
+     * @api
+     */
+    public function holdsMixedSuperAdmin(Authenticatable $user): bool
+    {
+        $this->forget($user);
+
+        return $this->holdsSuperAdminRole($user) && $this->holdsOtherRoles($user);
     }
 
     /**
@@ -126,7 +144,7 @@ final class EffectivePermissionResolver
             $this->roleCatalog->superAdminRoleName(),
             $this->directGlobalRoleNamesIgnoringTeamFilter($user),
             true,
-        );
+        ) && $this->isSuperAdmin($user);
     }
 
     /**
@@ -283,6 +301,77 @@ final class EffectivePermissionResolver
             'role_names' => $this->uniqueSortedStrings($roleNames),
             'role_ids' => $roleIds,
         ];
+    }
+
+    private function decideSuperAdmin(Authenticatable $user): bool
+    {
+        if (! $this->holdsSuperAdminRole($user)) {
+            return false;
+        }
+
+        if (! $this->holdsOtherRoles($user)) {
+            return true;
+        }
+
+        // No user id in the log line (design §9.4); access:check lists them.
+        Container::getInstance()->make('log')->warning('qiick/laravel-access: a super-admin also holds other roles, so the super-admin bypass is withheld; run access:check.');
+        Container::getInstance()->make('events')->dispatch(new SuperAdminBypassWithheldEvent($user));
+
+        return false;
+    }
+
+    private function holdsSuperAdminRole(Authenticatable $user): bool
+    {
+        return in_array($this->roleCatalog->superAdminRoleName(), $this->globalRoleNamesIgnoringTeamFilter($user), true);
+    }
+
+    /**
+     * Any role but the global super-admin one, in every team: direct roles
+     * with the team filter off, and the roles of every live group the user
+     * belongs to (all organisations when the source can list them).
+     */
+    private function holdsOtherRoles(Authenticatable $user): bool
+    {
+        $groupRoleIds = $this->groupRoles instanceof ListsAllGroupRoles
+            ? $this->groupRoles->allRoleIdsFor($user)
+            : [...$this->groupRoles->roleIdsFor($user), ...$this->groupRoles->instanceRoleIdsFor($user)];
+
+        $names = [
+            ...$this->directRoleNamesInEveryTeam($user),
+            ...$this->roleNamesForIds($groupRoleIds),
+        ];
+
+        return array_diff($names, [$this->roleCatalog->superAdminRoleName()]) !== [];
+    }
+
+    /**
+     * Direct role names in every team, team-local ones included.
+     *
+     * @return list<string>
+     */
+    private function directRoleNamesInEveryTeam(Authenticatable $user): array
+    {
+        if (! $this->registrar->teams) {
+            if ($user instanceof Model) {
+                $user->unsetRelation('roles');
+            }
+
+            return $this->pluckRoleNames($user);
+        }
+
+        $this->registrar->teams = false;
+
+        try {
+            $relation = method_exists($user, 'roles') ? $user->roles() : null;
+        } finally {
+            $this->registrar->teams = true;
+        }
+
+        if (! $relation instanceof BelongsToMany) {
+            return $this->pluckRoleNames($user);
+        }
+
+        return $this->stringsOnly($relation->pluck($relation->getRelated()->qualifyColumn('name'))->all());
     }
 
     /**

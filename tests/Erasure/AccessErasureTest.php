@@ -55,7 +55,8 @@ it('preserves instance super-admin grants when erasing one organisation', functi
     ]);
 
     $resolver = app(EffectivePermissionResolver::class);
-    expect($resolver->isSuperAdmin($directMember))->toBeTrue()
+    // The organisation role next to super-admin withholds the bypass until erased.
+    expect($resolver->isSuperAdmin($directMember))->toBeFalse()
         ->and($resolver->isSuperAdmin($groupMember))->toBeTrue();
 
     $eraser = app(AccessEraser::class);

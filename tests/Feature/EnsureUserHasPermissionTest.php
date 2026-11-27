@@ -312,12 +312,9 @@ it('never counts the super-admin role\'s own permissions beyond the vocabulary f
     Permission::create(['name' => 'can-purge-everything', 'guard_name' => 'web']);
     $superAdminRole = Role::findByName('super-admin');
     $superAdminRole->givePermissionTo('can-purge-everything');
-    $editorRole = Role::create(['name' => 'editor', 'guard_name' => 'web']);
-    $editorRole->givePermissionTo(FakePermissionEnum::CanShowUsers->value);
 
     $owner = userWithPermissions('can-delete-users');
-    // Mixed rows written before the exclusive rule (raw attach skips its listener).
-    $owner->roles()->attach([$superAdminRole->id, $editorRole->id]);
+    $owner->assignRole($superAdminRole);
     enterApiActor($owner);
     $this->app->instance(ApiActorScopeCheck::class, new ListedScopeCheck([
         FakePermissionEnum::CanShowUsers->value,
@@ -326,8 +323,8 @@ it('never counts the super-admin role\'s own permissions beyond the vocabulary f
         'can-purge-everything',
     ]));
 
-    // The vocabulary exactly: nothing outside it, whether assigned directly,
-    // through an ordinary role or on the super-admin role row.
+    // The vocabulary exactly: nothing outside it, whether assigned directly
+    // or on the super-admin role row.
     expect(passThroughPermissionMiddleware(requestAs(null), FakePermissionEnum::CanEditUsers->value)->getContent())
         ->toBe('next')
         ->and(passThroughPermissionMiddleware(requestAs(null), FakePermissionEnum::CanShowUsers->value)->getContent())

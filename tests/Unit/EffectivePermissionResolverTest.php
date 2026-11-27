@@ -129,7 +129,7 @@ it('caches the super-admin verdict until forget', function (): void {
     $roleCatalog->shouldReceive('superAdminRoleName')->andReturn('super-admin');
 
     $groupRoles = Mockery::mock(GroupRoleSource::class);
-    $groupRoles->shouldReceive('instanceRoleIdsFor')->andReturn([]);
+    $groupRoles->shouldReceive('instanceRoleIdsFor', 'roleIdsFor')->andReturn([]);
 
     $registrar = Mockery::mock(PermissionRegistrar::class);
     $registrar->teams = false;

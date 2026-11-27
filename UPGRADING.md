@@ -51,17 +51,22 @@ See [docs/public-api.md](docs/public-api.md#deprecation-policy).
   Accounts that already hold super-admin and other roles keep working; clean
   them up in the product's upgrade command if you want the new rule to hold
   for old rows.
-- Super-admin now stands alone on every Spatie role write, not only behind
-  the form (Excubia #474): `assignRole()`, `syncRoles()`, `permission:assign-role`
-  and OIDC role sync throw `ExclusiveSuperAdminException` when the result
-  would mix super-admin with another role (direct or through a group), after
-  taking the breaking roles back off. Promote with `syncRoles([$superAdmin])`,
-  not `assignRole()` followed by `removeRole()`; seeders that give super-admin
-  extra roles fail. Run role writes in a transaction to keep the earlier
-  roles of a refused `syncRoles()`. After saving a group's roles or members,
-  call `app(ExclusiveSuperAdmin::class)->assertHeldAlone($member)` for each
-  affected member inside the same transaction, since group pivots are the
-  product's own writes.
+- Super-admin stands alone across every team, directly and through groups
+  (Excubia #474). It is fail-closed on read: a user holding super-admin
+  together with any other role gets no super-admin bypass, only the other
+  roles' permissions, so a mixed account loses its super-admin powers on the
+  next request. The resolver logs a warning and dispatches
+  `Events\SuperAdminBypassWithheldEvent`. Listen to it and notify your
+  security log or the other super-admins. Before upgrading, clean up mixed
+  accounts in the product's upgrade command. Route every role and group
+  write (forms, OIDC role sync, API, your commands) through
+  `app(ExclusiveSuperAdmin::class)->write($user, fn () => ...)`, once per
+  affected user. It locks the user row, checks the result and rolls back
+  with `ExclusiveSuperAdminException`. Promote with
+  `syncRoles([$superAdmin])` inside it. A custom `GroupRoleSource` that
+  serves organisation groups should also implement
+  `Contracts\ListsAllGroupRoles`, or only the current team and instance
+  groups are checked.
 
 - Use `EffectivePermissionResolver::isActorSuperAdmin($actor)` for super-admin
   authority in policies. Replace acting-user role checks, including in policy

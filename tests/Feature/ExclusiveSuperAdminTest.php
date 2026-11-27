@@ -4,12 +4,15 @@ declare(strict_types=1);
 
 use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
-use Illuminate\Support\Facades\Artisan;
+use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Schema;
 use Qiick\Access\Contracts\GroupRoleSource;
+use Qiick\Access\Contracts\ListsAllGroupRoles;
 use Qiick\Access\EffectivePermissionResolver;
+use Qiick\Access\Events\SuperAdminBypassWithheldEvent;
 use Qiick\Access\ExclusiveSuperAdmin;
 use Qiick\Access\ExclusiveSuperAdminException;
+use Qiick\Access\Tests\Support\FakePermissionEnum;
 use Qiick\Access\Tests\Support\SpatieUser;
 use Spatie\Permission\Models\Role;
 use Spatie\Permission\PermissionRegistrar;
@@ -60,84 +63,85 @@ function directRoles(SpatieUser $user): array
     return $user->fresh()->getRoleNames()->sort()->values()->all();
 }
 
-function groupRolesAre(string ...$roles): void
+/** Group roles: $instance from instance groups, $elsewhere from another organisation's group. */
+function groupRolesAre(array $instance = [], array $elsewhere = []): void
 {
-    $ids = Role::query()->whereIn('name', $roles)->pluck('id')->all();
-    $groupRoles = Mockery::mock(GroupRoleSource::class);
-    $groupRoles->shouldReceive('roleIdsFor')->andReturn($ids);
-    $groupRoles->shouldReceive('instanceRoleIdsFor')->andReturn($ids);
-    app()->instance(GroupRoleSource::class, $groupRoles);
-    app()->forgetInstance(EffectivePermissionResolver::class);
+    $ids = fn (array $names): array => Role::query()->whereIn('name', $names)->pluck('id')->all();
+    $groupRoles = Mockery::mock(GroupRoleSource::class, ListsAllGroupRoles::class);
+    $groupRoles->shouldReceive('roleIdsFor', 'instanceRoleIdsFor')->andReturn($ids($instance));
+    $groupRoles->shouldReceive('allRoleIdsFor')->andReturn($ids([...$instance, ...$elsewhere]));
+    app()->scoped(GroupRoleSource::class, fn (): GroupRoleSource => $groupRoles);
+    app()->forgetScopedInstances();
 }
 
-it('refuses to add super-admin to a user who holds another role, and takes it back off', function (): void {
+function writeRoles(SpatieUser $user, Closure $write): void
+{
+    app(ExclusiveSuperAdmin::class)->write($user, $write);
+}
+
+it('rolls a refused sync back to the roles held before, without a caller transaction', function (): void {
+    // Codex review of #74: Spatie detaches the old roles before it attaches.
     $user = exclusiveUser('reader');
 
-    expect(fn () => $user->assignRole('super-admin'))->toThrow(ExclusiveSuperAdminException::class)
+    expect(fn () => writeRoles($user, fn () => $user->syncRoles(['super-admin', 'reader'])))->toThrow(ExclusiveSuperAdminException::class)
         ->and(directRoles($user))->toBe(['reader']);
 });
 
-it('refuses to add another role to a super-admin, and takes it back off', function (): void {
+it('refuses another role for a super-admin and keeps roles named again', function (): void {
     $user = exclusiveUser('super-admin');
 
-    expect(fn () => $user->assignRole('admin'))->toThrow(ExclusiveSuperAdminException::class)
+    expect(fn () => writeRoles($user, fn () => $user->assignRole('super-admin', 'admin')))->toThrow(ExclusiveSuperAdminException::class)
         ->and(directRoles($user))->toBe(['super-admin']);
 });
 
-it('keeps only the super-admin role of a mixed sync, as OIDC role mapping does', function (): void {
+it('commits a valid write', function (): void {
     $user = exclusiveUser('reader');
 
-    expect(fn () => $user->syncRoles(['super-admin', 'reader']))->toThrow(ExclusiveSuperAdminException::class)
-        ->and(directRoles($user))->toBe(['super-admin']);
-});
-
-it('leaves valid assignments alone', function (): void {
-    $user = exclusiveUser();
-    $user->assignRole('admin', 'reader');
-    $user->syncRoles(['super-admin']);
+    writeRoles($user, fn () => $user->syncRoles(['super-admin']));
 
     expect(directRoles($user))->toBe(['super-admin']);
 });
 
-it('applies to the Spatie assign-role command', function (): void {
+it('counts the group roles of every organisation', function (): void {
     $user = exclusiveUser('super-admin');
-
-    expect(fn () => Artisan::call('permission:assign-role', ['name' => 'reader', 'userId' => $user->id, 'guard' => 'web', 'userModelNamespace' => SpatieUser::class]))
-        ->toThrow(ExclusiveSuperAdminException::class)
-        ->and(directRoles($user))->toBe(['super-admin']);
-})->skip(fn (): bool => ! array_key_exists('permission:assign-role', Artisan::all()), 'This Spatie version has no assign-role command.');
-
-it('counts group roles: a super-admin through a group gets no direct role', function (): void {
-    $user = exclusiveUser();
-    groupRolesAre('super-admin');
-
-    expect(fn () => $user->assignRole('reader'))->toThrow(ExclusiveSuperAdminException::class)
-        ->and(directRoles($user))->toBe([]);
-});
-
-it('lets products check a user after a group write', function (): void {
-    $user = exclusiveUser('reader');
-
-    app(ExclusiveSuperAdmin::class)->assertHeldAlone($user);
-    groupRolesAre('super-admin');
+    groupRolesAre(elsewhere: ['reader']);
 
     expect(fn () => app(ExclusiveSuperAdmin::class)->assertHeldAlone($user))->toThrow(ExclusiveSuperAdminException::class);
 });
 
-it('ignores super-admin from a group that cannot mint it', function (): void {
-    // An organisation group carrying the role name is not an instance super-admin (C30).
+it('refuses a group write that gives a member super-admin next to direct roles', function (): void {
     $user = exclusiveUser('reader');
-    $ids = Role::query()->where('name', 'super-admin')->pluck('id')->all();
-    $groupRoles = Mockery::mock(GroupRoleSource::class);
-    $groupRoles->shouldReceive('roleIdsFor')->andReturn($ids);
-    $groupRoles->shouldReceive('instanceRoleIdsFor')->andReturn([]);
-    app()->instance(GroupRoleSource::class, $groupRoles);
-    app()->forgetInstance(EffectivePermissionResolver::class);
+    // The group source as the product's group write inside write() leaves it.
+    groupRolesAre(instance: ['super-admin']);
 
-    app(ExclusiveSuperAdmin::class)->assertHeldAlone($user);
-    $user->assignRole('admin');
+    expect(fn () => writeRoles($user, fn (): null => null))->toThrow(ExclusiveSuperAdminException::class);
+});
 
-    expect(directRoles($user))->toBe(['admin', 'reader']);
+it('withholds the bypass from a mixed holder that skipped write(), and reports it', function (): void {
+    // permission:assign-role or a raw attach: fail-closed on read.
+    Event::fake([SuperAdminBypassWithheldEvent::class]);
+    $user = exclusiveUser('super-admin', 'reader');
+    $resolver = app(EffectivePermissionResolver::class);
+
+    expect($resolver->isSuperAdmin($user))->toBeFalse()
+        ->and($resolver->isDirectSuperAdmin($user))->toBeFalse()
+        ->and($resolver->hasPermission($user, FakePermissionEnum::CanShowUsers->value))->toBeFalse()
+        ->and($resolver->holdsMixedSuperAdmin($user))->toBeTrue();
+    Event::assertDispatched(SuperAdminBypassWithheldEvent::class, fn (SuperAdminBypassWithheldEvent $event): bool => $event->user->is($user));
+});
+
+it('withholds the bypass for an ordinary role in another team as well', function (): void {
+    $user = exclusiveUser('super-admin');
+    groupRolesAre(elsewhere: ['reader']);
+
+    expect(app(EffectivePermissionResolver::class)->isSuperAdmin($user))->toBeFalse();
+});
+
+it('keeps the bypass of a super-admin who holds nothing else', function (): void {
+    $user = exclusiveUser('super-admin');
+
+    expect(app(EffectivePermissionResolver::class)->isSuperAdmin($user))->toBeTrue()
+        ->and(app(EffectivePermissionResolver::class)->isDirectSuperAdmin($user))->toBeTrue();
 });
 
 it('decides on role names case-insensitively', function (): void {
@@ -147,4 +151,8 @@ it('decides on role names case-insensitively', function (): void {
         ->and($service->breaks(['super-admin', 'SUPER-ADMIN']))->toBeFalse()
         ->and($service->breaks(['admin', 'reader']))->toBeFalse()
         ->and($service->breaks([]))->toBeFalse();
+});
+
+it('names the user in the exception', function (): void {
+    expect(ExclusiveSuperAdminException::forUser(exclusiveUser())->getMessage())->toContain('User [1]');
 });
