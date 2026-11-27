@@ -1,0 +1,25 @@
+<?php
+
+declare(strict_types=1);
+
+namespace Qiick\Access;
+
+use Illuminate\Contracts\Auth\Authenticatable;
+use LogicException;
+
+/**
+ * A write would leave a user with super-admin next to another role
+ * (decision 2026-11-26). See ExclusiveSuperAdmin.
+ *
+ * @api
+ */
+final class ExclusiveSuperAdminException extends LogicException
+{
+    public static function forUser(Authenticatable $user): self
+    {
+        $identifier = $user->getAuthIdentifier();
+        $id = is_int($identifier) || is_string($identifier) ? $identifier : 'unknown';
+
+        return new self("User [{$id}] would hold the super-admin role together with other roles; super-admin stands alone (decision 2026-11-26).");
+    }
+}

@@ -33,6 +33,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (decision `docs/decisions/2026-11-26-super-admin-key-ceiling.md`).
 - `Rules\ExclusiveSuperAdminRoleRule` rejects super-admin combined with any
   other role on a user's role list; other roles combine freely.
+- `ExclusiveSuperAdmin` enforces the rule on every Spatie role write
+  (`assignRole`, `syncRoles`, `permission:assign-role`, OIDC role sync):
+  a breaking attach is taken back off and throws
+  `ExclusiveSuperAdminException`. Products call `assertHeldAlone()` after
+  group writes (Excubia #474).
 
 - `PrincipalDirectory::markErased()` lets product soft-delete flows write a
   permanent membership tombstone for a principal of type `user`. Custom

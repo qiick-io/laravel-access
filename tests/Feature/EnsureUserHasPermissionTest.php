@@ -316,7 +316,8 @@ it('never counts the super-admin role\'s own permissions beyond the vocabulary f
     $editorRole->givePermissionTo(FakePermissionEnum::CanShowUsers->value);
 
     $owner = userWithPermissions('can-delete-users');
-    $owner->assignRole($superAdminRole, $editorRole);
+    // Mixed rows written before the exclusive rule (raw attach skips its listener).
+    $owner->roles()->attach([$superAdminRole->id, $editorRole->id]);
     enterApiActor($owner);
     $this->app->instance(ApiActorScopeCheck::class, new ListedScopeCheck([
         FakePermissionEnum::CanShowUsers->value,

@@ -47,6 +47,13 @@ beforeEach(function (): void {
     $migration->up();
 
     app(PermissionRegistrar::class)->forgetCachedPermissions();
+
+    // No group tables here: role writes run the exclusive super-admin check,
+    // which reads groups. Tests that need groups bind their own source.
+    $noGroups = Mockery::mock(GroupRoleSource::class);
+    $noGroups->shouldReceive('roleIdsFor', 'instanceRoleIdsFor')->andReturn([]);
+    app()->instance(GroupRoleSource::class, $noGroups);
+    app()->forgetInstance(EffectivePermissionResolver::class);
 });
 
 afterEach(function (): void {

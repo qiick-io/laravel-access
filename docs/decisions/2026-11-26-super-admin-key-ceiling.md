@@ -19,6 +19,12 @@ next to other roles, which grants nothing and hides who is a super-admin.
    or any combination of other roles. `Rules\ExclusiveSuperAdminRoleRule`
    is the server check; the app-ui role picker disables the other roles
    once super-admin is picked.
+   The rule covers direct and group roles together on every write path
+   (added 2026-11-27 after Excubia #474): `ExclusiveSuperAdmin` reverts a
+   Spatie role attach that would break it and throws, and products call
+   `assertHeldAlone()` after their group writes. A refused attach keeps the
+   super-admin role the call named (it never ends above what the call asked
+   for) unless the user still holds other roles, then that comes off too.
 2. **Permissions add up across roles**, as Spatie already resolves them;
    the picker says so in a short helper text.
 3. **The key ceiling of a super-admin is the vocabulary.**

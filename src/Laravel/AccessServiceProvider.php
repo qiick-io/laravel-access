@@ -29,6 +29,7 @@ use Qiick\Access\Contracts\TeamContext;
 use Qiick\Access\Contracts\TwoFactorPolicy;
 use Qiick\Access\Contracts\TwoFactorResponder;
 use Qiick\Access\EffectivePermissionResolver;
+use Qiick\Access\ExclusiveSuperAdmin;
 use Qiick\Access\GateBefore;
 use Qiick\Access\Http\EnsureTwoFactorIsEnabled;
 use Qiick\Access\Principals\EloquentPrincipalDirectory;
@@ -318,6 +319,13 @@ final class AccessServiceProvider extends ServiceProvider
         Event::listen(RoleDetachedEvent::class, $forget);
         Event::listen(PermissionAttachedEvent::class, $forget);
         Event::listen(PermissionDetachedEvent::class, $forget);
+
+        // Every Spatie role write, not only the product's form (Excubia #474).
+        Event::listen(RoleAttachedEvent::class, function (RoleAttachedEvent $event): void {
+            if ($event->model instanceof Authenticatable) {
+                $this->app->make(ExclusiveSuperAdmin::class)->revertBreakingAttach($event->model, $event->rolesOrIds);
+            }
+        });
     }
 
     private function registerReservedRoleNameGuard(): void

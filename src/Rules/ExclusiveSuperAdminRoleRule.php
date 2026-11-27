@@ -6,7 +6,7 @@ namespace Qiick\Access\Rules;
 
 use Closure;
 use Illuminate\Contracts\Validation\ValidationRule;
-use Qiick\Access\Contracts\RoleCatalog;
+use Qiick\Access\ExclusiveSuperAdmin;
 
 /**
  * Validates a list of role names for one user: the super-admin role stands
@@ -39,10 +39,7 @@ final class ExclusiveSuperAdminRoleRule implements ValidationRule
 
         // Case-folded: a case-insensitive role store resolves `Super-Admin`
         // to the super-admin row (review of PR #58).
-        $roleNames = array_unique(array_map(mb_strtolower(...), $value));
-        $superAdminRoleName = mb_strtolower(app(RoleCatalog::class)->superAdminRoleName());
-
-        if (in_array($superAdminRoleName, $roleNames, true) && count($roleNames) > 1) {
+        if (app(ExclusiveSuperAdmin::class)->breaks($value)) {
             $fail('The super-admin role cannot be combined with other roles.')->translate();
         }
     }
