@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\QueryException;
 use Illuminate\Database\Schema\Blueprint;
@@ -9,6 +10,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
 use Qiick\Access\Contracts\GroupRoleSource;
+use Qiick\Access\Contracts\ListsAllGroupRoles;
 use Qiick\Access\Contracts\TeamContext;
 use Qiick\Access\EffectivePermissionResolver;
 use Qiick\Access\Laravel\NoTeamContext;
@@ -58,7 +60,9 @@ beforeEach(function (): void {
     $registrar->teams = true;
     $registrar->forgetCachedPermissions();
 
-    $groupRoles = Mockery::mock(GroupRoleSource::class);
+    $groupRoles = Mockery::mock(GroupRoleSource::class, ListsAllGroupRoles::class);
+    // Every group of the user: here the current-team and instance ones.
+    $groupRoles->shouldReceive('allRoleIdsFor')->andReturnUsing(fn (Authenticatable $user): array => [...$groupRoles->roleIdsFor($user), ...$groupRoles->instanceRoleIdsFor($user)]);
     $groupRoles->shouldReceive('instanceRoleIdsFor')->andReturn([]);
     $groupRoles->shouldReceive('roleIdsFor')->andReturn([]);
     $this->app->instance(GroupRoleSource::class, $groupRoles);

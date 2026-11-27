@@ -115,7 +115,23 @@ final class EffectivePermissionResolver
         $principalType = $this->principalType($user);
         $identifier = $this->identifierKey($user);
 
-        return $this->superAdminVerdicts[$principalType][$identifier][$user::class] ??= $this->decideSuperAdmin($user);
+        if (isset($this->superAdminVerdicts[$principalType][$identifier][$user::class])) {
+            return $this->superAdminVerdicts[$principalType][$identifier][$user::class];
+        }
+
+        $holdsRole = $this->holdsSuperAdminRole($user);
+        $isWithheld = $holdsRole && $this->holdsOtherRoles($user);
+        // Stored before the event, so a listener that checks the user again
+        // reads the verdict instead of dispatching once more.
+        $this->superAdminVerdicts[$principalType][$identifier][$user::class] = $holdsRole && ! $isWithheld;
+
+        if ($isWithheld) {
+            // No user id in the log line (design §9.4); access:check lists them.
+            Container::getInstance()->make('log')->warning('qiick/laravel-access: a super-admin also holds other roles, so the super-admin bypass is withheld; run access:check.');
+            Container::getInstance()->make('events')->dispatch(new SuperAdminBypassWithheldEvent($user));
+        }
+
+        return $holdsRole && ! $isWithheld;
     }
 
     /**
@@ -303,24 +319,15 @@ final class EffectivePermissionResolver
         ];
     }
 
-    private function decideSuperAdmin(Authenticatable $user): bool
-    {
-        if (! $this->holdsSuperAdminRole($user)) {
-            return false;
-        }
-
-        if (! $this->holdsOtherRoles($user)) {
-            return true;
-        }
-
-        // No user id in the log line (design §9.4); access:check lists them.
-        Container::getInstance()->make('log')->warning('qiick/laravel-access: a super-admin also holds other roles, so the super-admin bypass is withheld; run access:check.');
-        Container::getInstance()->make('events')->dispatch(new SuperAdminBypassWithheldEvent($user));
-
-        return false;
-    }
-
-    private function holdsSuperAdminRole(Authenticatable $user): bool
+    /**
+     * Whether the user is assigned the global super-admin role, directly or
+     * through an instance group, whether or not the bypass is withheld.
+     * SuperAdminGuard protects such an account from ordinary admins. Read
+     * fresh.
+     *
+     * @api
+     */
+    public function holdsSuperAdminRole(Authenticatable $user): bool
     {
         return in_array($this->roleCatalog->superAdminRoleName(), $this->globalRoleNamesIgnoringTeamFilter($user), true);
     }
@@ -332,6 +339,12 @@ final class EffectivePermissionResolver
      */
     private function holdsOtherRoles(Authenticatable $user): bool
     {
+        if (! $this->groupRoles instanceof ListsAllGroupRoles && $this->registrar->teams) {
+            // Organisation groups the source cannot list may hold other
+            // roles, so the user cannot be proved alone: fail closed.
+            return true;
+        }
+
         $groupRoleIds = $this->groupRoles instanceof ListsAllGroupRoles
             ? $this->groupRoles->allRoleIdsFor($user)
             : [...$this->groupRoles->roleIdsFor($user), ...$this->groupRoles->instanceRoleIdsFor($user)];

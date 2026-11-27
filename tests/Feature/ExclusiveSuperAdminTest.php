@@ -4,14 +4,19 @@ declare(strict_types=1);
 
 use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Schema;
+use Illuminate\Support\Str;
+use Qiick\Access\Contracts\ActiveUsers;
 use Qiick\Access\Contracts\GroupRoleSource;
 use Qiick\Access\Contracts\ListsAllGroupRoles;
 use Qiick\Access\EffectivePermissionResolver;
 use Qiick\Access\Events\SuperAdminBypassWithheldEvent;
 use Qiick\Access\ExclusiveSuperAdmin;
 use Qiick\Access\ExclusiveSuperAdminException;
+use Qiick\Access\Laravel\EloquentGroupRoleSource;
+use Qiick\Access\SuperAdminGuard;
 use Qiick\Access\Tests\Support\FakePermissionEnum;
 use Qiick\Access\Tests\Support\SpatieUser;
 use Spatie\Permission\Models\Role;
@@ -155,4 +160,105 @@ it('decides on role names case-insensitively', function (): void {
 
 it('names the user in the exception', function (): void {
     expect(ExclusiveSuperAdminException::forUser(exclusiveUser())->getMessage())->toContain('User [1]');
+});
+
+function bindActiveUsers(): void
+{
+    app()->instance(ActiveUsers::class, Mockery::mock(ActiveUsers::class));
+    app()->forgetScopedInstances();
+}
+
+it('keeps a mixed holder out of an ordinary admin\'s reach', function (): void {
+    // Codex re-check of #74: protection follows the assignment, not the bypass.
+    bindActiveUsers();
+    $mixed = exclusiveUser('super-admin', 'reader');
+    $admin = exclusiveUser('admin');
+
+    expect(app(SuperAdminGuard::class)->isProtectedFrom($admin, $mixed))->toBeTrue()
+        ->and(app(SuperAdminGuard::class)->isProtectedFrom($admin, exclusiveUser('reader')))->toBeFalse();
+});
+
+it('refuses an ordinary admin who turns a mixed holder into an effective super-admin', function (): void {
+    bindActiveUsers();
+    $mixed = exclusiveUser('super-admin', 'reader');
+    $admin = exclusiveUser('admin');
+
+    expect(fn () => app(ExclusiveSuperAdmin::class)->write($mixed, fn () => $mixed->removeRole('reader'), $admin))
+        ->toThrow(ExclusiveSuperAdminException::class, 'may not manage super-admins')
+        ->and(directRoles($mixed))->toBe(['reader', 'super-admin']);
+});
+
+it('lets a super-admin clean up a mixed holder', function (): void {
+    bindActiveUsers();
+    $mixed = exclusiveUser('super-admin', 'reader');
+    $superAdmin = exclusiveUser('super-admin');
+
+    app(ExclusiveSuperAdmin::class)->write($mixed, fn () => $mixed->removeRole('reader'), $superAdmin);
+
+    expect(directRoles($mixed))->toBe(['super-admin'])
+        ->and(app(EffectivePermissionResolver::class)->isSuperAdmin($mixed))->toBeTrue();
+});
+
+it('drops a verdict read inside a write that throws', function (): void {
+    $user = exclusiveUser('reader');
+
+    expect(fn () => writeRoles($user, function () use ($user): never {
+        $user->syncRoles(['super-admin']);
+        expect(app(EffectivePermissionResolver::class)->isSuperAdmin($user))->toBeTrue();
+
+        throw new RuntimeException('Later step failed.');
+    }))->toThrow(RuntimeException::class, 'Later step failed.')
+        ->and(directRoles($user))->toBe(['reader'])
+        ->and(app(EffectivePermissionResolver::class)->isSuperAdmin($user))->toBeFalse();
+});
+
+it('refuses a write for a user row that does not exist', function (): void {
+    $ghost = (new SpatieUser)->forceFill(['id' => 999]);
+    $ghost->exists = true;
+
+    expect(fn () => writeRoles($ghost, fn (): null => null))->toThrow(LogicException::class, 'every user row to exist');
+});
+
+it('rolls a shared group write back for every member when one member breaks the rule', function (): void {
+    // Real group tables and the package's own group source.
+    Schema::create('user_groups', function (Blueprint $table): void {
+        $table->id();
+        $table->uuid('public_id');
+        $table->string('name');
+        $table->uuid('organisation_id')->nullable();
+        $table->boolean('is_instance')->default(false);
+        $table->softDeletes();
+    });
+    Schema::create('user_group_user', function (Blueprint $table): void {
+        $table->unsignedBigInteger('user_id');
+        $table->unsignedBigInteger('user_group_id');
+        $table->dateTime('expires_at')->nullable();
+    });
+    Schema::create('user_group_role', function (Blueprint $table): void {
+        $table->unsignedBigInteger('user_group_id');
+        $table->unsignedBigInteger('role_id');
+    });
+    app()->scoped(GroupRoleSource::class, fn (): GroupRoleSource => app()->build(EloquentGroupRoleSource::class));
+    app()->forgetScopedInstances();
+    expect(app(GroupRoleSource::class))->toBeInstanceOf(EloquentGroupRoleSource::class);
+
+    $reader = exclusiveUser('reader');
+    $plain = exclusiveUser();
+
+    try {
+        expect(fn () => app(ExclusiveSuperAdmin::class)->write([$plain, $reader], function () use ($reader, $plain): void {
+            $groupId = DB::table('user_groups')->insertGetId(['public_id' => (string) Str::uuid(), 'name' => 'admins', 'is_instance' => true]);
+            DB::table('user_group_role')->insert(['user_group_id' => $groupId, 'role_id' => Role::findByName('super-admin')->id]);
+            DB::table('user_group_user')->insert([
+                ['user_group_id' => $groupId, 'user_id' => $plain->id],
+                ['user_group_id' => $groupId, 'user_id' => $reader->id],
+            ]);
+        }))->toThrow(ExclusiveSuperAdminException::class, "User [{$reader->id}]")
+            ->and(DB::table('user_groups')->count())->toBe(0)
+            ->and(DB::table('user_group_user')->count())->toBe(0);
+    } finally {
+        Schema::dropIfExists('user_group_role');
+        Schema::dropIfExists('user_group_user');
+        Schema::dropIfExists('user_groups');
+    }
 });
