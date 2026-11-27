@@ -85,7 +85,7 @@ it('accepts a clean product', function (): void {
     ]))->toBe([]);
 });
 
-it('flags ->can() with the permission enum inside a Policy, however the enum is named', function (string $import, string $reference): void {
+it('flags ->can() with the permission enum inside a Policy, however the enum is named (AC9)', function (string $import, string $reference): void {
     $violations = scanProduct([
         'app/Policies/PostPolicy.php' => "<?php\n\nnamespace App\\Policies;\n\n{$import}\n\nfinal class PostPolicy\n{\n    public function view(\$actor): bool\n    {\n        return \$actor->can({$reference});\n    }\n}\n",
     ]);

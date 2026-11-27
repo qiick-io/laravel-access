@@ -34,7 +34,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   permanent membership tombstone for a principal of type `user`. Custom
   directory implementations must add the new interface method.
 
+### Deprecated
+
+- `PrincipalDirectory::eraseUser()`, removed in 2.0.0: products delete users
+  only through their erasure orchestrator, which runs `Erasure\AccessEraser`.
+
 ### Changed
+
+- `docs/public-api.md` is the frozen 1.0 inventory (classes, config keys,
+  environment variables, commands, events, tables, frozen behaviour and the
+  deprecation policy, moved from `UPGRADING.md`), checked by
+  `tests/Arch/PublicApiTest.php`; `docs/security-checklist.md` maps every
+  numbered security property to its test (F12).
 
 - **Breaking:** `Principals\PrincipalCreated` and
   `Principals\PrincipalDeactivated` are now `Events\PrincipalCreatedEvent`

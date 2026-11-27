@@ -1,7 +1,7 @@
 # Reference: schema the products own
 
 The package owns and migrates `user_groups`, `user_group_user`,
-`user_group_role` and `principals` (see `docs/reference-contracts.md`,
+`user_group_role` and `principals` (see `docs/public-api.md`,
 Migrations). It never creates or edits Spatie's tables: Spatie's migration is
 published into each product and becomes the product's own file. This page is
 the normative shape of those product-owned tables (standards review A4,
