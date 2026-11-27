@@ -168,6 +168,9 @@ it('reads the tables on the primary, not on a replica that has them (F2)', funct
         $this->artisan('access:check')
             ->expectsOutputToContain('Table [roles] is missing on the default connection')
             ->assertFailed();
+
+        // Reads go back to the replica afterwards.
+        expect(DB::connection('split')->select("SELECT name FROM sqlite_master WHERE name = 'roles'"))->toHaveCount(1);
     } finally {
         DB::setDefaultConnection($defaultConnection);
         DB::purge('split');
@@ -207,4 +210,36 @@ it('still requires the group tables when the package source reads product-owned 
     $this->artisan('access:check')
         ->expectsOutputToContain('Table [user_group_role] is missing on the default connection')
         ->assertFailed();
+});
+
+it('keeps the configuration problems next to an unreachable database (F2)', function (): void {
+    $defaultConnection = DB::getDefaultConnection();
+    config()->set('permission.table_names.roles', '');
+    config()->set('database.connections.unreachable', ['driver' => 'sqlite', 'database' => '/nonexistent/access.sqlite']);
+    DB::setDefaultConnection('unreachable');
+
+    try {
+        $exitCode = Artisan::call('access:check');
+
+        expect($exitCode)->toBe(1)
+            ->and(Artisan::output())->toContain('permission.table_names.roles must be a non-empty table name.')
+            ->toContain('The default database connection [unreachable] is unreachable');
+    } finally {
+        DB::setDefaultConnection($defaultConnection);
+        DB::purge('unreachable');
+    }
+});
+
+it('leaves the group tables to a product source that cannot be built here (F2)', function (): void {
+    config()->set('access.migrations.groups', false);
+    app()->forgetScopedInstances();
+    app()->bind(GroupRoleSource::class, static fn (): never => throw new LogicException('Needs a request.'));
+
+    foreach (['user_group_role', 'user_group_user', 'user_groups'] as $table) {
+        Schema::drop($table);
+    }
+
+    Artisan::call('access:check');
+
+    expect(Artisan::output())->not->toContain('Table [user_groups]');
 });

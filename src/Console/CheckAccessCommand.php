@@ -80,7 +80,7 @@ final class CheckAccessCommand extends Command
         // Required when the package migrates them or its own source reads
         // them (Externa 1.x owns the same tables with the migrations off);
         // a product GroupRoleSource keeps its own store.
-        if ($config->get('access.migrations.groups', true) === true || $this->readsPackageGroupTables()) {
+        if ($config->get('access.migrations.groups') === true || $this->readsPackageGroupTables()) {
             $tables = [...$tables, 'user_groups', 'user_group_user', 'user_group_role'];
         }
 
@@ -93,7 +93,6 @@ final class CheckAccessCommand extends Command
             $connection = $database->connection();
             // The package writes through the primary, and hasTable() selects
             // through the read PDO, so the metadata is read on the writer.
-            $connection->getPdo();
             $connection->useWriteConnectionWhenReading();
 
             try {
