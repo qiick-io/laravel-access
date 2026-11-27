@@ -10,6 +10,12 @@ See [docs/public-api.md](docs/public-api.md#deprecation-policy).
 
 ## Unreleased
 
+Nothing yet.
+
+## 0.1.0-beta.3
+
+No schema change: a database migrated with `0.1.0-beta.2` needs no refresh.
+
 - `PrincipalDirectory::eraseUser()` is deprecated (removed in 2.0.0). Delete
   users only through the product's erasure orchestrator. It writes the
   resumable `erasure_requests` row, runs `Erasure\AccessEraser` with the
