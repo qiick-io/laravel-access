@@ -4,11 +4,11 @@ declare(strict_types=1);
 
 namespace Qiick\Access\Laravel;
 
-use BackedEnum;
 use Illuminate\Contracts\Config\Repository as ConfigRepository;
 use Illuminate\Contracts\Foundation\Application;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\ConfigurationUrlParser;
+use InvalidArgumentException;
 use Qiick\Access\Contracts\ActorResolver;
 use Qiick\Access\Contracts\AuthorizationResponder;
 use Qiick\Access\Contracts\GroupRoleSource;
@@ -108,10 +108,11 @@ final class AccessBootChecks
      * defaults. The gate switches are checked by assertGateSelection().
      *
      * @throws RuntimeException naming the first invalid key
+     * @throws InvalidArgumentException from the instance type and permission enum rules the migration and the vocabulary apply
      */
     public function assertConfigValues(ConfigRepository $config): void
     {
-        foreach (['api_guards', 'web_guards', 'principals.instance_types', 'two_factor.exempt_route_names', 'principals.types'] as $key) {
+        foreach (['api_guards', 'web_guards', 'two_factor.exempt_route_names', 'principals.types'] as $key) {
             $value = $config->get("access.{$key}");
             $isListOfStrings = is_array($value) && array_is_list($value)
                 && array_filter($value, is_string(...)) === $value;
@@ -139,11 +140,19 @@ final class AccessBootChecks
             }
         }
 
+        // The same rules the principals migration applies, before a migration needs them.
+        MigrationSettings::instanceTypes();
+
         // An empty ACCESS_PERMISSION_ENUM reads as '': unset, like null.
         $permissionEnum = $config->get('access.permission_enum');
 
-        if ($permissionEnum !== null && $permissionEnum !== '' && (! is_string($permissionEnum) || ! is_subclass_of($permissionEnum, BackedEnum::class))) {
+        if ($permissionEnum !== null && ! is_string($permissionEnum)) {
             throw new RuntimeException('access.permission_enum must be null or a backed enum class name.');
+        }
+
+        if (is_string($permissionEnum) && $permissionEnum !== '') {
+            // The vocabulary's own check, so boot and the first request agree.
+            new SpatiePermissionVocabulary($permissionEnum);
         }
 
         $principalModel = $config->get('access.principals.model');

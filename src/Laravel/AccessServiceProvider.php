@@ -9,7 +9,6 @@ use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Contracts\Auth\Factory as AuthFactory;
 use Illuminate\Contracts\Config\Repository as ConfigRepository;
 use Illuminate\Contracts\Foundation\Application;
-use Illuminate\Contracts\Foundation\CachesConfiguration;
 use Illuminate\Database\DatabaseManager;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Events\MigrationsEnded;
@@ -212,24 +211,24 @@ final class AccessServiceProvider extends ServiceProvider
     }
 
     /**
-     * mergeConfigFrom() at every depth (F1). Skipped when the configuration is
-     * cached, like mergeConfigFrom(): the cache already holds the merged values.
+     * mergeConfigFrom() at every depth (F1). Unlike mergeConfigFrom() it also
+     * runs on a cached configuration: a cache built before an upgrade, with
+     * the old shallow merge, can lack a new nested key, and a boot error
+     * there would keep Artisan from reaching config:clear. Merging again
+     * changes nothing the product set.
+     *
+     * @throws RuntimeException when config/access.php or one of its sections is not a map
      */
     private function mergeConfigDefaults(): void
     {
-        if ($this->app instanceof CachesConfiguration && $this->app->configurationIsCached()) {
-            return;
-        }
-
         $config = $this->app->make(ConfigRepository::class);
         $defaults = require __DIR__.'/../../config/access.php';
-        $published = $config->get('access', []);
 
         if (! is_array($defaults)) {
-            throw new RuntimeException('config/access.php must return an array.');
+            throw new RuntimeException('The shipped config/access.php must return an array.');
         }
 
-        $config->set('access', ConfigDefaultsMerger::merge($defaults, is_array($published) ? $published : []));
+        $config->set('access', ConfigDefaultsMerger::merge($defaults, $config->get('access')));
     }
 
     private function registerGateBefore(): void
