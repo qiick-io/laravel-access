@@ -166,7 +166,7 @@ it('keeps illuminate log context next to the actor stamp in the job payload', fu
         ->and($payload['illuminate:log:context']['request_id'])->toBe('abc-123');
 });
 
-it('re-binds the stamped API actor when a database queue worker runs the job', function (): void {
+it('re-binds the stamped API actor when a database queue worker runs the job (AC5)', function (): void {
     config()->set('queue.default', 'database');
     config()->set('queue.connections.database', [
         'driver' => 'database',

@@ -25,7 +25,7 @@ beforeEach(function (): void {
  * B1: GateBefore must not keep a warm EffectivePermissionResolver across
  * request/job scopes in the same container (Octane / queue workers).
  */
-it('does not leak resolver cache across consecutive request scopes after a demotion', function (): void {
+it('does not leak resolver cache across consecutive request scopes after a demotion (AC11)', function (): void {
     $member = new PermissionedFakeUser(1, ['member'], [FakePermissionEnum::CanShowUsers->value]);
     AccessContext::enter(new ActorContext(ActorKind::WebSession, $member));
 

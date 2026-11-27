@@ -63,7 +63,7 @@ it('passes through when nobody is authenticated', function (): void {
     expect($response->getContent())->toBe('ok');
 });
 
-it('passes through exempt route names including wildcards (R9)', function (): void {
+it('passes through exempt route names including wildcards (R9 / AC10)', function (): void {
     $user = new FakeAuthenticatable(1);
     $actors = Mockery::mock(ActorResolver::class);
     $actors->shouldReceive('current')->never();

@@ -89,6 +89,10 @@ interface PrincipalDirectory
      * @param  \Closure(Authenticatable): void  $deleteUser  the product's hard user deletion
      *
      * @throws \LogicException when the user row still exists afterwards (everything is rolled back)
+     *
+     * @deprecated 1.0.0 removed in 2.0.0: products delete users only through
+     *             their erasure orchestrator, which runs Erasure\AccessEraser
+     *             (fleet erasure decision 2026-11-24).
      */
     public function eraseUser(Authenticatable $user, \Closure $deleteUser): void;
 
