@@ -67,7 +67,14 @@ See [docs/public-api.md](docs/public-api.md#deprecation-policy).
   result and rolls back with `ExclusiveSuperAdminException`. Pass the acting
   user: a write that makes someone an effective super-admin is refused
   unless that actor may manage super-admins. Pass `null` only for trusted
-  system writes, such as OIDC sync or your commands.
+  system writes, such as OIDC sync or your commands. The actor's authority
+  is read before the write, so a write never grants the authority that
+  allows it. Do not open a transaction around `write()`, except one whose
+  first statement locks these users
+  (`SuperAdminGuard::wouldLeaveNoActiveSuperAdmin()` does that). On InnoDB
+  an earlier plain read would fix an older snapshot. `access:check` fails
+  when the bound `GroupRoleSource` is not the package one, because it
+  cannot list super-admins through the product's groups.
 - With teams on, a custom `GroupRoleSource` must implement
   `Contracts\ListsAllGroupRoles`. Without it the package cannot see other
   organisations' groups, so it withholds every super-admin bypass.

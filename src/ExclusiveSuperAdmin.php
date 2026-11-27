@@ -13,7 +13,9 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\MorphToMany;
 use Illuminate\Support\Arr;
 use LogicException;
+use Qiick\Access\Contracts\GroupRoleSource;
 use Qiick\Access\Contracts\RoleCatalog;
+use Qiick\Access\Laravel\EloquentGroupRoleSource;
 
 /**
  * Super-admin stands alone (decision 2026-11-26, Excubia #474): an instance
@@ -42,7 +44,8 @@ final class ExclusiveSuperAdmin
      * Ids of the users who hold super-admin together with another role, so
      * their bypass is withheld; `access:check` lists them. Candidates are the
      * holders of a role named super-admin, directly or through a live
-     * instance group, each then read fresh on the primary.
+     * instance group of the package tables, each then read fresh on the
+     * primary. Call it only when listsEveryHolder() is true.
      *
      * @return array<int, string> the keys, JSON-encoded
      */
@@ -61,40 +64,53 @@ final class ExclusiveSuperAdmin
             return [];
         }
 
-        // Inside a transaction every read goes to the primary.
         $user = $roles->getParent();
+        // The exact class the package group source admits (an STI subclass).
+        $memberClass = $this->config->get('access.group_member_model');
+        $member = is_string($memberClass) && is_a($memberClass, Model::class, true) ? new $memberClass : $user;
 
-        return $user->getConnection()->transaction(function () use ($user, $roles): array {
+        // Inside a transaction every read goes to the primary.
+        return $user->getConnection()->transaction(function () use ($user, $member, $roles): array {
             $roleModel = $roles->getRelated();
             $superAdminName = $this->roleCatalog->superAdminRoleName();
             $connection = $user->getConnection();
 
-            $candidates = $connection->table($roles->getTable())
+            $direct = $connection->table($roles->getTable())
                 ->join($roleModel->getTable(), $roleModel->getQualifiedKeyName(), '=', $roles->getQualifiedRelatedPivotKeyName())
                 ->where($roleModel->qualifyColumn('name'), $superAdminName)
                 ->where($roles->qualifyPivotColumn($roles->getMorphType()), $user->getMorphClass())
                 ->pluck($roles->getQualifiedForeignPivotKeyName())
                 ->all();
 
-            if ($connection->getSchemaBuilder()->hasTable('user_group_role')) {
-                $candidates = [...$candidates, ...$connection->table('user_group_user')
-                    ->join('user_groups', 'user_groups.id', '=', 'user_group_user.user_group_id')
-                    ->join('user_group_role', 'user_group_role.user_group_id', '=', 'user_groups.id')
-                    ->join($roleModel->getTable(), $roleModel->getQualifiedKeyName(), '=', 'user_group_role.role_id')
-                    ->where($roleModel->qualifyColumn('name'), $superAdminName)
-                    ->where('user_groups.is_instance', true)
-                    ->whereNull('user_groups.deleted_at')
-                    ->pluck('user_group_user.user_id')
-                    ->all()];
-            }
+            $throughGroups = $connection->table('user_group_user')
+                ->join('user_groups', 'user_groups.id', '=', 'user_group_user.user_group_id')
+                ->join('user_group_role', 'user_group_role.user_group_id', '=', 'user_groups.id')
+                ->join($roleModel->getTable(), $roleModel->getQualifiedKeyName(), '=', 'user_group_role.role_id')
+                ->where($roleModel->qualifyColumn('name'), $superAdminName)
+                ->where('user_groups.is_instance', true)
+                ->whereNull('user_groups.deleted_at')
+                ->pluck('user_group_user.user_id')
+                ->all();
 
-            return $user->newQueryWithoutScopes()->whereKey(collect($candidates)->unique()->values()->all())->get()
+            return $user->newQueryWithoutScopes()->whereKey($direct)->get()
+                ->merge($member->newQueryWithoutScopes()->whereKey($throughGroups)->get())
                 ->filter(fn (Model $holder): bool => $holder instanceof Authenticatable && $this->resolver->holdsMixedSuperAdmin($holder))
                 // JSON keeps an int and a string key apart in the listing.
                 ->map(fn (Model $holder): string => json_encode($holder->getKey(), JSON_THROW_ON_ERROR))
+                ->unique()
                 ->values()
                 ->all();
         });
+    }
+
+    /**
+     * Whether mixedHolderIds() can see every holder: only the package's own
+     * group source reads tables the listing can enumerate. Otherwise holders
+     * through the product's groups stay unlisted, and access:check says so.
+     */
+    public function listsEveryHolder(): bool
+    {
+        return Container::getInstance()->make(GroupRoleSource::class) instanceof EloquentGroupRoleSource;
     }
 
     /**
@@ -131,6 +147,11 @@ final class ExclusiveSuperAdmin
      *
      * @throws ExclusiveSuperAdminException after rolling the write back
      * @throws LogicException when the users live on different connections or a user row is missing
+     *
+     * Open no other transaction around it, or only one whose first statement
+     * locked these users (SuperAdminGuard::wouldLeaveNoActiveSuperAdmin()
+     * locks every active user first): an earlier plain read would fix an
+     * older snapshot on InnoDB.
      */
     public function write(Model|array $users, Closure $write, ?Authenticatable $actor = null): mixed
     {
@@ -141,14 +162,20 @@ final class ExclusiveSuperAdmin
 
         try {
             return $connection->transaction(function () use ($users, $write, $actor): mixed {
-                $wasEffective = [];
-
-                foreach ($users as $index => $user) {
-                    // Serialises concurrent writes for the user, on the primary.
+                // Every lock first: on InnoDB the first plain read fixes the
+                // snapshot, so it must come after every user is locked.
+                foreach ($users as $user) {
                     if ($user->newQueryWithoutScopes()->whereKey($user->getKey())->lockForUpdate()->first() === null) {
                         throw new LogicException('ExclusiveSuperAdmin::write() needs every user row to exist.');
                     }
+                }
 
+                // The actor's authority as it stands before the write: a write
+                // never grants the authority that allows it.
+                $actorMayManage = $actor === null || $this->mayManageSuperAdmins($actor);
+                $wasEffective = [];
+
+                foreach ($users as $index => $user) {
                     $this->resolver->forget($user);
                     $wasEffective[$index] = $this->resolver->isSuperAdmin($user);
                 }
@@ -158,7 +185,7 @@ final class ExclusiveSuperAdmin
                 foreach ($users as $index => $user) {
                     $this->assertHeldAlone($user);
 
-                    if ($actor !== null && ! $wasEffective[$index] && $this->resolver->isSuperAdmin($user) && ! $this->guard()->canManageSuperAdmins($actor)) {
+                    if (! $actorMayManage && ! $wasEffective[$index] && $this->resolver->isSuperAdmin($user)) {
                         throw ExclusiveSuperAdminException::promotionBy($user);
                     }
                 }
@@ -188,9 +215,11 @@ final class ExclusiveSuperAdmin
         return $users[0]->getConnection();
     }
 
-    private function guard(): SuperAdminGuard
+    private function mayManageSuperAdmins(Authenticatable $actor): bool
     {
-        return Container::getInstance()->make(SuperAdminGuard::class);
+        $this->resolver->forget($actor);
+
+        return Container::getInstance()->make(SuperAdminGuard::class)->canManageSuperAdmins($actor);
     }
 
     /**

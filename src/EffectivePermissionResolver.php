@@ -53,6 +53,15 @@ final class EffectivePermissionResolver
      */
     private array $superAdminVerdicts = [];
 
+    /**
+     * Subjects already reported by SuperAdminBypassWithheldEvent in this
+     * scope. Not cleared by forget() or flush(): a fresh read must not
+     * report the same subject again.
+     *
+     * @var array<string, true>
+     */
+    private array $withheldReported = [];
+
     public function __construct(
         private readonly RoleCatalog $roleCatalog,
         private readonly GroupRoleSource $groupRoles,
@@ -125,7 +134,10 @@ final class EffectivePermissionResolver
         // reads the verdict instead of dispatching once more.
         $this->superAdminVerdicts[$principalType][$identifier][$user::class] = $holdsRole && ! $isWithheld;
 
-        if ($isWithheld) {
+        $reportKey = json_encode([$principalType, $identifier, $user::class], JSON_THROW_ON_ERROR);
+
+        if ($isWithheld && ! isset($this->withheldReported[$reportKey])) {
+            $this->withheldReported[$reportKey] = true;
             // No user id in the log line (design §9.4); access:check lists them.
             Container::getInstance()->make('log')->warning('qiick/laravel-access: a super-admin also holds other roles, so the super-admin bypass is withheld; run access:check.');
             Container::getInstance()->make('events')->dispatch(new SuperAdminBypassWithheldEvent($user));

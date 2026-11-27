@@ -324,19 +324,99 @@ it('refuses users on different connections in one write', function (): void {
         ->toThrow(LogicException::class, 'all on one connection');
 });
 
-it('lists mixed holders once, without group tables, and nothing for a users model without roles', function (): void {
-    $mixed = exclusiveUser('super-admin', 'reader');
-    exclusiveUser('super-admin');
-    exclusiveUser('reader');
+it('lists nothing for a users model without roles, and says when a group source cannot be listed', function (): void {
+    expect(app(ExclusiveSuperAdmin::class)->listsEveryHolder())->toBeFalse();
 
-    expect(app(ExclusiveSuperAdmin::class)->mixedHolderIds())->toBe([(string) $mixed->id]);
-
-    config()->set('auth.providers.users.model', Principal::class);
-    expect(app(ExclusiveSuperAdmin::class)->mixedHolderIds())->toBe([]);
-
-    config()->set('auth.providers.users.model', stdClass::class);
-    expect(app(ExclusiveSuperAdmin::class)->mixedHolderIds())->toBe([]);
-
-    config()->set('auth.providers.users.model', null);
-    expect(app(ExclusiveSuperAdmin::class)->mixedHolderIds())->toBe([]);
+    foreach ([Principal::class, stdClass::class, null] as $userModel) {
+        config()->set('auth.providers.users.model', $userModel);
+        expect(app(ExclusiveSuperAdmin::class)->mixedHolderIds())->toBe([]);
+    }
 });
+
+it('refuses a mixed holder who makes themselves an effective super-admin', function (): void {
+    // Codex final check of #74: the actor's authority is read before the write.
+    bindActiveUsers();
+    $mixed = exclusiveUser('super-admin', 'reader');
+
+    expect(fn () => app(ExclusiveSuperAdmin::class)->write($mixed, fn () => $mixed->removeRole('reader'), $mixed))
+        ->toThrow(ExclusiveSuperAdminException::class, 'may not manage super-admins')
+        ->and(directRoles($mixed))->toBe(['reader', 'super-admin']);
+});
+
+it('reads the actor\'s authority fresh, not from a verdict cached before a demotion', function (): void {
+    bindActiveUsers();
+    $actor = exclusiveUser('super-admin');
+    expect(app(EffectivePermissionResolver::class)->isSuperAdmin($actor))->toBeTrue();
+    $actor->roles()->detach();
+    $target = exclusiveUser('reader');
+
+    expect(fn () => app(ExclusiveSuperAdmin::class)->write($target, fn () => $target->syncRoles(['super-admin']), $actor))
+        ->toThrow(ExclusiveSuperAdminException::class, 'may not manage super-admins')
+        ->and(directRoles($target))->toBe(['reader']);
+});
+
+it('reports a withheld bypass once per scope, even after the verdict is forgotten', function (): void {
+    Event::fake([SuperAdminBypassWithheldEvent::class]);
+    $user = exclusiveUser('super-admin', 'reader');
+    $resolver = app(EffectivePermissionResolver::class);
+
+    $resolver->isSuperAdmin($user);
+    $resolver->forget($user);
+    $resolver->isSuperAdmin($user);
+    $resolver->flush();
+    $resolver->isSuperAdmin($user);
+
+    Event::assertDispatchedTimes(SuperAdminBypassWithheldEvent::class, 1);
+});
+
+it('serialises two overlapping writes so the second sees the first (InnoDB, PostgreSQL)', function (): void {
+    // Codex final check of #74: locks before any plain read, on the default isolation.
+    if (! function_exists('pcntl_fork') || ! in_array(DB::getDriverName(), ['mysql', 'mariadb', 'pgsql'], true)) {
+        $this->markTestSkipped('Needs pcntl and a server database with row locks.');
+    }
+
+    $user = exclusiveUser();
+    $gate = sys_get_temp_dir().'/qiick-access-exclusive-'.getmypid();
+    @unlink($gate);
+
+    $childPid = pcntl_fork();
+
+    if ($childPid === 0) {
+        try {
+            DB::purge();
+            DB::reconnect();
+            app(ExclusiveSuperAdmin::class)->write($user, function () use ($user, $gate): void {
+                file_put_contents($gate, 'locked');
+                usleep(400_000);
+                $user->assignRole('super-admin');
+            });
+            exit(0);
+        } catch (Throwable $throwable) {
+            fwrite(STDERR, $throwable->getMessage().PHP_EOL);
+            exit(30);
+        }
+    }
+
+    $deadline = microtime(true) + 5;
+
+    while (! is_file($gate) && microtime(true) < $deadline) {
+        usleep(5_000);
+    }
+
+    DB::purge();
+    DB::reconnect();
+    $refused = false;
+
+    try {
+        app(ExclusiveSuperAdmin::class)->write($user, fn () => $user->assignRole('reader'));
+    } catch (ExclusiveSuperAdminException) {
+        $refused = true;
+    }
+
+    pcntl_waitpid($childPid, $status);
+    @unlink($gate);
+
+    expect(pcntl_wexitstatus($status))->toBe(0)
+        ->and($refused)->toBeTrue()
+        ->and(directRoles($user))->toBe(['super-admin']);
+})->group('engines');

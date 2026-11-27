@@ -12,6 +12,7 @@ use Illuminate\Support\Str;
 use Qiick\Access\Contracts\GroupRoleSource;
 use Qiick\Access\Contracts\PermissionVocabulary;
 use Qiick\Access\Tests\Support\SpatieUser;
+use Qiick\Access\Tests\Support\StiAdminUser;
 use Spatie\Permission\Models\Role;
 
 /*
@@ -202,7 +203,12 @@ it('does not require the group tables for a product group source with the group 
         Schema::drop($table);
     }
 
-    $this->artisan('access:check')->assertSuccessful();
+    // Its tables are its own; its super-admins cannot be listed (C31).
+    $exitCode = Artisan::call('access:check');
+
+    expect($exitCode)->toBe(1)
+        ->and(Artisan::output())->not->toContain('Table [user_group')
+        ->toContain('cannot be listed');
 });
 
 it('still requires the group tables when the package source reads product-owned tables (F2)', function (): void {
@@ -279,4 +285,19 @@ it('passes with a super-admin who holds nothing else (C31)', function (): void {
     SpatieUser::query()->create()->roles()->attach(Role::create(['name' => 'super-admin', 'guard_name' => 'web']));
 
     $this->artisan('access:check')->assertSuccessful();
+});
+
+it('lists a mixed holder through the groups of an STI member model (C31)', function (): void {
+    config()->set('auth.providers.users.model', SpatieUser::class);
+    config()->set('access.group_member_model', StiAdminUser::class);
+    $superAdmin = Role::create(['name' => 'super-admin', 'guard_name' => 'web']);
+    $member = SpatieUser::query()->create();
+    $member->roles()->attach(Role::create(['name' => 'reader', 'guard_name' => 'web']));
+    $groupId = DB::table('user_groups')->insertGetId(['public_id' => (string) Str::uuid(), 'name' => 'admins', 'is_instance' => true]);
+    DB::table('user_group_role')->insert(['user_group_id' => $groupId, 'role_id' => $superAdmin->id]);
+    DB::table('user_group_user')->insert(['user_group_id' => $groupId, 'user_id' => $member->id]);
+
+    $this->artisan('access:check')
+        ->expectsOutputToContain("User [{$member->id}] holds super-admin together with other roles")
+        ->assertFailed();
 });

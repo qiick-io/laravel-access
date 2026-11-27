@@ -46,7 +46,13 @@ final class CheckAccessCommand extends Command
 
         // Only once the tables are there: the listing reads them.
         if ($problems === []) {
-            foreach ($this->getLaravel()->make(ExclusiveSuperAdmin::class)->mixedHolderIds() as $id) {
+            $exclusive = $this->getLaravel()->make(ExclusiveSuperAdmin::class);
+
+            if (! $exclusive->listsEveryHolder()) {
+                $problems[] = 'Super-admins through the groups of the bound GroupRoleSource cannot be listed, so a mixed holder may go unreported; check them in the product.';
+            }
+
+            foreach ($exclusive->listsEveryHolder() ? $exclusive->mixedHolderIds() : [] as $id) {
                 $problems[] = "User [{$id}] holds super-admin together with other roles, so its super-admin bypass is withheld; remove the other roles or super-admin through ExclusiveSuperAdmin::write().";
             }
         }
