@@ -209,6 +209,13 @@ membership FK targets `access.users_table` when set, otherwise the table from
 group uses `is_instance = true` with `organisation_id` NULL; a CHECK forbids
 `is_instance = true` together with a non-null `organisation_id`.
 
+The resolver caches each decision for the request or job (C29 / AC6), and
+only Spatie's role and permission events clear it. After the product writes
+`user_group_user` or `user_group_role`, it calls
+`app(EffectivePermissionResolver::class)->forget($user)` for every member it
+changed (or `flush()` for a change to a whole group) before it checks
+permissions again in the same request or job; the next request starts clean.
+
 Group memberships are read from the default database connection. They
 count only for a user that is exactly the group member model
 (`access.group_member_model`, else `auth.providers.users.model`) and whose
