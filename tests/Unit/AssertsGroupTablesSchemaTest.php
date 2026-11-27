@@ -6,6 +6,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
+use Illuminate\Support\Str;
 use Qiick\Access\Laravel\AccessSchema;
 use Qiick\Access\Testing\AssertsGroupTablesSchema;
 
@@ -31,6 +32,7 @@ afterEach(function (): void {
     Schema::dropIfExists('user_group_role');
     Schema::dropIfExists('user_group_user');
     Schema::dropIfExists('user_groups');
+    Schema::dropIfExists('organisations');
     Schema::dropIfExists('roles');
     Schema::dropIfExists('users');
 });
@@ -92,26 +94,7 @@ it('fails AC17 when a surrogate id appears on a pivot', function (): void {
     });
 
     // XOR holds so assertShape reaches the surrogate-id check on the pivot.
-    $driver = Schema::getConnection()->getDriverName();
-
-    if ($driver === 'sqlite') {
-        DB::statement(
-            'CREATE TRIGGER user_groups_instance_org_xor_insert
-             BEFORE INSERT ON user_groups
-             FOR EACH ROW
-             WHEN NEW.is_instance = 1 AND NEW.organisation_id IS NOT NULL
-             BEGIN
-                 SELECT RAISE(ABORT, \'is_instance requires null organisation_id\');
-             END',
-        );
-    } else {
-        $expression = in_array($driver, ['mysql', 'mariadb'], true)
-            ? '(is_instance = 0 OR organisation_id IS NULL)'
-            : '(is_instance = false OR organisation_id IS NULL)';
-        DB::statement(
-            "ALTER TABLE user_groups ADD CONSTRAINT user_groups_instance_org_xor CHECK {$expression}",
-        );
-    }
+    AccessSchema::ensureConstraints();
 
     Schema::create('user_group_user', function (Blueprint $table): void {
         $table->id();
@@ -229,6 +212,12 @@ function createGroupTablesBreaking(string $break): void
         }
     };
 
+    if ($isBroken('user_groups', 'foreign', 'organisation_id')) {
+        Schema::create('organisations', function (Blueprint $table): void {
+            $table->uuid('id')->primary();
+        });
+    }
+
     Schema::create('user_groups', function (Blueprint $table) use ($column, $isBroken): void {
         if ($isBroken('user_groups', 'nullable', 'id')) {
             $table->unsignedBigInteger('id')->nullable()->unique();
@@ -267,9 +256,17 @@ function createGroupTablesBreaking(string $break): void
         if (! $isBroken('user_groups', 'unindexed', 'organisation_id') && ! $isBroken('user_groups', 'missing', 'organisation_id')) {
             $table->index('organisation_id');
         }
+
+        // A product organisation FK, and no instance rule.
+        if ($isBroken('user_groups', 'foreign', 'organisation_id')) {
+            $table->foreign('organisation_id')->references('id')->on('organisations');
+        }
     });
 
-    if (! $isBroken('user_groups', 'unchecked', 'is_instance') && ! $isBroken('user_groups', 'missing', 'is_instance') && ! $isBroken('user_groups', 'missing', 'organisation_id')) {
+    if ($isBroken('user_groups', 'insertonly', 'is_instance')) {
+        // SQLite: the rule on INSERT only, so an UPDATE can still break it.
+        DB::statement("CREATE TRIGGER user_groups_xor_insert_only BEFORE INSERT ON user_groups FOR EACH ROW WHEN NEW.is_instance = 1 AND NEW.organisation_id IS NOT NULL BEGIN SELECT RAISE(ABORT, 'xor'); END");
+    } elseif (! $isBroken('user_groups', 'unchecked', 'is_instance') && ! $isBroken('user_groups', 'foreign', 'organisation_id') && ! $isBroken('user_groups', 'missing', 'is_instance') && ! $isBroken('user_groups', 'missing', 'organisation_id')) {
         AccessSchema::ensureConstraints();
     }
 
@@ -479,3 +476,29 @@ final class SpatieMemberUser extends Model
 {
     protected $table = 'members';
 }
+
+it('does not take an organisation FK refusal for the instance rule (C75)', function (): void {
+    // Codex review of #72: the probe varies only is_instance, on a real organisation.
+    createGroupTablesBreaking('user_groups.foreign:organisation_id');
+    $organisationId = (string) Str::uuid();
+    DB::table('organisations')->insert(['id' => $organisationId]);
+
+    expect(fn () => (new AssertsGroupTablesSchema(app('db')->connection(), $organisationId))->assertShape())
+        ->toThrow(RuntimeException::class, 'AC17/C75')
+        ->and(DB::table('user_groups')->count())->toBe(0);
+});
+
+it('asks for an existing organisation when an organisation FK refuses the probe (C75)', function (): void {
+    createGroupTablesBreaking('user_groups.foreign:organisation_id');
+
+    expect(fn () => (new AssertsGroupTablesSchema(app('db')->connection()))->assertShape())
+        ->toThrow(RuntimeException::class, 'pass an existing organisation id');
+});
+
+it('proves the instance rule on UPDATE too (C75)', function (): void {
+    createGroupTablesBreaking('user_groups.insertonly:is_instance');
+
+    expect(fn () => (new AssertsGroupTablesSchema(app('db')->connection()))->assertShape())
+        ->toThrow(RuntimeException::class, 'AC17/C75')
+        ->and(DB::table('user_groups')->count())->toBe(0);
+})->skip(fn (): bool => DB::getDriverName() !== 'sqlite', 'CHECK constraints cover UPDATE on the server engines.');

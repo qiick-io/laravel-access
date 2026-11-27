@@ -60,8 +60,6 @@ DECLARATION_ONLY_FILES=(
   src/Events/SubjectErasedEvent.php
   src/Laravel/NoTeamContext.php
   src/Principals/DeactivationReason.php
-  src/Principals/PrincipalCreated.php
-  src/Principals/PrincipalDeactivated.php
   src/Principals/PrincipalDirectory.php
   src/Principals/UserHasPrincipalsException.php
 )

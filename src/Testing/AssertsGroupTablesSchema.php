@@ -24,8 +24,13 @@ use RuntimeException;
  */
 final class AssertsGroupTablesSchema
 {
+    /**
+     * @param  string|null  $organisationId  an existing organisation, for a product whose
+     *                                       user_groups.organisation_id references its own table
+     */
     public function __construct(
         private readonly Connection $connection,
+        private readonly ?string $organisationId = null,
     ) {}
 
     /**
@@ -103,10 +108,21 @@ final class AssertsGroupTablesSchema
      */
     private function requireInstanceOrganisationXorConstraint(): void
     {
+        // Control and probe share one organisation and differ only in
+        // is_instance (and the name), so no FK or unique index can refuse
+        // the probe for the rule. INSERT and UPDATE are both proved.
+        $organisationId = $this->organisationId ?? (string) Str::uuid();
+        $failure = 'AC17/C75: expected CHECK that is_instance=true only when organisation_id IS NULL on user_groups.';
+
         $this->probeRefusal(
-            $this->probeGroupRow('__ac17_instance_group__', null, true),
-            $this->probeGroupRow('__ac17_instance_org_xor__', (string) Str::uuid(), true),
-            'AC17/C75: expected CHECK that is_instance=true only when organisation_id IS NULL on user_groups.',
+            $this->probeGroupRow('__ac17_instance_org_control__', $organisationId, false),
+            $this->probeGroupRow('__ac17_instance_org_xor__', $organisationId, true),
+            $failure,
+        );
+        $this->probeRefusal(
+            $this->probeGroupRow('__ac17_instance_org_control__', $organisationId, false),
+            ['is_instance' => true],
+            $failure,
         );
     }
 
@@ -116,7 +132,7 @@ final class AssertsGroupTablesSchema
      * not an unrelated constraint of the product's table.
      *
      * @param  array<string, mixed>  $controlRow  a row the schema must accept
-     * @param  array<string, mixed>  $probeRow  a row the rule must refuse
+     * @param  array<string, mixed>  $probeRow  a row the rule must refuse, or the columns of an update of the control row
      *
      * @throws RuntimeException with $failure when the probe row is saved, or when the control row is refused
      */
@@ -128,11 +144,14 @@ final class AssertsGroupTablesSchema
             try {
                 $this->connection->table('user_groups')->insert($controlRow);
             } catch (QueryException $exception) {
-                throw new RuntimeException("AC17: user_groups refused a valid probe row, so the probe proves nothing: {$exception->getMessage()}", previous: $exception);
+                throw new RuntimeException("AC17: user_groups refused a valid probe row, so the probe proves nothing (with an organisation FK, pass an existing organisation id): {$exception->getMessage()}", previous: $exception);
             }
 
             try {
-                $this->connection->table('user_groups')->insert($probeRow);
+                // A full row is inserted; a partial one updates the control row.
+                isset($probeRow['public_id'])
+                    ? $this->connection->table('user_groups')->insert($probeRow)
+                    : $this->connection->table('user_groups')->where('public_id', $controlRow['public_id'])->update($probeRow);
             } catch (QueryException) {
                 return;
             }
