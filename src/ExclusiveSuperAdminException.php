@@ -17,17 +17,18 @@ final class ExclusiveSuperAdminException extends LogicException
 {
     public static function forUser(Authenticatable $user): self
     {
-        $identifier = $user->getAuthIdentifier();
-        $id = is_int($identifier) || is_string($identifier) ? $identifier : 'unknown';
-
-        return new self("User [{$id}] would hold the super-admin role together with other roles; super-admin stands alone (decision 2026-11-26).");
+        return new self('User ['.self::idOf($user).'] would hold the super-admin role together with other roles; super-admin stands alone (decision 2026-11-26).');
     }
 
     public static function promotionBy(Authenticatable $user): self
     {
-        $identifier = $user->getAuthIdentifier();
-        $id = is_int($identifier) || is_string($identifier) ? $identifier : 'unknown';
+        return new self('User ['.self::idOf($user).'] would become an effective super-admin, and the acting user may not manage super-admins.');
+    }
 
-        return new self("User [{$id}] would become an effective super-admin, and the acting user may not manage super-admins.");
+    private static function idOf(Authenticatable $user): string
+    {
+        $identifier = $user->getAuthIdentifier();
+
+        return is_int($identifier) || is_string($identifier) ? (string) $identifier : 'unknown';
     }
 }

@@ -9,6 +9,7 @@ use Illuminate\Container\Container;
 use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Database\Connection;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Support\Arr;
 use LogicException;
 use Qiick\Access\Contracts\RoleCatalog;
 
@@ -62,16 +63,17 @@ final class ExclusiveSuperAdmin
      *
      * @template TResult
      *
-     * @param  (Model&Authenticatable)|iterable<Model&Authenticatable>  $users
+     * @param  (Model&Authenticatable)|list<Model&Authenticatable>  $users
      * @param  Closure(): TResult  $write
      * @return TResult
      *
      * @throws ExclusiveSuperAdminException after rolling the write back
      * @throws LogicException when the users live on different connections or a user row is missing
      */
-    public function write(Model|iterable $users, Closure $write, ?Authenticatable $actor = null): mixed
+    public function write(Model|array $users, Closure $write, ?Authenticatable $actor = null): mixed
     {
-        $users = $users instanceof Model ? [$users] : array_values(is_array($users) ? $users : iterator_to_array($users, false));
+        $users = Arr::wrap($users);
+        // A stable lock order, so two writes over the same users cannot deadlock.
         usort($users, fn (Model $first, Model $second): int => $first->getKey() <=> $second->getKey());
         $connection = $this->connectionOf($users);
 
@@ -93,7 +95,6 @@ final class ExclusiveSuperAdmin
 
                 foreach ($users as $index => $user) {
                     $this->assertHeldAlone($user);
-                    $this->resolver->forget($user);
 
                     if ($actor !== null && ! $wasEffective[$index] && $this->resolver->isSuperAdmin($user) && ! $this->guard()->canManageSuperAdmins($actor)) {
                         throw ExclusiveSuperAdminException::promotionBy($user);
@@ -116,9 +117,9 @@ final class ExclusiveSuperAdmin
      */
     private function connectionOf(array $users): Connection
     {
-        $names = array_unique(array_map(fn (Model $user): string => $user->getConnection()->getName() ?? '', $users));
+        $connections = array_unique(array_map(fn (Model $user): int => spl_object_id($user->getConnection()), $users));
 
-        if (count($names) !== 1) {
+        if (count($connections) !== 1) {
             throw new LogicException('ExclusiveSuperAdmin::write() needs at least one user, all on one connection.');
         }
 
@@ -135,10 +136,7 @@ final class ExclusiveSuperAdmin
      */
     public function assertHeldAlone(Authenticatable $user): void
     {
-        if ($user instanceof Model) {
-            $user->unsetRelation('roles');
-        }
-
+        // A fresh read: holdsMixedSuperAdmin() forgets the user and its loaded roles.
         if ($this->resolver->holdsMixedSuperAdmin($user)) {
             throw ExclusiveSuperAdminException::forUser($user);
         }

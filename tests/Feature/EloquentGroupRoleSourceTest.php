@@ -464,3 +464,21 @@ it('gives group roles only to exactly the member model class on the default conn
 
     config()->set('access.group_member_model', null);
 })->group('engines');
+
+it('lists the roles of every live group, every organisation included', function (): void {
+    $connection = app('db')->connection();
+    $connection->table('user_groups')->insert([
+        ['id' => 1, 'public_id' => '11111111-1111-7111-8111-111111111111', 'name' => 'a', 'organisation_id' => '22222222-2222-7222-8222-222222222222', 'is_instance' => false, 'deleted_at' => null],
+        ['id' => 2, 'public_id' => '33333333-3333-7333-8333-333333333333', 'name' => 'b', 'organisation_id' => null, 'is_instance' => true, 'deleted_at' => null],
+    ]);
+    $connection->table('user_group_user')->insert([
+        ['user_id' => 10, 'user_group_id' => 1, 'expires_at' => null],
+        ['user_id' => 10, 'user_group_id' => 2, 'expires_at' => null],
+    ]);
+    $connection->table('user_group_role')->insert([
+        ['user_group_id' => 1, 'role_id' => 4],
+        ['user_group_id' => 2, 'role_id' => 1],
+    ]);
+
+    expect(app(GroupRoleSource::class)->allRoleIdsFor((new SpatieUser)->forceFill(['id' => 10])))->toBe([1, 4]);
+})->group('engines');

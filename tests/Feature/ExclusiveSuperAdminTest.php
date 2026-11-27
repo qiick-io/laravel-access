@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use Illuminate\Auth\GenericUser;
 use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\DB;
@@ -261,4 +262,63 @@ it('rolls a shared group write back for every member when one member breaks the 
         Schema::dropIfExists('user_group_user');
         Schema::dropIfExists('user_groups');
     }
+});
+
+it('names the user, or unknown, in both exceptions', function (): void {
+    $named = new GenericUser(['id' => 'u-7']);
+
+    expect(ExclusiveSuperAdminException::forUser($named)->getMessage())->toStartWith('User [u-7] would hold')
+        ->and(ExclusiveSuperAdminException::promotionBy(new GenericUser(['id' => 12]))->getMessage())->toStartWith('User [12] would become')
+        ->and(ExclusiveSuperAdminException::forUser(new GenericUser(['id' => null]))->getMessage())->toStartWith('User [unknown]');
+});
+
+it('locks the users in key order', function (): void {
+    $first = exclusiveUser();
+    $second = exclusiveUser();
+    DB::enableQueryLog();
+
+    app(ExclusiveSuperAdmin::class)->write([$second, $first], fn (): null => null);
+
+    $lockedIds = collect(DB::getQueryLog())
+        ->filter(fn (array $query): bool => str_starts_with($query['query'], 'select * from "users"'))
+        ->map(fn (array $query): mixed => $query['bindings'][0])
+        ->values()
+        ->all();
+
+    expect($lockedIds)->toBe([$first->id, $second->id]);
+});
+
+it('reads the effective super-admin state fresh before the write', function (): void {
+    // A raw attach after a cached verdict: the user already is a super-admin.
+    bindActiveUsers();
+    $user = exclusiveUser();
+    expect(app(EffectivePermissionResolver::class)->isSuperAdmin($user))->toBeFalse();
+    $user->roles()->attach(Role::findByName('super-admin'));
+
+    app(ExclusiveSuperAdmin::class)->write($user, fn (): null => null, exclusiveUser('admin'));
+
+    expect(directRoles($user))->toBe(['super-admin']);
+});
+
+it('leaves no stale roles loaded on the user after a refused write', function (): void {
+    $user = exclusiveUser('reader');
+
+    try {
+        writeRoles($user, function () use ($user): void {
+            $user->syncRoles(['super-admin', 'reader']);
+            $user->load('roles');
+        });
+    } catch (ExclusiveSuperAdminException) {
+    }
+
+    expect($user->relationLoaded('roles'))->toBeFalse();
+});
+
+it('refuses users on different connections in one write', function (): void {
+    config()->set('database.connections.other', ['driver' => 'sqlite', 'database' => ':memory:']);
+    $elsewhere = exclusiveUser();
+    $elsewhere->setConnection('other');
+
+    expect(fn () => app(ExclusiveSuperAdmin::class)->write([exclusiveUser(), $elsewhere], fn (): null => null))
+        ->toThrow(LogicException::class, 'all on one connection');
 });
