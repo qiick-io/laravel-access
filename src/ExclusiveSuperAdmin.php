@@ -7,8 +7,10 @@ namespace Qiick\Access;
 use Closure;
 use Illuminate\Container\Container;
 use Illuminate\Contracts\Auth\Authenticatable;
+use Illuminate\Contracts\Config\Repository as ConfigRepository;
 use Illuminate\Database\Connection;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\MorphToMany;
 use Illuminate\Support\Arr;
 use LogicException;
 use Qiick\Access\Contracts\RoleCatalog;
@@ -33,7 +35,67 @@ final class ExclusiveSuperAdmin
     public function __construct(
         private readonly EffectivePermissionResolver $resolver,
         private readonly RoleCatalog $roleCatalog,
+        private readonly ConfigRepository $config,
     ) {}
+
+    /**
+     * Ids of the users who hold super-admin together with another role, so
+     * their bypass is withheld; `access:check` lists them. Candidates are the
+     * holders of a role named super-admin, directly or through a live
+     * instance group, each then read fresh on the primary.
+     *
+     * @return array<int, string> the keys, JSON-encoded
+     */
+    public function mixedHolderIds(): array
+    {
+        $userClass = $this->config->get('auth.providers.users.model');
+
+        if (! is_string($userClass) || ! class_exists($userClass)) {
+            return [];
+        }
+
+        $user = new $userClass;
+        $roles = method_exists($user, 'roles') ? $user->roles() : null;
+
+        if (! $roles instanceof MorphToMany) {
+            return [];
+        }
+
+        // Inside a transaction every read goes to the primary.
+        $user = $roles->getParent();
+
+        return $user->getConnection()->transaction(function () use ($user, $roles): array {
+            $roleModel = $roles->getRelated();
+            $superAdminName = $this->roleCatalog->superAdminRoleName();
+            $connection = $user->getConnection();
+
+            $candidates = $connection->table($roles->getTable())
+                ->join($roleModel->getTable(), $roleModel->getQualifiedKeyName(), '=', $roles->getQualifiedRelatedPivotKeyName())
+                ->where($roleModel->qualifyColumn('name'), $superAdminName)
+                ->where($roles->qualifyPivotColumn($roles->getMorphType()), $user->getMorphClass())
+                ->pluck($roles->getQualifiedForeignPivotKeyName())
+                ->all();
+
+            if ($connection->getSchemaBuilder()->hasTable('user_group_role')) {
+                $candidates = [...$candidates, ...$connection->table('user_group_user')
+                    ->join('user_groups', 'user_groups.id', '=', 'user_group_user.user_group_id')
+                    ->join('user_group_role', 'user_group_role.user_group_id', '=', 'user_groups.id')
+                    ->join($roleModel->getTable(), $roleModel->getQualifiedKeyName(), '=', 'user_group_role.role_id')
+                    ->where($roleModel->qualifyColumn('name'), $superAdminName)
+                    ->where('user_groups.is_instance', true)
+                    ->whereNull('user_groups.deleted_at')
+                    ->pluck('user_group_user.user_id')
+                    ->all()];
+            }
+
+            return $user->newQueryWithoutScopes()->whereKey(collect($candidates)->unique()->values()->all())->get()
+                ->filter(fn (Model $holder): bool => $holder instanceof Authenticatable && $this->resolver->holdsMixedSuperAdmin($holder))
+                // JSON keeps an int and a string key apart in the listing.
+                ->map(fn (Model $holder): string => json_encode($holder->getKey(), JSON_THROW_ON_ERROR))
+                ->values()
+                ->all();
+        });
+    }
 
     /**
      * Whether a list of role names holds super-admin next to another role.
@@ -106,8 +168,8 @@ final class ExclusiveSuperAdmin
         } finally {
             // Whatever the outcome, no verdict read inside the transaction survives it.
             foreach ($users as $user) {
+                // forget() also drops the loaded roles relation.
                 $this->resolver->forget($user);
-                $user->unsetRelation('roles');
             }
         }
     }

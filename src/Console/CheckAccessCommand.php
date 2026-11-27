@@ -9,6 +9,7 @@ use Illuminate\Contracts\Config\Repository as ConfigRepository;
 use Illuminate\Database\DatabaseManager;
 use Qiick\Access\Contracts\GroupRoleSource;
 use Qiick\Access\EffectivePermissionResolver;
+use Qiick\Access\ExclusiveSuperAdmin;
 use Qiick\Access\Laravel\AccessBootChecks;
 use Qiick\Access\Laravel\EloquentGroupRoleSource;
 use Symfony\Component\Console\Formatter\OutputFormatter;
@@ -42,6 +43,13 @@ final class CheckAccessCommand extends Command
         }
 
         $problems = [...$problems, ...$this->tableProblems($config, $database)];
+
+        // Only once the tables are there: the listing reads them.
+        if ($problems === []) {
+            foreach ($this->getLaravel()->make(ExclusiveSuperAdmin::class)->mixedHolderIds() as $id) {
+                $problems[] = "User [{$id}] holds super-admin together with other roles, so its super-admin bypass is withheld; remove the other roles or super-admin through ExclusiveSuperAdmin::write().";
+            }
+        }
 
         if ($problems === []) {
             $this->info('qiick/laravel-access configuration, bindings and tables are ready.');

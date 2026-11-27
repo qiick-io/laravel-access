@@ -59,7 +59,7 @@ See [docs/public-api.md](docs/public-api.md#deprecation-policy).
   security log or the other super-admins. Such an account stays protected:
   `SuperAdminGuard::isProtectedFrom()` now follows
   `holdsSuperAdminRole()`, the assignment, not the bypass. Clean up mixed
-  accounts in the product's upgrade command before deploying.
+  accounts before deploying: `php artisan access:check` lists them.
 - Route every role and group write (forms, OIDC role sync, API, your
   commands) through `app(ExclusiveSuperAdmin::class)->write($users, fn ()
   => ..., $actor)`. Pass every user the write affects: for a group change,

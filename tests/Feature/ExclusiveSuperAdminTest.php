@@ -17,6 +17,7 @@ use Qiick\Access\Events\SuperAdminBypassWithheldEvent;
 use Qiick\Access\ExclusiveSuperAdmin;
 use Qiick\Access\ExclusiveSuperAdminException;
 use Qiick\Access\Laravel\EloquentGroupRoleSource;
+use Qiick\Access\Principals\Principal;
 use Qiick\Access\SuperAdminGuard;
 use Qiick\Access\Tests\Support\FakePermissionEnum;
 use Qiick\Access\Tests\Support\SpatieUser;
@@ -321,4 +322,21 @@ it('refuses users on different connections in one write', function (): void {
 
     expect(fn () => app(ExclusiveSuperAdmin::class)->write([exclusiveUser(), $elsewhere], fn (): null => null))
         ->toThrow(LogicException::class, 'all on one connection');
+});
+
+it('lists mixed holders once, without group tables, and nothing for a users model without roles', function (): void {
+    $mixed = exclusiveUser('super-admin', 'reader');
+    exclusiveUser('super-admin');
+    exclusiveUser('reader');
+
+    expect(app(ExclusiveSuperAdmin::class)->mixedHolderIds())->toBe([(string) $mixed->id]);
+
+    config()->set('auth.providers.users.model', Principal::class);
+    expect(app(ExclusiveSuperAdmin::class)->mixedHolderIds())->toBe([]);
+
+    config()->set('auth.providers.users.model', stdClass::class);
+    expect(app(ExclusiveSuperAdmin::class)->mixedHolderIds())->toBe([]);
+
+    config()->set('auth.providers.users.model', null);
+    expect(app(ExclusiveSuperAdmin::class)->mixedHolderIds())->toBe([]);
 });

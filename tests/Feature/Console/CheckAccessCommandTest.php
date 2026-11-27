@@ -8,8 +8,11 @@ use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
+use Illuminate\Support\Str;
 use Qiick\Access\Contracts\GroupRoleSource;
 use Qiick\Access\Contracts\PermissionVocabulary;
+use Qiick\Access\Tests\Support\SpatieUser;
+use Spatie\Permission\Models\Role;
 
 /*
  * F2: access:check exits 0 on a ready install and 1 with one line per
@@ -242,4 +245,38 @@ it('leaves the group tables to a product source that cannot be built here (F2)',
     Artisan::call('access:check');
 
     expect(Artisan::output())->not->toContain('Table [user_groups]');
+});
+
+it('lists the users who hold super-admin together with other roles (C31)', function (): void {
+    config()->set('auth.providers.users.model', SpatieUser::class);
+    $superAdmin = Role::create(['name' => 'super-admin', 'guard_name' => 'web']);
+    $reader = Role::create(['name' => 'reader', 'guard_name' => 'web']);
+    $alone = SpatieUser::query()->create();
+    $alone->roles()->attach($superAdmin);
+    $direct = SpatieUser::query()->create();
+    $direct->roles()->attach([$superAdmin->id, $reader->id]);
+    $throughGroup = SpatieUser::query()->create();
+    $throughGroup->roles()->attach($reader);
+    // Also a direct super-admin: listed once.
+    $twice = SpatieUser::query()->create();
+    $twice->roles()->attach([$superAdmin->id, $reader->id]);
+    $groupId = DB::table('user_groups')->insertGetId(['public_id' => (string) Str::uuid(), 'name' => 'admins', 'is_instance' => true]);
+    DB::table('user_group_role')->insert(['user_group_id' => $groupId, 'role_id' => $superAdmin->id]);
+    DB::table('user_group_user')->insert([['user_group_id' => $groupId, 'user_id' => $throughGroup->id], ['user_group_id' => $groupId, 'user_id' => $twice->id]]);
+
+    $exitCode = Artisan::call('access:check');
+    $output = Artisan::output();
+
+    expect($exitCode)->toBe(1)
+        ->and($output)->toContain("User [{$direct->id}] holds super-admin together with other roles")
+        ->toContain("User [{$throughGroup->id}] holds super-admin together with other roles")
+        ->not->toContain("User [{$alone->id}]")
+        ->and(substr_count($output, "User [{$twice->id}]"))->toBe(1);
+});
+
+it('passes with a super-admin who holds nothing else (C31)', function (): void {
+    config()->set('auth.providers.users.model', SpatieUser::class);
+    SpatieUser::query()->create()->roles()->attach(Role::create(['name' => 'super-admin', 'guard_name' => 'web']));
+
+    $this->artisan('access:check')->assertSuccessful();
 });
