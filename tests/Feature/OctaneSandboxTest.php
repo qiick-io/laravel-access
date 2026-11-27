@@ -3,13 +3,18 @@
 declare(strict_types=1);
 
 use Illuminate\Container\Container;
+use Illuminate\Contracts\Auth\Access\Gate;
+use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Facade;
-use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\Schema;
 use Qiick\Access\Contracts\GroupRoleSource;
+use Qiick\Access\Contracts\LegacyGateBefore;
+use Qiick\Access\Contracts\TeamContext;
 use Qiick\Access\EffectivePermissionResolver;
+use Qiick\Access\Laravel\GateBeforeSelector;
+use Qiick\Access\Laravel\SpatieTeamContext;
 use Qiick\Access\Tests\Support\SpatieUser;
 use Spatie\Permission\Models\Role;
 use Spatie\Permission\PermissionRegistrar;
@@ -38,7 +43,8 @@ beforeEach(function (): void {
 
     $noGroups = Mockery::mock(GroupRoleSource::class);
     $noGroups->shouldReceive('roleIdsFor', 'instanceRoleIdsFor')->andReturn([]);
-    app()->instance(GroupRoleSource::class, $noGroups);
+    // Scoped, as the package binds it: the sandbox rebuilds it from this.
+    app()->scoped(GroupRoleSource::class, fn (): GroupRoleSource => $noGroups);
     app()->forgetInstance(EffectivePermissionResolver::class);
 
     Role::create(['name' => 'super-admin', 'guard_name' => 'web']);
@@ -82,12 +88,51 @@ it('lets GateBefore read the resolver of the request, not the boot container', f
     $user->assignRole('super-admin');
 
     enterOctaneSandbox();
-    expect(Gate::forUser($user)->allows('anything'))->toBeTrue();
+    expect(app(Gate::class)->forUser($user)->allows('anything'))->toBeTrue();
 
     // A product write the package sees no event for, followed by the
     // documented forget() on the request's resolver.
     $user->roles()->detach();
     app(EffectivePermissionResolver::class)->forget($user);
 
-    expect(Gate::forUser($user)->allows('anything'))->toBeFalse();
+    expect(app(Gate::class)->forUser($user)->allows('anything'))->toBeFalse();
+});
+
+it('lets a team switch clear the resolver of the request, with an adapter built at boot', function (): void {
+    // Codex review of #75: adoption binds the adapter as a singleton.
+    app()->singleton(TeamContext::class, fn () => app(SpatieTeamContext::class));
+    app(TeamContext::class);
+    $user = SpatieUser::query()->create(['email' => 'admin@example.com']);
+    $user->assignRole('super-admin');
+
+    $sandbox = enterOctaneSandbox();
+    $resolver = $sandbox->make(EffectivePermissionResolver::class);
+    expect($resolver->isSuperAdmin($user))->toBeTrue();
+
+    $user->roles()->detach();
+    $sandbox->make(TeamContext::class)->switchTo(null);
+
+    expect($resolver->isSuperAdmin($user))->toBeFalse();
+});
+
+it('resolves the legacy Gate of the request, not the boot container', function (): void {
+    config()->set('access.use_package_gate', false);
+    $legacy = fn (bool $verdict): LegacyGateBefore => new class($verdict) implements LegacyGateBefore
+    {
+        public function __construct(private readonly bool $verdict) {}
+
+        public function decide(?Authenticatable $user, string $ability, array $arguments = []): ?bool
+        {
+            return $this->verdict;
+        }
+    };
+    app()->instance(LegacyGateBefore::class, $legacy(true));
+    $gate = app(Gate::class);
+    $gate->before(app(GateBeforeSelector::class)->callback());
+    $user = SpatieUser::query()->create(['email' => 'user@example.com']);
+
+    $sandbox = enterOctaneSandbox();
+    $sandbox->instance(LegacyGateBefore::class, $legacy(false));
+
+    expect($gate->forUser($user)->allows('anything'))->toBeFalse();
 });

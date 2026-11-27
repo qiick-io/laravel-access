@@ -23,6 +23,8 @@ See [docs/public-api.md](docs/public-api.md#deprecation-policy).
   it again safely. Use-time checks already refuse keys of an inactive
   principal, but the keys are not revoked until this step runs. Prove it in
   the product's C17 test.
+- `GateBefore` takes no constructor argument any more: resolve it from the
+  container (`app(GateBefore::class)`) or build it with `new GateBefore`.
 
 - Rename the principal event listeners' types:
   `Qiick\Access\Principals\PrincipalCreated` →

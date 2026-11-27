@@ -84,8 +84,10 @@ final class AccessServiceProvider extends ServiceProvider
             return new SpatieTeamContext(
                 $app->make(PermissionRegistrar::class),
                 $app->make(AuthFactory::class),
-                function () use ($app): void {
-                    $app->make(EffectivePermissionResolver::class)->flush();
+                // The current container: a singleton adapter built at boot is
+                // copied into each Octane sandbox (#69).
+                static function (): void {
+                    Container::getInstance()->make(EffectivePermissionResolver::class)->flush();
                 },
             );
         });
