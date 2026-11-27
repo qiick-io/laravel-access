@@ -8,8 +8,12 @@ use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
+use Illuminate\Support\Str;
 use Qiick\Access\Contracts\GroupRoleSource;
 use Qiick\Access\Contracts\PermissionVocabulary;
+use Qiick\Access\Tests\Support\SpatieUser;
+use Qiick\Access\Tests\Support\StiAdminUser;
+use Spatie\Permission\Models\Role;
 
 /*
  * F2: access:check exits 0 on a ready install and 1 with one line per
@@ -199,7 +203,12 @@ it('does not require the group tables for a product group source with the group 
         Schema::drop($table);
     }
 
-    $this->artisan('access:check')->assertSuccessful();
+    // Its tables are its own; its super-admins cannot be listed (C31).
+    $exitCode = Artisan::call('access:check');
+
+    expect($exitCode)->toBe(1)
+        ->and(Artisan::output())->not->toContain('Table [user_group')
+        ->toContain('cannot be listed');
 });
 
 it('still requires the group tables when the package source reads product-owned tables (F2)', function (): void {
@@ -242,4 +251,79 @@ it('leaves the group tables to a product source that cannot be built here (F2)',
     Artisan::call('access:check');
 
     expect(Artisan::output())->not->toContain('Table [user_groups]');
+});
+
+it('lists the users who hold super-admin together with other roles (C31)', function (): void {
+    config()->set('auth.providers.users.model', SpatieUser::class);
+    $superAdmin = Role::create(['name' => 'super-admin', 'guard_name' => 'web']);
+    $reader = Role::create(['name' => 'reader', 'guard_name' => 'web']);
+    $alone = SpatieUser::query()->create();
+    $alone->roles()->attach($superAdmin);
+    $direct = SpatieUser::query()->create();
+    $direct->roles()->attach([$superAdmin->id, $reader->id]);
+    $throughGroup = SpatieUser::query()->create();
+    $throughGroup->roles()->attach($reader);
+    // Also a direct super-admin: listed once.
+    $twice = SpatieUser::query()->create();
+    $twice->roles()->attach([$superAdmin->id, $reader->id]);
+    $groupId = DB::table('user_groups')->insertGetId(['public_id' => (string) Str::uuid(), 'name' => 'admins', 'is_instance' => true]);
+    DB::table('user_group_role')->insert(['user_group_id' => $groupId, 'role_id' => $superAdmin->id]);
+    DB::table('user_group_user')->insert([['user_group_id' => $groupId, 'user_id' => $throughGroup->id], ['user_group_id' => $groupId, 'user_id' => $twice->id]]);
+
+    $exitCode = Artisan::call('access:check');
+    $output = Artisan::output();
+
+    expect($exitCode)->toBe(1)
+        ->and($output)->toContain("User [{$direct->id}] holds super-admin together with other roles")
+        ->toContain("User [{$throughGroup->id}] holds super-admin together with other roles")
+        ->not->toContain("User [{$alone->id}]")
+        ->and(substr_count($output, "User [{$twice->id}]"))->toBe(1);
+});
+
+it('passes with a super-admin who holds nothing else (C31)', function (): void {
+    config()->set('auth.providers.users.model', SpatieUser::class);
+    SpatieUser::query()->create()->roles()->attach(Role::create(['name' => 'super-admin', 'guard_name' => 'web']));
+
+    $this->artisan('access:check')->assertSuccessful();
+});
+
+it('lists a mixed holder through the groups of an STI member model (C31)', function (): void {
+    config()->set('auth.providers.users.model', SpatieUser::class);
+    config()->set('access.group_member_model', StiAdminUser::class);
+    $superAdmin = Role::create(['name' => 'super-admin', 'guard_name' => 'web']);
+    $member = SpatieUser::query()->create();
+    $member->roles()->attach(Role::create(['name' => 'reader', 'guard_name' => 'web']));
+    $groupId = DB::table('user_groups')->insertGetId(['public_id' => (string) Str::uuid(), 'name' => 'admins', 'is_instance' => true]);
+    DB::table('user_group_role')->insert(['user_group_id' => $groupId, 'role_id' => $superAdmin->id]);
+    DB::table('user_group_user')->insert(['user_group_id' => $groupId, 'user_id' => $member->id]);
+
+    $this->artisan('access:check')
+        ->expectsOutputToContain("User [{$member->id}] holds super-admin together with other roles")
+        ->assertFailed();
+});
+
+it('lists direct holders through the users model when the group member model is not Eloquent (C31)', function (): void {
+    config()->set('auth.providers.users.model', SpatieUser::class);
+    config()->set('access.group_member_model', stdClass::class);
+    $mixed = SpatieUser::query()->create();
+    $mixed->roles()->attach([Role::create(['name' => 'super-admin', 'guard_name' => 'web'])->id, Role::create(['name' => 'reader', 'guard_name' => 'web'])->id]);
+
+    $this->artisan('access:check')
+        ->expectsOutputToContain("User [{$mixed->id}] holds super-admin together with other roles")
+        ->assertFailed();
+});
+
+it('lists an STI holder with a direct super-admin and another role from a group (C31)', function (): void {
+    // Codex last check of #74: the inverse of the case above.
+    config()->set('auth.providers.users.model', SpatieUser::class);
+    config()->set('access.group_member_model', StiAdminUser::class);
+    $member = SpatieUser::query()->create();
+    $member->roles()->attach(Role::create(['name' => 'super-admin', 'guard_name' => 'web']));
+    $groupId = DB::table('user_groups')->insertGetId(['public_id' => (string) Str::uuid(), 'name' => 'readers', 'is_instance' => true]);
+    DB::table('user_group_role')->insert(['user_group_id' => $groupId, 'role_id' => Role::create(['name' => 'reader', 'guard_name' => 'web'])->id]);
+    DB::table('user_group_user')->insert(['user_group_id' => $groupId, 'user_id' => $member->id]);
+
+    $this->artisan('access:check')
+        ->expectsOutputToContain("User [{$member->id}] holds super-admin together with other roles")
+        ->assertFailed();
 });

@@ -19,6 +19,14 @@ next to other roles, which grants nothing and hides who is a super-admin.
    or any combination of other roles. `Rules\ExclusiveSuperAdminRoleRule`
    is the server check; the app-ui role picker disables the other roles
    once super-admin is picked.
+   The rule covers direct and group roles in every team (added
+   2026-11-27 after Excubia #474, approved by the maintainer). It is
+   enforced on read, fail-closed: a holder of super-admin and another role
+   gets no super-admin bypass, only the other roles, and
+   `SuperAdminBypassWithheldEvent` is dispatched. On write,
+   `ExclusiveSuperAdmin::write()` is the one supported path: a transaction
+   with the user row locked, a check of the resulting state, a rollback on
+   a breach. A write that skips it cannot hide a super-admin.
 2. **Permissions add up across roles**, as Spatie already resolves them;
    the picker says so in a short helper text.
 3. **The key ceiling of a super-admin is the vocabulary.**

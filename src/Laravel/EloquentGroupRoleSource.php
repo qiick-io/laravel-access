@@ -11,6 +11,7 @@ use Illuminate\Database\DatabaseManager;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Query\Builder;
 use Qiick\Access\Contracts\GroupRoleSource;
+use Qiick\Access\Contracts\ListsAllGroupRoles;
 use Qiick\Access\Contracts\TeamContext;
 
 /**
@@ -35,7 +36,7 @@ use Qiick\Access\Contracts\TeamContext;
  *
  * @api
  */
-final class EloquentGroupRoleSource implements GroupRoleSource
+final class EloquentGroupRoleSource implements GroupRoleSource, ListsAllGroupRoles
 {
     public function __construct(
         private readonly DatabaseManager $database,
@@ -73,6 +74,16 @@ final class EloquentGroupRoleSource implements GroupRoleSource
         return $this->pluckRoleIds($user, function (Builder $query): void {
             $query->where('user_groups.is_instance', true);
         });
+    }
+
+    /**
+     * Every live group of the user, in every organisation.
+     *
+     * @return list<int|string>
+     */
+    public function allRoleIdsFor(Authenticatable $user): array
+    {
+        return $this->pluckRoleIds($user, static function (Builder $query): void {});
     }
 
     /**

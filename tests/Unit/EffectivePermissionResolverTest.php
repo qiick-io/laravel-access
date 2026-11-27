@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use Illuminate\Contracts\Auth\Authenticatable;
 use Qiick\Access\Contracts\GroupRoleSource;
+use Qiick\Access\Contracts\ListsAllGroupRoles;
 use Qiick\Access\Contracts\PermissionVocabulary;
 use Qiick\Access\Contracts\RoleCatalog;
 use Qiick\Access\Contracts\TeamContext;
@@ -20,7 +21,9 @@ it('reports super-admin from role names without requiring a current team', funct
     $roleCatalog = Mockery::mock(RoleCatalog::class);
     $roleCatalog->shouldReceive('superAdminRoleName')->andReturn('super-admin');
 
-    $groupRoles = Mockery::mock(GroupRoleSource::class);
+    $groupRoles = Mockery::mock(GroupRoleSource::class, ListsAllGroupRoles::class);
+    // Every group of the user: here the current-team and instance ones.
+    $groupRoles->shouldReceive('allRoleIdsFor')->andReturnUsing(fn (Authenticatable $user): array => [...$groupRoles->roleIdsFor($user), ...$groupRoles->instanceRoleIdsFor($user)]);
     $groupRoles->shouldReceive('instanceRoleIdsFor')->andReturn([]);
     $groupRoles->shouldReceive('roleIdsFor')->with($user)->andReturn([]);
 
@@ -58,7 +61,9 @@ it('caches permissions per user and team until forget', function (): void {
     $roleCatalog = Mockery::mock(RoleCatalog::class);
     $roleCatalog->shouldReceive('superAdminRoleName')->andReturn('super-admin');
 
-    $groupRoles = Mockery::mock(GroupRoleSource::class);
+    $groupRoles = Mockery::mock(GroupRoleSource::class, ListsAllGroupRoles::class);
+    // Every group of the user: here the current-team and instance ones.
+    $groupRoles->shouldReceive('allRoleIdsFor')->andReturnUsing(fn (Authenticatable $user): array => [...$groupRoles->roleIdsFor($user), ...$groupRoles->instanceRoleIdsFor($user)]);
     $groupRoles->shouldReceive('instanceRoleIdsFor')->andReturn([]);
     $groupRoles->shouldReceive('roleIdsFor')->with($user)->andReturn([]);
 
@@ -95,7 +100,9 @@ it('keys the cache by user type as well as identifier', function (): void {
     $roleCatalog = Mockery::mock(RoleCatalog::class);
     $roleCatalog->shouldReceive('superAdminRoleName')->andReturn('super-admin');
 
-    $groupRoles = Mockery::mock(GroupRoleSource::class);
+    $groupRoles = Mockery::mock(GroupRoleSource::class, ListsAllGroupRoles::class);
+    // Every group of the user: here the current-team and instance ones.
+    $groupRoles->shouldReceive('allRoleIdsFor')->andReturnUsing(fn (Authenticatable $user): array => [...$groupRoles->roleIdsFor($user), ...$groupRoles->instanceRoleIdsFor($user)]);
     $groupRoles->shouldReceive('instanceRoleIdsFor')->andReturn([]);
     $groupRoles->shouldReceive('roleIdsFor')->andReturn([]);
 
@@ -128,8 +135,10 @@ it('caches the super-admin verdict until forget', function (): void {
     $roleCatalog = Mockery::mock(RoleCatalog::class);
     $roleCatalog->shouldReceive('superAdminRoleName')->andReturn('super-admin');
 
-    $groupRoles = Mockery::mock(GroupRoleSource::class);
-    $groupRoles->shouldReceive('instanceRoleIdsFor')->andReturn([]);
+    $groupRoles = Mockery::mock(GroupRoleSource::class, ListsAllGroupRoles::class);
+    // Every group of the user: here the current-team and instance ones.
+    $groupRoles->shouldReceive('allRoleIdsFor')->andReturnUsing(fn (Authenticatable $user): array => [...$groupRoles->roleIdsFor($user), ...$groupRoles->instanceRoleIdsFor($user)]);
+    $groupRoles->shouldReceive('instanceRoleIdsFor', 'roleIdsFor')->andReturn([]);
 
     $registrar = Mockery::mock(PermissionRegistrar::class);
     $registrar->teams = false;
@@ -159,7 +168,9 @@ it('reports assigned permissions without the super-admin grant, cached unless fr
     $roleCatalog = Mockery::mock(RoleCatalog::class);
     $roleCatalog->shouldReceive('superAdminRoleName')->andReturn('super-admin');
 
-    $groupRoles = Mockery::mock(GroupRoleSource::class);
+    $groupRoles = Mockery::mock(GroupRoleSource::class, ListsAllGroupRoles::class);
+    // Every group of the user: here the current-team and instance ones.
+    $groupRoles->shouldReceive('allRoleIdsFor')->andReturnUsing(fn (Authenticatable $user): array => [...$groupRoles->roleIdsFor($user), ...$groupRoles->instanceRoleIdsFor($user)]);
     $groupRoles->shouldReceive('instanceRoleIdsFor')->andReturn([]);
     $groupRoles->shouldReceive('roleIdsFor')->andReturn([]);
 
@@ -191,7 +202,9 @@ it('fresh bypasses a warm cache entry', function (): void {
     $roleCatalog = Mockery::mock(RoleCatalog::class);
     $roleCatalog->shouldReceive('superAdminRoleName')->andReturn('super-admin');
 
-    $groupRoles = Mockery::mock(GroupRoleSource::class);
+    $groupRoles = Mockery::mock(GroupRoleSource::class, ListsAllGroupRoles::class);
+    // Every group of the user: here the current-team and instance ones.
+    $groupRoles->shouldReceive('allRoleIdsFor')->andReturnUsing(fn (Authenticatable $user): array => [...$groupRoles->roleIdsFor($user), ...$groupRoles->instanceRoleIdsFor($user)]);
     $groupRoles->shouldReceive('instanceRoleIdsFor')->andReturn([]);
     $groupRoles->shouldReceive('roleIdsFor')->andReturn([]);
 
@@ -225,7 +238,9 @@ it('exposes role names, role ids and permissions for a member', function (): voi
     $roleCatalog = Mockery::mock(RoleCatalog::class);
     $roleCatalog->shouldReceive('superAdminRoleName')->andReturn('super-admin');
 
-    $groupRoles = Mockery::mock(GroupRoleSource::class);
+    $groupRoles = Mockery::mock(GroupRoleSource::class, ListsAllGroupRoles::class);
+    // Every group of the user: here the current-team and instance ones.
+    $groupRoles->shouldReceive('allRoleIdsFor')->andReturnUsing(fn (Authenticatable $user): array => [...$groupRoles->roleIdsFor($user), ...$groupRoles->instanceRoleIdsFor($user)]);
     $groupRoles->shouldReceive('instanceRoleIdsFor')->andReturn([]);
     $groupRoles->shouldReceive('roleIdsFor')->with($user)->andReturn([]);
 
@@ -258,7 +273,9 @@ it('flush clears every cached user and forget null delegates to flush', function
     $roleCatalog = Mockery::mock(RoleCatalog::class);
     $roleCatalog->shouldReceive('superAdminRoleName')->andReturn('super-admin');
 
-    $groupRoles = Mockery::mock(GroupRoleSource::class);
+    $groupRoles = Mockery::mock(GroupRoleSource::class, ListsAllGroupRoles::class);
+    // Every group of the user: here the current-team and instance ones.
+    $groupRoles->shouldReceive('allRoleIdsFor')->andReturnUsing(fn (Authenticatable $user): array => [...$groupRoles->roleIdsFor($user), ...$groupRoles->instanceRoleIdsFor($user)]);
     $groupRoles->shouldReceive('instanceRoleIdsFor')->andReturn([]);
     $groupRoles->shouldReceive('roleIdsFor')->andReturn([]);
 
@@ -299,7 +316,9 @@ it('returns empty roles and permissions for users without Spatie helpers', funct
     $roleCatalog = Mockery::mock(RoleCatalog::class);
     $roleCatalog->shouldReceive('superAdminRoleName')->andReturn('super-admin');
 
-    $groupRoles = Mockery::mock(GroupRoleSource::class);
+    $groupRoles = Mockery::mock(GroupRoleSource::class, ListsAllGroupRoles::class);
+    // Every group of the user: here the current-team and instance ones.
+    $groupRoles->shouldReceive('allRoleIdsFor')->andReturnUsing(fn (Authenticatable $user): array => [...$groupRoles->roleIdsFor($user), ...$groupRoles->instanceRoleIdsFor($user)]);
     $groupRoles->shouldReceive('instanceRoleIdsFor')->andReturn([]);
     $groupRoles->shouldReceive('roleIdsFor')->with($user)->andReturn([]);
 
@@ -333,7 +352,9 @@ it('keys the cache by team id so a switchTo forces a fresh resolve', function ()
     $roleCatalog = Mockery::mock(RoleCatalog::class);
     $roleCatalog->shouldReceive('superAdminRoleName')->andReturn('super-admin');
 
-    $groupRoles = Mockery::mock(GroupRoleSource::class);
+    $groupRoles = Mockery::mock(GroupRoleSource::class, ListsAllGroupRoles::class);
+    // Every group of the user: here the current-team and instance ones.
+    $groupRoles->shouldReceive('allRoleIdsFor')->andReturnUsing(fn (Authenticatable $user): array => [...$groupRoles->roleIdsFor($user), ...$groupRoles->instanceRoleIdsFor($user)]);
     $groupRoles->shouldReceive('instanceRoleIdsFor')->andReturn([]);
     $groupRoles->shouldReceive('roleIdsFor')->andReturn([]);
 
@@ -366,7 +387,9 @@ it('keys the cache by integer team ids and string user identifiers', function ()
     $roleCatalog = Mockery::mock(RoleCatalog::class);
     $roleCatalog->shouldReceive('superAdminRoleName')->andReturn('super-admin');
 
-    $groupRoles = Mockery::mock(GroupRoleSource::class);
+    $groupRoles = Mockery::mock(GroupRoleSource::class, ListsAllGroupRoles::class);
+    // Every group of the user: here the current-team and instance ones.
+    $groupRoles->shouldReceive('allRoleIdsFor')->andReturnUsing(fn (Authenticatable $user): array => [...$groupRoles->roleIdsFor($user), ...$groupRoles->instanceRoleIdsFor($user)]);
     $groupRoles->shouldReceive('instanceRoleIdsFor')->andReturn([]);
     $groupRoles->shouldReceive('roleIdsFor')->andReturn([]);
 
@@ -398,7 +421,9 @@ it('filters empty role and permission names and exposes direct role ids', functi
     $roleCatalog = Mockery::mock(RoleCatalog::class);
     $roleCatalog->shouldReceive('superAdminRoleName')->andReturn('super-admin');
 
-    $groupRoles = Mockery::mock(GroupRoleSource::class);
+    $groupRoles = Mockery::mock(GroupRoleSource::class, ListsAllGroupRoles::class);
+    // Every group of the user: here the current-team and instance ones.
+    $groupRoles->shouldReceive('allRoleIdsFor')->andReturnUsing(fn (Authenticatable $user): array => [...$groupRoles->roleIdsFor($user), ...$groupRoles->instanceRoleIdsFor($user)]);
     $groupRoles->shouldReceive('instanceRoleIdsFor')->andReturn([]);
     $groupRoles->shouldReceive('roleIdsFor')->with($user)->andReturn([]);
 
@@ -430,7 +455,9 @@ it('detects a direct super-admin while ignoring the team filter (P6)', function 
     $roleCatalog = Mockery::mock(RoleCatalog::class);
     $roleCatalog->shouldReceive('superAdminRoleName')->andReturn('super-admin');
 
-    $groupRoles = Mockery::mock(GroupRoleSource::class);
+    $groupRoles = Mockery::mock(GroupRoleSource::class, ListsAllGroupRoles::class);
+    // Every group of the user: here the current-team and instance ones.
+    $groupRoles->shouldReceive('allRoleIdsFor')->andReturnUsing(fn (Authenticatable $user): array => [...$groupRoles->roleIdsFor($user), ...$groupRoles->instanceRoleIdsFor($user)]);
     $groupRoles->shouldReceive('instanceRoleIdsFor')->andReturn([]);
     $groupRoles->shouldReceive('roleIdsFor')->with($direct)->andReturn([]);
     $groupRoles->shouldReceive('roleIdsFor')->with($groupOnly)->andReturn([99]);
@@ -462,7 +489,9 @@ it('leaves registrar teams false when super-admin is checked without teams', fun
     $roleCatalog = Mockery::mock(RoleCatalog::class);
     $roleCatalog->shouldReceive('superAdminRoleName')->andReturn('super-admin');
 
-    $groupRoles = Mockery::mock(GroupRoleSource::class);
+    $groupRoles = Mockery::mock(GroupRoleSource::class, ListsAllGroupRoles::class);
+    // Every group of the user: here the current-team and instance ones.
+    $groupRoles->shouldReceive('allRoleIdsFor')->andReturnUsing(fn (Authenticatable $user): array => [...$groupRoles->roleIdsFor($user), ...$groupRoles->instanceRoleIdsFor($user)]);
     $groupRoles->shouldReceive('instanceRoleIdsFor')->andReturn([]);
     $groupRoles->shouldReceive('roleIdsFor')->with($user)->andReturn([]);
 
@@ -495,7 +524,9 @@ it('forgets only the matching user prefix so user 1 does not clear user 10', fun
     $roleCatalog = Mockery::mock(RoleCatalog::class);
     $roleCatalog->shouldReceive('superAdminRoleName')->andReturn('super-admin');
 
-    $groupRoles = Mockery::mock(GroupRoleSource::class);
+    $groupRoles = Mockery::mock(GroupRoleSource::class, ListsAllGroupRoles::class);
+    // Every group of the user: here the current-team and instance ones.
+    $groupRoles->shouldReceive('allRoleIdsFor')->andReturnUsing(fn (Authenticatable $user): array => [...$groupRoles->roleIdsFor($user), ...$groupRoles->instanceRoleIdsFor($user)]);
     $groupRoles->shouldReceive('instanceRoleIdsFor')->andReturn([]);
     $groupRoles->shouldReceive('roleIdsFor')->andReturn([]);
 
@@ -534,7 +565,9 @@ it('deduplicates mixed int and string role ids and sorts them', function (): voi
     $roleCatalog = Mockery::mock(RoleCatalog::class);
     $roleCatalog->shouldReceive('superAdminRoleName')->andReturn('super-admin');
 
-    $groupRoles = Mockery::mock(GroupRoleSource::class);
+    $groupRoles = Mockery::mock(GroupRoleSource::class, ListsAllGroupRoles::class);
+    // Every group of the user: here the current-team and instance ones.
+    $groupRoles->shouldReceive('allRoleIdsFor')->andReturnUsing(fn (Authenticatable $user): array => [...$groupRoles->roleIdsFor($user), ...$groupRoles->instanceRoleIdsFor($user)]);
     $groupRoles->shouldReceive('instanceRoleIdsFor')->andReturn([]);
     // Duplicate of the direct role id (1) as a string, plus string ids that need casting.
     $groupRoles->shouldReceive('roleIdsFor')->with($user)->andReturn(['1', 'role-b', 'role-a', 'role-b']);
@@ -611,7 +644,9 @@ it('skips invalid role and permission entries without aborting the list', functi
     $roleCatalog = Mockery::mock(RoleCatalog::class);
     $roleCatalog->shouldReceive('superAdminRoleName')->andReturn('super-admin');
 
-    $groupRoles = Mockery::mock(GroupRoleSource::class);
+    $groupRoles = Mockery::mock(GroupRoleSource::class, ListsAllGroupRoles::class);
+    // Every group of the user: here the current-team and instance ones.
+    $groupRoles->shouldReceive('allRoleIdsFor')->andReturnUsing(fn (Authenticatable $user): array => [...$groupRoles->roleIdsFor($user), ...$groupRoles->instanceRoleIdsFor($user)]);
     $groupRoles->shouldReceive('instanceRoleIdsFor')->andReturn([]);
     $groupRoles->shouldReceive('roleIdsFor')->with($user)->andReturn([]);
 
@@ -658,7 +693,9 @@ it('returns empty role ids when roles() is not a gettable relation', function ()
     $roleCatalog = Mockery::mock(RoleCatalog::class);
     $roleCatalog->shouldReceive('superAdminRoleName')->andReturn('super-admin');
 
-    $groupRoles = Mockery::mock(GroupRoleSource::class);
+    $groupRoles = Mockery::mock(GroupRoleSource::class, ListsAllGroupRoles::class);
+    // Every group of the user: here the current-team and instance ones.
+    $groupRoles->shouldReceive('allRoleIdsFor')->andReturnUsing(fn (Authenticatable $user): array => [...$groupRoles->roleIdsFor($user), ...$groupRoles->instanceRoleIdsFor($user)]);
     $groupRoles->shouldReceive('instanceRoleIdsFor')->andReturn([]);
     $groupRoles->shouldReceive('roleIdsFor')->andReturn([]);
 
@@ -703,7 +740,9 @@ it('returns empty role ids when roles() is an object without get()', function ()
     $roleCatalog = Mockery::mock(RoleCatalog::class);
     $roleCatalog->shouldReceive('superAdminRoleName')->andReturn('super-admin');
 
-    $groupRoles = Mockery::mock(GroupRoleSource::class);
+    $groupRoles = Mockery::mock(GroupRoleSource::class, ListsAllGroupRoles::class);
+    // Every group of the user: here the current-team and instance ones.
+    $groupRoles->shouldReceive('allRoleIdsFor')->andReturnUsing(fn (Authenticatable $user): array => [...$groupRoles->roleIdsFor($user), ...$groupRoles->instanceRoleIdsFor($user)]);
     $groupRoles->shouldReceive('instanceRoleIdsFor')->andReturn([]);
     $groupRoles->shouldReceive('roleIdsFor')->andReturn([]);
 
@@ -733,7 +772,9 @@ it('deduplicates duplicate role names from the same user', function (): void {
     $roleCatalog = Mockery::mock(RoleCatalog::class);
     $roleCatalog->shouldReceive('superAdminRoleName')->andReturn('super-admin');
 
-    $groupRoles = Mockery::mock(GroupRoleSource::class);
+    $groupRoles = Mockery::mock(GroupRoleSource::class, ListsAllGroupRoles::class);
+    // Every group of the user: here the current-team and instance ones.
+    $groupRoles->shouldReceive('allRoleIdsFor')->andReturnUsing(fn (Authenticatable $user): array => [...$groupRoles->roleIdsFor($user), ...$groupRoles->instanceRoleIdsFor($user)]);
     $groupRoles->shouldReceive('instanceRoleIdsFor')->andReturn([]);
     $groupRoles->shouldReceive('roleIdsFor')->andReturn([]);
 
@@ -796,7 +837,9 @@ it('falls back to unknown when the auth identifier is neither int nor string', f
     $roleCatalog = Mockery::mock(RoleCatalog::class);
     $roleCatalog->shouldReceive('superAdminRoleName')->andReturn('super-admin');
 
-    $groupRoles = Mockery::mock(GroupRoleSource::class);
+    $groupRoles = Mockery::mock(GroupRoleSource::class, ListsAllGroupRoles::class);
+    // Every group of the user: here the current-team and instance ones.
+    $groupRoles->shouldReceive('allRoleIdsFor')->andReturnUsing(fn (Authenticatable $user): array => [...$groupRoles->roleIdsFor($user), ...$groupRoles->instanceRoleIdsFor($user)]);
     $groupRoles->shouldReceive('instanceRoleIdsFor')->andReturn([]);
     $groupRoles->shouldReceive('roleIdsFor')->andReturn([]);
 
@@ -827,7 +870,9 @@ it('bounds an owner ceiling by assigned permissions, or by the vocabulary for a 
     $roleCatalog = Mockery::mock(RoleCatalog::class);
     $roleCatalog->shouldReceive('superAdminRoleName')->andReturn('super-admin');
 
-    $groupRoles = Mockery::mock(GroupRoleSource::class);
+    $groupRoles = Mockery::mock(GroupRoleSource::class, ListsAllGroupRoles::class);
+    // Every group of the user: here the current-team and instance ones.
+    $groupRoles->shouldReceive('allRoleIdsFor')->andReturnUsing(fn (Authenticatable $user): array => [...$groupRoles->roleIdsFor($user), ...$groupRoles->instanceRoleIdsFor($user)]);
     $groupRoles->shouldReceive('instanceRoleIdsFor')->andReturn([]);
     $groupRoles->shouldReceive('roleIdsFor')->andReturn([]);
 
@@ -856,4 +901,26 @@ it('bounds an owner ceiling by assigned permissions, or by the vocabulary for a 
 
     expect($resolver->isWithinOwnerCeiling($superAdmin, 'can-edit-users'))->toBeTrue()
         ->and($resolver->isWithinOwnerCeiling($superAdmin, 'can-edit-users', true))->toBeFalse();
+});
+
+it('withholds the bypass under teams when the group source cannot list every organisation', function (): void {
+    // Codex re-check of #74: a verdict from one team context would be incomplete.
+    $user = new PermissionedFakeUser(21, ['super-admin']);
+    $roleCatalog = Mockery::mock(RoleCatalog::class);
+    $roleCatalog->shouldReceive('superAdminRoleName')->andReturn('super-admin');
+    $groupRoles = Mockery::mock(GroupRoleSource::class);
+    $groupRoles->shouldReceive('roleIdsFor', 'instanceRoleIdsFor')->andReturn([]);
+    $teamContext = Mockery::mock(TeamContext::class);
+    $teamContext->shouldReceive('currentId')->andReturn('org-1', 'org-2');
+    $registrar = Mockery::mock(PermissionRegistrar::class);
+    $registrar->teams = true;
+
+    $resolver = new EffectivePermissionResolver($roleCatalog, $groupRoles, Mockery::mock(PermissionVocabulary::class), $teamContext, $registrar);
+
+    expect($resolver->isSuperAdmin($user))->toBeFalse()
+        ->and($resolver->holdsSuperAdminRole($user))->toBeTrue();
+
+    $resolver->flush();
+
+    expect($resolver->isSuperAdmin($user))->toBeFalse();
 });

@@ -33,6 +33,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (decision `docs/decisions/2026-11-26-super-admin-key-ceiling.md`).
 - `Rules\ExclusiveSuperAdminRoleRule` rejects super-admin combined with any
   other role on a user's role list; other roles combine freely.
+- Super-admin is exclusive on read and on write (Excubia #474): a holder of
+  super-admin and another role (any team, direct or group) gets no bypass
+  and `SuperAdminBypassWithheldEvent` is dispatched;
+  `ExclusiveSuperAdmin::write()` runs a role or group write atomically and
+  rolls it back when it breaks the rule;
+  `EffectivePermissionResolver::holdsMixedSuperAdmin()` and the optional
+  `Contracts\ListsAllGroupRoles` read every team.
 
 - `PrincipalDirectory::markErased()` lets product soft-delete flows write a
   permanent membership tombstone for a principal of type `user`. Custom

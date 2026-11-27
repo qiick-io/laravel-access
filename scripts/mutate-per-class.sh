@@ -50,6 +50,7 @@ DECLARATION_ONLY_FILES=(
   src/Contracts/AuthorizationResponder.php
   src/Contracts/GroupRoleSource.php
   src/Contracts/LegacyGateBefore.php
+  src/Contracts/ListsAllGroupRoles.php
   src/Contracts/PermissionVocabulary.php
   src/Contracts/RoleCatalog.php
   src/Contracts/TeamContext.php
@@ -58,6 +59,7 @@ DECLARATION_ONLY_FILES=(
   src/Events/PrincipalCreatedEvent.php
   src/Events/PrincipalDeactivatedEvent.php
   src/Events/SubjectErasedEvent.php
+  src/Events/SuperAdminBypassWithheldEvent.php
   src/Laravel/NoTeamContext.php
   src/Principals/DeactivationReason.php
   src/Principals/PrincipalDirectory.php

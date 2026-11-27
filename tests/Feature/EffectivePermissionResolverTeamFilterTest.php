@@ -2,12 +2,14 @@
 
 declare(strict_types=1);
 
+use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use Qiick\Access\Contracts\GroupRoleSource;
+use Qiick\Access\Contracts\ListsAllGroupRoles;
 use Qiick\Access\Contracts\TeamContext;
 use Qiick\Access\EffectivePermissionResolver;
 use Qiick\Access\Laravel\SpatieTeamContext;
@@ -54,7 +56,9 @@ beforeEach(function (): void {
     $registrar->teams = true;
     $registrar->forgetCachedPermissions();
 
-    $groupRoles = Mockery::mock(GroupRoleSource::class);
+    $groupRoles = Mockery::mock(GroupRoleSource::class, ListsAllGroupRoles::class);
+    // Every group of the user: here the current-team and instance ones.
+    $groupRoles->shouldReceive('allRoleIdsFor')->andReturnUsing(fn (Authenticatable $user): array => [...$groupRoles->roleIdsFor($user), ...$groupRoles->instanceRoleIdsFor($user)]);
     $groupRoles->shouldReceive('instanceRoleIdsFor')->andReturn([]);
     $groupRoles->shouldReceive('roleIdsFor')->andReturn([]);
     $this->app->instance(GroupRoleSource::class, $groupRoles);
@@ -233,7 +237,9 @@ it('detects super-admin when the global role arrives only through an instance gr
     $user = SpatieUser::query()->create(['email' => 'group-admin@example.com']);
     $user->assignRole(Role::create(['name' => 'org-editor', 'guard_name' => 'web', 'organisation_id' => 'org-1']));
 
-    $groupRoles = Mockery::mock(GroupRoleSource::class);
+    $groupRoles = Mockery::mock(GroupRoleSource::class, ListsAllGroupRoles::class);
+    // Every group of the user: here the current-team and instance ones.
+    $groupRoles->shouldReceive('allRoleIdsFor')->andReturnUsing(fn (Authenticatable $user): array => [...$groupRoles->roleIdsFor($user), ...$groupRoles->instanceRoleIdsFor($user)]);
     $groupRoles->shouldReceive('roleIdsFor')->andReturn([$superAdminRole->id, $organisationGroupRole->id]);
     $groupRoles->shouldReceive('instanceRoleIdsFor')->andReturn([$superAdminRole->id]);
     $this->app->instance(GroupRoleSource::class, $groupRoles);
@@ -241,9 +247,11 @@ it('detects super-admin when the global role arrives only through an instance gr
 
     $resolver = app(EffectivePermissionResolver::class);
 
-    expect($resolver->isSuperAdmin($user))->toBeTrue()
+    // With org roles next to it the bypass is withheld (fail-closed); the
+    // super-admin role still arrives through the instance group (C30).
+    expect($resolver->isSuperAdmin($user))->toBeFalse()
+        ->and($resolver->holdsMixedSuperAdmin($user))->toBeTrue()
         ->and($registrar->teams)->toBeTrue()
-        ->and($resolver->hasPermission($user, FakePermissionEnum::CanShowUsers->value))->toBeTrue()
         ->and($resolver->roleNamesFor($user))->toBe(['org-editor', 'org-viewer', 'super-admin']);
 });
 
@@ -255,7 +263,9 @@ it('ignores a team-local role named super-admin that arrives through an instance
     ]);
     $user = SpatieUser::query()->create(['email' => 'group-org-admin@example.com']);
 
-    $groupRoles = Mockery::mock(GroupRoleSource::class);
+    $groupRoles = Mockery::mock(GroupRoleSource::class, ListsAllGroupRoles::class);
+    // Every group of the user: here the current-team and instance ones.
+    $groupRoles->shouldReceive('allRoleIdsFor')->andReturnUsing(fn (Authenticatable $user): array => [...$groupRoles->roleIdsFor($user), ...$groupRoles->instanceRoleIdsFor($user)]);
     $groupRoles->shouldReceive('roleIdsFor')->andReturn([]);
     $groupRoles->shouldReceive('instanceRoleIdsFor')->andReturn([$teamLocalRoleId]);
     $this->app->instance(GroupRoleSource::class, $groupRoles);
@@ -276,5 +286,24 @@ it('ignores the team filter for a global super-admin assigned in no current team
 
     expect($resolver->isSuperAdmin($user))->toBeTrue()
         ->and($resolver->roleNamesFor($user))->toBe(['super-admin'])
+        ->and($registrar->teams)->toBeTrue();
+});
+
+it('withholds the bypass for a direct role in another organisation than the current one (C31)', function (): void {
+    $registrar = app(PermissionRegistrar::class);
+    $registrar->setPermissionsTeamId('org-2');
+    $user = SpatieUser::query()->create(['email' => 'mixed@example.com']);
+    $user->assignRole(Role::create(['name' => 'org-editor', 'guard_name' => 'web', 'organisation_id' => 'org-2']));
+    $registrar->setPermissionsTeamId('org-1');
+    $user->assignRole(Role::create(['name' => 'super-admin', 'guard_name' => 'web', 'organisation_id' => null]));
+
+    $groupRoles = Mockery::mock(GroupRoleSource::class, ListsAllGroupRoles::class);
+    $groupRoles->shouldReceive('roleIdsFor', 'instanceRoleIdsFor', 'allRoleIdsFor')->andReturn([]);
+    $this->app->instance(GroupRoleSource::class, $groupRoles);
+    $this->app->forgetInstance(EffectivePermissionResolver::class);
+    $resolver = app(EffectivePermissionResolver::class);
+
+    expect($resolver->holdsMixedSuperAdmin($user))->toBeTrue()
+        ->and($resolver->isSuperAdmin($user))->toBeFalse()
         ->and($registrar->teams)->toBeTrue();
 });

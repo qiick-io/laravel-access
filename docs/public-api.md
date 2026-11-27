@@ -24,6 +24,8 @@ erasure hooks of `EloquentPrincipalDirectory`) is not public.
 ### `Qiick\Access`
 
 - `EffectivePermissionResolver` (class)
+- `ExclusiveSuperAdmin` (class)
+- `ExclusiveSuperAdminException` (class)
 - `GateBefore` (class)
 - `SuperAdminGuard` (class)
 
@@ -37,6 +39,7 @@ erasure hooks of `EloquentPrincipalDirectory`) is not public.
 - `AuthorizationResponder` (interface)
 - `GroupRoleSource` (interface)
 - `LegacyGateBefore` (interface)
+- `ListsAllGroupRoles` (interface)
 - `PermissionVocabulary` (interface)
 - `RoleCatalog` (interface)
 - `TeamContext` (interface)
@@ -53,6 +56,7 @@ erasure hooks of `EloquentPrincipalDirectory`) is not public.
 - `PrincipalCreatedEvent` (class)
 - `PrincipalDeactivatedEvent` (class)
 - `SubjectErasedEvent` (class)
+- `SuperAdminBypassWithheldEvent` (class)
 
 ### `Qiick\Access\Http`
 
@@ -113,6 +117,17 @@ test named in [security-checklist.md](security-checklist.md).
   With `access.use_package_gate = false` (externa, until v2) the product's
   `LegacyGateBefore` is the one registered callback instead; with
   `access.gate_shadow` the other one also runs and only logs.
+- **Super-admin stands alone** (decision
+  [2026-11-26](decisions/2026-11-26-super-admin-key-ceiling.md), Excubia
+  #474). `isSuperAdmin()` is false for a holder of super-admin and any other
+  role, in any team, direct or through a live group. Such a holder keeps only
+  the other roles, and `SuperAdminBypassWithheldEvent` is dispatched. With
+  teams on, a group source without `ListsAllGroupRoles` withholds every
+  bypass. `SuperAdminGuard::isProtectedFrom()` follows the assignment
+  (`holdsSuperAdminRole()`). `ExclusiveSuperAdmin::write()` is the
+  supported write path. It locks every affected user and rolls back a
+  breaking write, or a promotion by an actor who may not manage
+  super-admins.
 - **Owner ceiling of an API actor** (`isWithinOwnerCeiling()`): for an
   ordinary owner, the permissions assigned to them (direct and group). For a
   super-admin owner, the whole vocabulary: never the Gate bypass, and never

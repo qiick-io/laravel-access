@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use Illuminate\Contracts\Auth\Authenticatable;
 use Qiick\Access\Contracts\GroupRoleSource;
+use Qiick\Access\Contracts\ListsAllGroupRoles;
 use Qiick\Access\Contracts\PermissionVocabulary;
 use Qiick\Access\Contracts\RoleCatalog;
 use Qiick\Access\Contracts\TeamContext;
@@ -56,7 +57,9 @@ it('agrees permissionsFor with isSuperAdmin for an instance super-admin under te
     $roleCatalog = Mockery::mock(RoleCatalog::class);
     $roleCatalog->shouldReceive('superAdminRoleName')->andReturn('super-admin');
 
-    $groupRoles = Mockery::mock(GroupRoleSource::class);
+    $groupRoles = Mockery::mock(GroupRoleSource::class, ListsAllGroupRoles::class);
+    // Every group of the user: here the current-team and instance ones.
+    $groupRoles->shouldReceive('allRoleIdsFor')->andReturnUsing(fn (Authenticatable $user): array => [...$groupRoles->roleIdsFor($user), ...$groupRoles->instanceRoleIdsFor($user)]);
     $groupRoles->shouldReceive('instanceRoleIdsFor')->andReturn([]);
     $groupRoles->shouldReceive('roleIdsFor')->with(Mockery::type(Authenticatable::class))->andReturn([]);
 

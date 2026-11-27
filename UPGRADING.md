@@ -51,6 +51,34 @@ See [docs/public-api.md](docs/public-api.md#deprecation-policy).
   Accounts that already hold super-admin and other roles keep working; clean
   them up in the product's upgrade command if you want the new rule to hold
   for old rows.
+- Super-admin stands alone across every team, directly and through groups
+  (Excubia #474). It is fail-closed on read: a user holding super-admin
+  together with any other role gets no super-admin bypass, only the other
+  roles' permissions. The resolver logs a warning and dispatches
+  `Events\SuperAdminBypassWithheldEvent`. Listen to it to notify your
+  security log or the other super-admins. Such an account stays protected:
+  `SuperAdminGuard::isProtectedFrom()` now follows
+  `holdsSuperAdminRole()`, the assignment, not the bypass. Clean up mixed
+  accounts before deploying: `php artisan access:check` lists them.
+- Route every role and group write (forms, OIDC role sync, API, your
+  commands) through `app(ExclusiveSuperAdmin::class)->write($users, fn ()
+  => ..., $actor)`. Pass every user the write affects: for a group change,
+  every member before and after. One transaction locks them, checks the
+  result and rolls back with `ExclusiveSuperAdminException`. Pass the acting
+  user: a write that makes someone an effective super-admin is refused
+  unless that actor may manage super-admins. Pass `null` only for trusted
+  system writes, such as OIDC sync or your commands. The actor's authority
+  is read before the write, so a write never grants the authority that
+  allows it. Do not open a transaction around `write()`, except one whose
+  first statement locks these users
+  (`SuperAdminGuard::wouldLeaveNoActiveSuperAdmin()` does that). On InnoDB
+  an earlier plain read would fix an older snapshot. `access:check` fails
+  when the bound `GroupRoleSource` is not the package one, because it
+  cannot list super-admins through the product's groups.
+- With teams on, a custom `GroupRoleSource` must implement
+  `Contracts\ListsAllGroupRoles`. Without it the package cannot see other
+  organisations' groups, so it withholds every super-admin bypass.
+
 
 - Use `EffectivePermissionResolver::isActorSuperAdmin($actor)` for super-admin
   authority in policies. Replace acting-user role checks, including in policy
