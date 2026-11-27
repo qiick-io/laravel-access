@@ -2,8 +2,10 @@
 
 declare(strict_types=1);
 
+use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
 use Qiick\Access\EffectivePermissionResolver;
 use Qiick\Access\Erasure\AccessEraser;
@@ -168,3 +170,140 @@ it('scrubs a snapshotted principal and a separate creator reference', function (
         ->and($shared->name)->toBe('Shared service')
         ->and($directory->isActive($shared->id))->toBeTrue();
 });
+
+it('refuses a user key that is not a non-negative integer for an integer-keyed users model', function (string $userId): void {
+    expect(fn () => app(AccessEraser::class)->erase($userId, (string) Str::uuid(), AccessEraser::DELETE))
+        ->toThrow(InvalidArgumentException::class, 'Invalid access erasure user key.');
+})->with(['a uuid' => fn (): string => strtoupper((string) Str::uuid()), 'negative' => '-1', 'text' => 'subject']);
+
+it('accepts user key zero for an integer-keyed users model', function (): void {
+    $report = app(AccessEraser::class)->erase('0', (string) Str::uuid(), AccessEraser::DELETE);
+
+    expect($report->stores)->toHaveKey('principals');
+});
+
+it('refuses a users model that is not authenticatable', function (): void {
+    config()->set('auth.providers.users.model', ErasurePlainUserModel::class);
+
+    expect(fn () => app(AccessEraser::class)->erase('1', (string) Str::uuid(), AccessEraser::DELETE))
+        ->toThrow(LogicException::class, 'Access erasure requires an authenticatable Eloquent users model.');
+});
+
+it('refuses a users model on another connection than the principals', function (): void {
+    config()->set('database.connections.archive', ['driver' => 'sqlite', 'database' => ':memory:']);
+    config()->set('auth.providers.users.model', ErasureArchiveUser::class);
+
+    expect(fn () => app(AccessEraser::class)->erase('1', (string) Str::uuid(), AccessEraser::DELETE))
+        ->toThrow(LogicException::class, 'Access erasure requires principals, users, groups and Spatie grants on the default connection.');
+});
+
+it('refuses principals on a connection that is not the default one', function (): void {
+    $defaultConnection = DB::getDefaultConnection();
+    config()->set('database.connections.secondary', config("database.connections.{$defaultConnection}"));
+    config()->set('auth.providers.users.model', ErasureSecondaryUser::class);
+    config()->set('access.principals.model', ErasureSecondaryPrincipal::class);
+
+    expect(fn () => app(AccessEraser::class)->erase('1', (string) Str::uuid(), AccessEraser::DELETE))
+        ->toThrow(LogicException::class, 'Access erasure requires principals, users, groups and Spatie grants on the default connection.');
+});
+
+it('matches upper-case organisation and principal ids', function (): void {
+    $user = SpatieUser::query()->create(['email' => 'subject@example.test']);
+    $organisationId = (string) Str::uuid();
+    $directory = app(PrincipalDirectory::class);
+    $member = $directory->forMember($user, $organisationId);
+    $otherMember = $directory->forMember($user, (string) Str::uuid());
+
+    $report = app(AccessEraser::class)->erase((string) $user->getKey(), (string) Str::uuid(), AccessEraser::ANONYMISE, [strtoupper($member->id)], organisationId: strtoupper($organisationId));
+
+    expect(Principal::query()->findOrFail($member->id)->user_id)->toBeNull()
+        ->and(Principal::query()->findOrFail($otherMember->id)->user_id)->toBe($user->getKey())
+        ->and($report->stores)->toHaveKey('cleartext:principals.id')
+        ->and($report->stores['cleartext:principals.id']['kept'])->toBe($report->stores['principals']['kept']);
+});
+
+/**
+ * A users model that is not authenticatable.
+ */
+final class ErasurePlainUserModel extends Model
+{
+    protected $table = 'users';
+}
+
+/**
+ * A users model on another connection.
+ */
+final class ErasureArchiveUser extends SpatieUser
+{
+    protected $connection = 'archive';
+}
+
+/**
+ * Users and principals on the same non-default connection.
+ */
+final class ErasureSecondaryUser extends SpatieUser
+{
+    protected $connection = 'secondary';
+}
+
+/**
+ * A principal on the non-default connection.
+ */
+final class ErasureSecondaryPrincipal extends Principal
+{
+    protected $connection = 'secondary';
+}
+
+it('scrubs a principal named only by an upper-case public id', function (): void {
+    $user = SpatieUser::query()->create(['email' => 'subject@example.test']);
+    $organisationId = (string) Str::uuid();
+    $agent = app(PrincipalDirectory::class)->createService('agent', $organisationId, 'Subject agent', null, metadata: ['note' => 'Subject agent']);
+
+    app(AccessEraser::class)->erase((string) $user->getKey(), (string) Str::uuid(), AccessEraser::DELETE, [strtoupper($agent->id)]);
+
+    expect($agent->refresh()->metadata)->toBeNull();
+});
+
+it('reports the membership store even when the product has no group tables', function (): void {
+    Schema::drop('user_group_role');
+    Schema::drop('user_group_user');
+    $user = SpatieUser::query()->create(['email' => 'subject@example.test']);
+
+    $report = app(AccessEraser::class)->erase((string) $user->getKey(), (string) Str::uuid(), AccessEraser::DELETE);
+
+    expect($report->stores)->toHaveKey('user_group_user');
+});
+
+it('erases the grants of a uuid-keyed user named in upper case', function (): void {
+    config()->set('auth.providers.users.model', ErasureUuidUser::class);
+    $userId = (string) Str::uuid();
+    $permissionId = DB::table('permissions')->insertGetId(['name' => 'can-show-users', 'guard_name' => 'web']);
+    DB::table('model_has_permissions')->insert(['permission_id' => $permissionId, 'model_type' => (new ErasureUuidUser)->getMorphClass(), 'model_id' => $userId, 'organisation_id' => (string) Str::uuid()]);
+
+    app(AccessEraser::class)->erase(strtoupper($userId), (string) Str::uuid(), AccessEraser::DELETE);
+
+    expect(DB::table('model_has_permissions')->count())->toBe(0);
+})->skip(fn (): bool => DB::connection()->getDriverName() !== 'sqlite', "Spatie's model_id is a bigint on the server engines; SQLite stores the uuid as text");
+
+it('still unlinks permissions when the product has no role pivot or principals table', function (): void {
+    Schema::drop('principals');
+    Schema::drop('model_has_roles');
+    $user = SpatieUser::query()->create(['email' => 'subject@example.test']);
+    $permissionId = DB::table('permissions')->insertGetId(['name' => 'can-show-users', 'guard_name' => 'web']);
+    DB::table('model_has_permissions')->insert(['permission_id' => $permissionId, 'model_type' => $user->getMorphClass(), 'model_id' => $user->getKey(), 'organisation_id' => (string) Str::uuid()]);
+
+    $report = app(AccessEraser::class)->erase((string) $user->getKey(), (string) Str::uuid(), AccessEraser::DELETE);
+
+    expect(DB::table('model_has_permissions')->count())->toBe(0)
+        ->and($report->stores['principals'])->toBe($report->stores['cleartext:principals.id']);
+});
+
+/**
+ * A users model keyed by UUID.
+ */
+final class ErasureUuidUser extends SpatieUser
+{
+    protected $keyType = 'string';
+
+    public $incrementing = false;
+}

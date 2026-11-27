@@ -4,21 +4,16 @@
     "php": true,
     "erasure": true,
     "requiredChecks": [
-        "Databases (MariaDB 10.11)",
+        "Databases (MariaDB 11.4)",
         "Databases (MySQL 8.4)",
         "Databases (PostgreSQL 17)",
-        "PHP 8.3 Laravel 12 lowest",
-        "PHP 8.3 Laravel 12 stable",
-        "PHP 8.3 Laravel 13 lowest",
-        "PHP 8.3 Laravel 13 stable",
-        "PHP 8.4 Laravel 12 lowest",
-        "PHP 8.4 Laravel 12 stable",
-        "PHP 8.4 Laravel 13 lowest",
-        "PHP 8.4 Laravel 13 stable",
-        "PHP 8.5 Laravel 12 lowest",
-        "PHP 8.5 Laravel 12 stable",
-        "PHP 8.5 Laravel 13 lowest",
+        "Erasure (E1–E14)",
+        "migrations-frozen / migrations-frozen",
+        "Mutation (per-class ≥95%)",
         "PHP 8.5 Laravel 13 stable",
+        "Pint and PHPStan",
+        "pr-title / commitlint",
         "standards / standards"
-    ]
+    ],
+    "package": true
 }

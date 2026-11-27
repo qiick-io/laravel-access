@@ -24,8 +24,13 @@ use RuntimeException;
  */
 final class AssertsGroupTablesSchema
 {
+    /**
+     * @param  string|null  $organisationId  an existing organisation, for a product whose
+     *                                       user_groups.organisation_id references its own table
+     */
     public function __construct(
         private readonly Connection $connection,
+        private readonly ?string $organisationId = null,
     ) {}
 
     /**
@@ -80,7 +85,7 @@ final class AssertsGroupTablesSchema
     private function requireGroupNameUniqueness(): void
     {
         $uniqueColumnLists = array_column(array_filter(
-            $this->indexColumnLists('user_groups'),
+            $this->connection->getSchemaBuilder()->getIndexes('user_groups'),
             static fn (array $index): bool => $index['unique'],
         ), 'columns');
 
@@ -90,28 +95,11 @@ final class AssertsGroupTablesSchema
             );
         }
 
-        $this->connection->beginTransaction();
-
-        try {
-            foreach ([1, 2] as $attempt) {
-                $this->connection->table('user_groups')->insert([
-                    'public_id' => (string) Str::uuid(),
-                    'name' => '__ac_a_duplicate_name__',
-                    'organisation_id' => null,
-                    'is_instance' => false,
-                    'created_at' => now(),
-                    'updated_at' => now(),
-                ]);
-            }
-        } catch (QueryException) {
-            $this->connection->rollBack();
-
-            return;
-        }
-
-        $this->connection->rollBack();
-
-        throw new RuntimeException('AC-a: two groups without an organisation were saved with the same name.');
+        $this->probeRefusal(
+            $this->probeGroupRow('__ac_a_duplicate_name__', null, false),
+            $this->probeGroupRow('__ac_a_duplicate_name__', null, false),
+            'AC-a: two groups without an organisation were saved with the same name.',
+        );
     }
 
     /**
@@ -120,27 +108,78 @@ final class AssertsGroupTablesSchema
      */
     private function requireInstanceOrganisationXorConstraint(): void
     {
+        // Control and probe share one organisation and differ only in
+        // is_instance (and the name), so no FK or unique index can refuse
+        // the probe for the rule. INSERT and UPDATE are both proved.
+        $organisationId = $this->organisationId ?? (string) Str::uuid();
+        $failure = 'AC17/C75: expected CHECK that is_instance=true only when organisation_id IS NULL on user_groups.';
+
+        $this->probeRefusal(
+            $this->probeGroupRow('__ac17_instance_org_control__', $organisationId, false),
+            $this->probeGroupRow('__ac17_instance_org_xor__', $organisationId, true),
+            $failure,
+        );
+        $this->probeRefusal(
+            $this->probeGroupRow('__ac17_instance_org_control__', $organisationId, false),
+            ['is_instance' => true],
+            $failure,
+        );
+    }
+
+    /**
+     * Inside a transaction that is always rolled back: the valid control row
+     * must be saved, so a failure of the probe row is the rule's refusal and
+     * not an unrelated constraint of the product's table.
+     *
+     * @param  array<string, mixed>  $controlRow  a row the schema must accept
+     * @param  array<string, mixed>  $probeRow  a row the rule must refuse, or the columns of an update of the control row
+     *
+     * @throws RuntimeException with $failure when the probe row is saved, or when the control row is refused
+     */
+    private function probeRefusal(array $controlRow, array $probeRow, string $failure): void
+    {
         $this->connection->beginTransaction();
 
         try {
-            $this->connection->table('user_groups')->insert([
-                'public_id' => (string) Str::uuid(),
-                'name' => '__ac17_instance_org_xor__',
-                'description' => null,
-                'metadata' => null,
-                'organisation_id' => (string) Str::uuid(),
-                'is_instance' => true,
-                'created_at' => now(),
-                'updated_at' => now(),
-            ]);
-            $this->connection->rollBack();
+            try {
+                $this->connection->table('user_groups')->insert($controlRow);
+            } catch (QueryException $exception) {
+                throw new RuntimeException("AC17: user_groups refused a valid probe row, so the probe proves nothing (with an organisation FK, pass an existing organisation id): {$exception->getMessage()}", previous: $exception);
+            }
 
-            throw new RuntimeException(
-                'AC17/C75: expected CHECK that is_instance=true only when organisation_id IS NULL on user_groups.',
-            );
-        } catch (QueryException) {
+            try {
+                // A full row is inserted; a partial one updates the control row.
+                isset($probeRow['public_id'])
+                    ? $this->connection->table('user_groups')->insert($probeRow)
+                    : $this->connection->table('user_groups')->where('public_id', $controlRow['public_id'])->update($probeRow);
+            } catch (QueryException) {
+                return;
+            }
+
+            throw new RuntimeException($failure);
+        } finally {
             $this->connection->rollBack();
         }
+    }
+
+    /**
+     * A user_groups row for the rolled-back probes, every column set that a
+     * product table may declare NOT NULL.
+     *
+     * @return array<string, mixed>
+     */
+    private function probeGroupRow(string $name, ?string $organisationId, bool $isInstance): array
+    {
+        return [
+            'public_id' => (string) Str::uuid(),
+            'name' => $name,
+            'description' => null,
+            'metadata' => null,
+            'organisation_id' => $organisationId,
+            'is_instance' => $isInstance,
+            'created_at' => now(),
+            'updated_at' => now(),
+        ];
     }
 
     private function assertUserGroupUser(): void
@@ -254,8 +293,8 @@ final class AssertsGroupTablesSchema
     private function isNullable(string $table, string $column): bool
     {
         foreach ($this->connection->getSchemaBuilder()->getColumns($table) as $definition) {
-            if (($definition['name'] ?? null) === $column) {
-                return (bool) ($definition['nullable'] ?? false);
+            if ($definition['name'] === $column) {
+                return $definition['nullable'];
             }
         }
 
@@ -266,74 +305,33 @@ final class AssertsGroupTablesSchema
 
     private function requireUniqueCovering(string $table, string ...$columns): void
     {
-        $wanted = array_values($columns);
-
-        foreach ($this->indexColumnLists($table) as $index) {
-            if (! $index['unique']) {
-                continue;
-            }
-
-            if ($index['columns'] === $wanted) {
+        foreach ($this->connection->getSchemaBuilder()->getIndexes($table) as $index) {
+            if ($index['unique'] && $index['columns'] === $columns) {
                 return;
             }
         }
 
         throw new RuntimeException(
-            'AC17: expected unique index on ['.$table.'.'.implode(',', $wanted).'] (§2.4–2.6).',
+            'AC17: expected unique index on ['.$table.'.'.implode(',', $columns).'] (§2.4–2.6).',
         );
     }
 
     private function requireIndexCovering(string $table, string ...$columns): void
     {
-        $wanted = array_values($columns);
-
-        foreach ($this->indexColumnLists($table) as $index) {
-            if ($index['columns'] === $wanted) {
+        foreach ($this->connection->getSchemaBuilder()->getIndexes($table) as $index) {
+            if ($index['columns'] === $columns) {
                 return;
             }
         }
 
         throw new RuntimeException(
-            'AC17: expected index on ['.$table.'.'.implode(',', $wanted).'] (§2.4–2.6).',
+            'AC17: expected index on ['.$table.'.'.implode(',', $columns).'] (§2.4–2.6).',
         );
-    }
-
-    /**
-     * @return list<array{unique: bool, columns: list<string>}>
-     */
-    private function indexColumnLists(string $table): array
-    {
-        $normalized = [];
-
-        foreach ($this->connection->getSchemaBuilder()->getIndexes($table) as $index) {
-            if (! is_array($index)) {
-                continue;
-            }
-
-            $columns = $index['columns'] ?? null;
-            if (! is_array($columns)) {
-                continue;
-            }
-
-            $columnNames = [];
-            foreach ($columns as $columnName) {
-                if (is_string($columnName)) {
-                    $columnNames[] = $columnName;
-                }
-            }
-
-            $normalized[] = [
-                'unique' => (bool) ($index['unique'] ?? false),
-                'columns' => $columnNames,
-            ];
-        }
-
-        return $normalized;
     }
 
     private function requireForeignKeyCascade(string $table, string $column, string $foreignTable): void
     {
-        foreach ($this->foreignKeyDescriptors($table) as $foreignKey) {
+        foreach ($this->connection->getSchemaBuilder()->getForeignKeys($table) as $foreignKey) {
             if ($foreignKey['columns'] !== [$column]) {
                 continue;
             }
@@ -344,9 +342,12 @@ final class AssertsGroupTablesSchema
                 );
             }
 
-            if ($foreignKey['on_delete'] !== 'cascade') {
+            // Laravel's schema processors report the action in lower case on every engine.
+            $onDelete = $foreignKey['on_delete'] ?? 'no action';
+
+            if ($onDelete !== 'cascade') {
                 throw new RuntimeException(
-                    "AC17: [{$table}.{$column}] FK onDelete must be cascade, got [{$foreignKey['on_delete']}].",
+                    "AC17: [{$table}.{$column}] FK onDelete must be cascade, got [{$onDelete}].",
                 );
             }
 
@@ -356,46 +357,5 @@ final class AssertsGroupTablesSchema
         throw new RuntimeException(
             "AC17: expected cascade FK [{$table}.{$column}] → [{$foreignTable}] (§2.5–2.6).",
         );
-    }
-
-    /**
-     * @return list<array{columns: list<string>, foreign_table: string, on_delete: string}>
-     */
-    private function foreignKeyDescriptors(string $table): array
-    {
-        $normalized = [];
-
-        foreach ($this->connection->getSchemaBuilder()->getForeignKeys($table) as $foreignKey) {
-            if (! is_array($foreignKey)) {
-                continue;
-            }
-
-            $columns = $foreignKey['columns'] ?? null;
-            if (! is_array($columns)) {
-                continue;
-            }
-
-            $columnNames = [];
-            foreach ($columns as $columnName) {
-                if (is_string($columnName)) {
-                    $columnNames[] = $columnName;
-                }
-            }
-
-            $referenced = $foreignKey['foreign_table'] ?? null;
-            $onDelete = $foreignKey['on_delete'] ?? null;
-
-            if (! is_string($referenced) || ! is_string($onDelete)) {
-                continue;
-            }
-
-            $normalized[] = [
-                'columns' => $columnNames,
-                'foreign_table' => $referenced,
-                'on_delete' => strtolower($onDelete),
-            ];
-        }
-
-        return $normalized;
     }
 }

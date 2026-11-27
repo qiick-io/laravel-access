@@ -79,8 +79,9 @@ composer lint      # Pint
 composer analyse   # PHPStan level max
 ```
 
-Mutation targets (design §11) run per class at MSI ≥ 95 via
-`scripts/mutate-per-class.sh` in CI. Real-HTTP middleware tests use `php -S`
+Every class in `src/` runs mutation per class at MSI ≥ 95 via
+`scripts/mutate-per-class.sh` in CI (all classes on push and nightly, the
+changed ones on a pull request). Real-HTTP middleware tests use `php -S`
 (no shell wrapper; torn down in `tearDown`).
 
 ## License
