@@ -55,28 +55,39 @@ final class CheckAccessCommand extends Command
     }
 
     /**
+     * Spatie passes its configured table names straight to its relations, so
+     * a missing or empty name is a problem of its own, not a default.
+     *
      * @return list<string>
      */
     private function tableProblems(ConfigRepository $config, DatabaseManager $database): array
     {
+        $problems = [];
         $tables = [];
 
         foreach (['roles', 'permissions', 'model_has_roles', 'model_has_permissions', 'role_has_permissions'] as $spatieTable) {
             $tableName = $config->get("permission.table_names.{$spatieTable}");
-            $tables[] = is_string($tableName) && $tableName !== '' ? $tableName : $spatieTable;
+
+            if (is_string($tableName) && $tableName !== '') {
+                $tables[] = $tableName;
+            } else {
+                $problems[] = "permission.table_names.{$spatieTable} must be a non-empty table name.";
+            }
         }
 
         // Externa 1.x switches the group migrations off and owns the same tables.
         $tables = [...$tables, 'user_groups', 'user_group_user', 'user_group_role'];
 
-        if ($config->get('access.migrations.principals') === true) {
+        // The provider's default: the principals migration loads unless switched off.
+        if ($config->get('access.migrations.principals', true) === true) {
             $tables[] = 'principals';
         }
 
-        $problems = [];
-
         try {
-            $schema = $database->connection()->getSchemaBuilder();
+            $connection = $database->connection();
+            // hasTable() reads through a replica; the package writes through the primary.
+            $connection->getPdo();
+            $schema = $connection->getSchemaBuilder();
 
             foreach ($tables as $table) {
                 if (! $schema->hasTable($table)) {
@@ -84,7 +95,7 @@ final class CheckAccessCommand extends Command
                 }
             }
         } catch (Throwable) {
-            return ['The default database connection ['.$database->getDefaultConnection().'] is unreachable.'];
+            return [...$problems, 'The default database connection ['.$database->getDefaultConnection().'] is unreachable.'];
         }
 
         return $problems;

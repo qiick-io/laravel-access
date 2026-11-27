@@ -64,6 +64,13 @@ it('skips the principals table when its migrations are off (F2)', function (): v
     config()->set('access.migrations.principals', false);
 
     $this->artisan('access:check')->assertSuccessful();
+
+    // An older published config without the switch loads the migration.
+    config()->set('access.migrations', ['groups' => true]);
+
+    $this->artisan('access:check')
+        ->expectsOutputToContain('Table [principals] is missing')
+        ->assertFailed();
 });
 
 it('reads the Spatie table names from the permission config (F2)', function (): void {
@@ -73,10 +80,15 @@ it('reads the Spatie table names from the permission config (F2)', function (): 
         ->expectsOutputToContain('Table [access_roles] is missing')
         ->assertFailed();
 
-    // An empty name falls back to Spatie's default.
-    config()->set('permission.table_names.roles', '');
+    // Spatie uses the configured name as is: missing or empty is a problem.
+    config()->set('permission.table_names.roles', 'roles');
+    config()->set('permission.table_names.model_has_roles', '');
+    config()->set('permission.table_names.role_has_permissions', null);
 
-    $this->artisan('access:check')->assertSuccessful();
+    $this->artisan('access:check')
+        ->expectsOutputToContain('permission.table_names.model_has_roles must be a non-empty table name.')
+        ->expectsOutputToContain('permission.table_names.role_has_permissions must be a non-empty table name.')
+        ->assertFailed();
 });
 
 it('reports a failed boot check (F2)', function (): void {
@@ -95,6 +107,27 @@ it('reports a resolver that cannot be built, which boot never builds (F2)', func
     $this->artisan('access:check')
         ->expectsOutputToContain('Set access.permission_enum')
         ->assertFailed();
+});
+
+it('reports an unreachable primary behind a healthy replica (F2)', function (): void {
+    $defaultConnection = DB::getDefaultConnection();
+    $replicaDatabase = tempnam(sys_get_temp_dir(), 'access-replica');
+    config()->set('database.connections.split', [
+        'driver' => 'sqlite',
+        'read' => ['database' => $replicaDatabase],
+        'write' => ['database' => '/nonexistent/access.sqlite'],
+    ]);
+    DB::setDefaultConnection('split');
+
+    try {
+        $this->artisan('access:check')
+            ->expectsOutputToContain('The default database connection [split] is unreachable')
+            ->assertFailed();
+    } finally {
+        DB::setDefaultConnection($defaultConnection);
+        DB::purge('split');
+        unlink($replicaDatabase);
+    }
 });
 
 it('reports an unreachable default database (F2)', function (): void {
