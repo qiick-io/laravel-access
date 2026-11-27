@@ -220,11 +220,9 @@ changed, or `flush()` for a group- or role-wide change, before it checks
 permissions again in the same request or job. A membership that expires
 while a job runs counts until then; the next request or job starts clean.
 
-Under Octane these clears reach the resolver of the current request only
-once #69 is fixed (PR #75). Until then the Gate and the Spatie event clears
-use the boot container, not the request's sandbox. A demotion during an
-Octane request can then keep counting in Gate checks until that request
-ends, even after `forget()`. The next request starts clean.
+Under Octane the Gate (package, legacy and shadow), the Spatie event
+clears and `switchTo()` use the container of the current request, so they
+reach the resolver the request reads (#69).
 
 Group memberships are read from the default database connection. They
 count only for a user that is exactly the group member model

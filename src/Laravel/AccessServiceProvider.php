@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Qiick\Access\Laravel;
 
+use Illuminate\Container\Container;
 use Illuminate\Contracts\Auth\Access\Gate;
 use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Contracts\Auth\Factory as AuthFactory;
@@ -83,8 +84,10 @@ final class AccessServiceProvider extends ServiceProvider
             return new SpatieTeamContext(
                 $app->make(PermissionRegistrar::class),
                 $app->make(AuthFactory::class),
-                function () use ($app): void {
-                    $app->make(EffectivePermissionResolver::class)->flush();
+                // The current container: a singleton adapter built at boot is
+                // copied into each Octane sandbox (#69).
+                static function (): void {
+                    Container::getInstance()->make(EffectivePermissionResolver::class)->flush();
                 },
             );
         });
@@ -128,7 +131,7 @@ final class AccessServiceProvider extends ServiceProvider
         // on each invoke (B1). Closing over concrete scoped instances at boot
         // would pin a warm resolver across requests.
         $this->app->singleton(GateBefore::class, function (Application $app): GateBefore {
-            return new GateBefore($app);
+            return new GateBefore;
         });
 
         $this->app->singleton(PrincipalDirectory::class, function (Application $app): PrincipalDirectory {
@@ -276,12 +279,12 @@ final class AccessServiceProvider extends ServiceProvider
         // Do not call createPayloadUsing(null): that would wipe other packages'
         // hooks (including illuminate:log:context).
         Queue::createPayloadUsing(function (mixed $connection, mixed $queue, array $payload): array {
-            return $this->app->make(ActorPayloadStamper::class)->stamp();
+            return Container::getInstance()->make(ActorPayloadStamper::class)->stamp();
         });
 
         $events = $this->app->make('events');
-        $stamper = fn (): ActorPayloadStamper => $this->app->make(ActorPayloadStamper::class);
-        $teamBoundary = fn (): SpatieTeamQueueBoundary => $this->app->make(SpatieTeamQueueBoundary::class);
+        $stamper = fn (): ActorPayloadStamper => Container::getInstance()->make(ActorPayloadStamper::class);
+        $teamBoundary = fn (): SpatieTeamQueueBoundary => Container::getInstance()->make(SpatieTeamQueueBoundary::class);
 
         $events->listen(JobProcessing::class, function (JobProcessing $event) use ($stamper, $teamBoundary): void {
             $this->flushResolver();
@@ -304,7 +307,7 @@ final class AccessServiceProvider extends ServiceProvider
         $forget = function (object $event): void {
             $model = $event->model ?? null;
             if ($model instanceof Authenticatable) {
-                $this->app->make(EffectivePermissionResolver::class)->forget($model);
+                Container::getInstance()->make(EffectivePermissionResolver::class)->forget($model);
             }
         };
 
@@ -325,14 +328,18 @@ final class AccessServiceProvider extends ServiceProvider
         }
 
         Event::listen("eloquent.saving: {$roleClass}", function (Model $role): void {
-            $this->app->make(ReservedRoleNameGuard::class)->assertAllowed($role);
+            Container::getInstance()->make(ReservedRoleNameGuard::class)->assertAllowed($role);
         });
     }
 
     private function flushResolver(): void
     {
-        if ($this->app->bound(EffectivePermissionResolver::class)) {
-            $this->app->make(EffectivePermissionResolver::class)->flush();
+        // The current container: under Octane each request runs in a clone of
+        // the boot container, with its own scoped resolver (#69).
+        $container = Container::getInstance();
+
+        if ($container->bound(EffectivePermissionResolver::class)) {
+            $container->make(EffectivePermissionResolver::class)->flush();
         }
     }
 

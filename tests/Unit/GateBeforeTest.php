@@ -43,7 +43,7 @@ it('abstains unconditionally for API actors even when they are super-admin (AC2)
     $user = new PermissionedFakeUser(1, ['super-admin']);
     AccessContext::enter(new ActorContext(ActorKind::ApiKey, $user, 'cred-1'));
 
-    $gateBefore = new GateBefore($this->app);
+    $gateBefore = new GateBefore;
 
     expect($gateBefore($user, FakePermissionEnum::CanShowUsers->value))->toBeNull()
         ->and($gateBefore($user, 'any-ability'))->toBeNull();
@@ -53,7 +53,7 @@ it('grants when a web actor is super-admin and no Policy argument is present', f
     $user = new PermissionedFakeUser(1, ['super-admin']);
     AccessContext::enter(new ActorContext(ActorKind::WebSession, $user));
 
-    $gateBefore = new GateBefore($this->app);
+    $gateBefore = new GateBefore;
 
     expect($gateBefore($user, 'any-ability'))->toBeTrue();
 });
@@ -66,7 +66,7 @@ it('abstains for Policy-backed abilities so super-admin cannot pre-empt (AC3)', 
     $gate->shouldReceive('getPolicyFor')->once()->with('App\\Models\\Post')->andReturn(new stdClass);
     $this->app->instance(Gate::class, $gate);
 
-    $gateBefore = new GateBefore($this->app);
+    $gateBefore = new GateBefore;
 
     expect($gateBefore($user, 'update', ['App\\Models\\Post']))->toBeNull();
 });
@@ -75,7 +75,7 @@ it('grants a bare permission ability through the resolver for web actors', funct
     $user = new PermissionedFakeUser(1, ['member'], [FakePermissionEnum::CanShowUsers->value]);
     AccessContext::enter(new ActorContext(ActorKind::WebSession, $user));
 
-    $gateBefore = new GateBefore($this->app);
+    $gateBefore = new GateBefore;
 
     expect($gateBefore($user, FakePermissionEnum::CanShowUsers->value))->toBeTrue();
 });
@@ -84,7 +84,7 @@ it('never returns false', function (): void {
     $user = new PermissionedFakeUser(1, ['member'], []);
     AccessContext::enter(new ActorContext(ActorKind::WebSession, $user));
 
-    $gateBefore = new GateBefore($this->app);
+    $gateBefore = new GateBefore;
 
     expect($gateBefore($user, FakePermissionEnum::CanShowUsers->value))->toBeNull();
 });
@@ -97,7 +97,7 @@ it('does not grant a permission when arguments are present even without a Policy
     $gate->shouldReceive('getPolicyFor')->once()->with('not-a-model')->andReturn(null);
     $this->app->instance(Gate::class, $gate);
 
-    $gateBefore = new GateBefore($this->app);
+    $gateBefore = new GateBefore;
 
     expect($gateBefore($user, FakePermissionEnum::CanShowUsers->value, ['not-a-model']))->toBeNull();
 });

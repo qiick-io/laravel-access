@@ -4,9 +4,9 @@ declare(strict_types=1);
 
 namespace Qiick\Access;
 
+use Illuminate\Container\Container;
 use Illuminate\Contracts\Auth\Access\Gate;
 use Illuminate\Contracts\Auth\Authenticatable;
-use Illuminate\Contracts\Foundation\Application;
 use Qiick\Access\Contracts\ActorResolver;
 use Qiick\Access\Contracts\PermissionVocabulary;
 
@@ -14,17 +14,15 @@ use Qiick\Access\Contracts\PermissionVocabulary;
  * The package's single Gate::before callback (design §3.1). Never returns false;
  * denials come from definitions, Policies and middleware. API actors never reach
  * the super-admin or permission grants (steps 4–5). Dependencies are resolved
- * from the container on each invoke so a singleton GateBefore cannot pin a
- * scoped EffectivePermissionResolver / ActorResolver across requests (B1).
+ * from the current container on each invoke so a singleton GateBefore cannot
+ * pin a scoped EffectivePermissionResolver / ActorResolver across requests (B1),
+ * nor read the boot container's under Octane, where each request runs in a
+ * clone of it (#69).
  *
  * @api
  */
 final class GateBefore
 {
-    public function __construct(
-        private readonly Application $app,
-    ) {}
-
     /**
      * @param  array<mixed>  $arguments
      */
@@ -34,10 +32,10 @@ final class GateBefore
             return null;
         }
 
-        $actors = $this->app->make(ActorResolver::class);
+        $actors = Container::getInstance()->make(ActorResolver::class);
         $context = $actors->current();
 
-        $resolver = $this->app->make(EffectivePermissionResolver::class);
+        $resolver = Container::getInstance()->make(EffectivePermissionResolver::class);
 
         // Design §3.3: bound context user must be the Gate user, else abstain.
         $boundUser = $context->user;
@@ -50,7 +48,7 @@ final class GateBefore
             return null;
         }
 
-        $gate = $this->app->make(Gate::class);
+        $gate = Container::getInstance()->make(Gate::class);
         $policySubject = $arguments[0] ?? null;
 
         if ((is_object($policySubject) || is_string($policySubject)) && $gate->getPolicyFor($policySubject) !== null) {
@@ -61,7 +59,7 @@ final class GateBefore
             return true;
         }
 
-        $vocabulary = $this->app->make(PermissionVocabulary::class);
+        $vocabulary = Container::getInstance()->make(PermissionVocabulary::class);
 
         if ($arguments === [] && $vocabulary->isPermission($ability) && $resolver->hasPermission($user, $ability)) {
             return true;
