@@ -6,9 +6,11 @@ namespace Qiick\Access\Laravel;
 
 use Illuminate\Contracts\Config\Repository as ConfigRepository;
 use Illuminate\Contracts\Foundation\Application;
+use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\ConfigurationUrlParser;
 use Qiick\Access\Contracts\ActorResolver;
 use Qiick\Access\Contracts\AuthorizationResponder;
+use Qiick\Access\Contracts\GroupRoleSource;
 use Qiick\Access\Contracts\LegacyGateBefore;
 use Qiick\Access\Contracts\RoleCatalog;
 use Qiick\Access\Contracts\TwoFactorPolicy;
@@ -40,6 +42,58 @@ final class AccessBootChecks
         $this->assertNoLegacyMigrationsSwitch($config);
         $this->assertGateSelection($config);
         $this->assertConnectionNamesMatchTheirKeys($config);
+    }
+
+    /**
+     * user_group_user.user_id holds ids of the member model's table on the
+     * group tables' connection, the default one. A member model on another
+     * connection would get no group roles at runtime (EloquentGroupRoleSource
+     * fails closed), so the misconfiguration is refused at boot instead of
+     * silently emptying every group (issue #27). A member model that is not
+     * an Eloquent model gets no group roles either and has no connection to
+     * compare, and a product that binds its own GroupRoleSource keeps its
+     * own membership store, so neither is checked.
+     *
+     * It builds the member model, whose boot hooks may need services the
+     * product sets up in its own providers, so the package provider runs it
+     * once the application has booted, not from assert().
+     *
+     * @throws RuntimeException naming the key, the model and its connection
+     */
+    public function assertGroupMemberModelOnTheGroupConnection(ConfigRepository $config): void
+    {
+        $key = $config->get('access.group_member_model') !== null ? 'access.group_member_model' : 'auth.providers.users.model';
+        $memberModel = $config->get($key);
+
+        if (! is_string($memberModel) || ! is_subclass_of($memberModel, Model::class)) {
+            return;
+        }
+
+        // The alias stays only while nothing rebinds GroupRoleSource; a
+        // product factory is never built here (it may need a request).
+        if (! $this->app->isAlias(GroupRoleSource::class) || $this->app->getAlias(GroupRoleSource::class) !== EloquentGroupRoleSource::class) {
+            return;
+        }
+
+        $groupConnectionName = $config->get('database.default');
+        $memberConnectionName = (new $memberModel)->getConnectionName() ?? $groupConnectionName;
+
+        if ($memberConnectionName !== $groupConnectionName) {
+            $shownConnectionName = is_string($memberConnectionName) ? $memberConnectionName : get_debug_type($memberConnectionName);
+
+            throw new RuntimeException(
+                "{$key} [{$memberModel}] uses the connection [{$shownConnectionName}], but the group tables are read from the default connection; group members must use the default connection (see docs/adoption.md).",
+            );
+        }
+
+        // Same connection, other table: a member id would name another account.
+        $memberTable = (new $memberModel)->getTable();
+
+        if ($memberTable !== MigrationSettings::usersTable()) {
+            throw new RuntimeException(
+                "{$key} [{$memberModel}] uses the table [{$memberTable}], but user_group_user.user_id points at [".MigrationSettings::usersTable().']; set access.users_table or the member model to the same table (see docs/adoption.md).',
+            );
+        }
     }
 
     /**
