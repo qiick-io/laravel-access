@@ -283,7 +283,7 @@ it('erases the grants of a uuid-keyed user named in upper case', function (): vo
     app(AccessEraser::class)->erase(strtoupper($userId), (string) Str::uuid(), AccessEraser::DELETE);
 
     expect(DB::table('model_has_permissions')->count())->toBe(0);
-});
+})->skip(fn (): bool => DB::connection()->getDriverName() !== 'sqlite', "Spatie's model_id is a bigint on the server engines; SQLite stores the uuid as text");
 
 it('still unlinks permissions when the product has no role pivot or principals table', function (): void {
     Schema::drop('principals');
