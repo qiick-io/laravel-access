@@ -89,7 +89,8 @@ final class AccessServiceProvider extends ServiceProvider
             );
         });
 
-        $this->app->singleton(GroupRoleSource::class, function (Application $app): GroupRoleSource {
+        // Scoped: it holds the TeamContext, which a product may bind scoped (#66).
+        $this->app->scoped(GroupRoleSource::class, function (Application $app): GroupRoleSource {
             return new EloquentGroupRoleSource(
                 $app->make(DatabaseManager::class),
                 $app->make(TeamContext::class),
@@ -139,7 +140,8 @@ final class AccessServiceProvider extends ServiceProvider
             return new AccessBootChecks($app);
         });
 
-        $this->app->singleton(EnsureTwoFactorIsEnabled::class, function (Application $app): EnsureTwoFactorIsEnabled {
+        // Scoped: it holds the scoped ActorResolver and the product's policy (#66).
+        $this->app->scoped(EnsureTwoFactorIsEnabled::class, function (Application $app): EnsureTwoFactorIsEnabled {
             return new EnsureTwoFactorIsEnabled(
                 $app->make(ActorResolver::class),
                 $app->make(TwoFactorPolicy::class),
@@ -149,7 +151,9 @@ final class AccessServiceProvider extends ServiceProvider
         });
 
         // ActiveUsers is product-bound; resolving SuperAdminGuard fails closed until then.
-        $this->app->singleton(SuperAdminGuard::class, function (Application $app): SuperAdminGuard {
+        // Scoped like the resolver it holds: a singleton would keep the first
+        // scope's resolver and its cached verdicts in a long-lived worker (#66).
+        $this->app->scoped(SuperAdminGuard::class, function (Application $app): SuperAdminGuard {
             return new SuperAdminGuard(
                 $app->make(EffectivePermissionResolver::class),
                 $app->make(ActiveUsers::class),
