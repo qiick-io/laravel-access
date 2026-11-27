@@ -18,6 +18,7 @@ use Illuminate\Queue\Events\JobProcessing;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\ServiceProvider;
+use Qiick\Access\Console\CheckAccessCommand;
 use Qiick\Access\Contracts\ActiveUsers;
 use Qiick\Access\Contracts\ActorResolver;
 use Qiick\Access\Contracts\GroupRoleSource;
@@ -184,6 +185,8 @@ final class AccessServiceProvider extends ServiceProvider
             $this->publishes([
                 __DIR__.'/../../config/access.php' => config_path('access.php'),
             ], 'access-config');
+
+            $this->commands([CheckAccessCommand::class]);
         }
 
         $this->registerGateBefore();
