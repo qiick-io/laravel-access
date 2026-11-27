@@ -24,7 +24,7 @@ Part of the qiick fleet. Binding design:
 
 ## Status
 
-`0.1.0-beta.2` is the current tagged pre-release (the first was
+`0.1.0-beta.3` is the current tagged pre-release (the first was
 `0.1.0-beta.1`), for beta adoption in the qiick products. Public APIs may change in any 0.x release; see
 [UPGRADING.md](./UPGRADING.md). Packagist publishing waits for the
 maintainer's go; until then products install it from the tag.
