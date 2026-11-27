@@ -54,19 +54,24 @@ See [docs/public-api.md](docs/public-api.md#deprecation-policy).
 - Super-admin stands alone across every team, directly and through groups
   (Excubia #474). It is fail-closed on read: a user holding super-admin
   together with any other role gets no super-admin bypass, only the other
-  roles' permissions, so a mixed account loses its super-admin powers on the
-  next request. The resolver logs a warning and dispatches
-  `Events\SuperAdminBypassWithheldEvent`. Listen to it and notify your
-  security log or the other super-admins. Before upgrading, clean up mixed
-  accounts in the product's upgrade command. Route every role and group
-  write (forms, OIDC role sync, API, your commands) through
-  `app(ExclusiveSuperAdmin::class)->write($user, fn () => ...)`, once per
-  affected user. It locks the user row, checks the result and rolls back
-  with `ExclusiveSuperAdminException`. Promote with
-  `syncRoles([$superAdmin])` inside it. A custom `GroupRoleSource` that
-  serves organisation groups should also implement
-  `Contracts\ListsAllGroupRoles`, or only the current team and instance
-  groups are checked.
+  roles' permissions. The resolver logs a warning and dispatches
+  `Events\SuperAdminBypassWithheldEvent`. Listen to it to notify your
+  security log or the other super-admins. Such an account stays protected:
+  `SuperAdminGuard::isProtectedFrom()` now follows
+  `holdsSuperAdminRole()`, the assignment, not the bypass. Clean up mixed
+  accounts in the product's upgrade command before deploying.
+- Route every role and group write (forms, OIDC role sync, API, your
+  commands) through `app(ExclusiveSuperAdmin::class)->write($users, fn ()
+  => ..., $actor)`. Pass every user the write affects: for a group change,
+  every member before and after. One transaction locks them, checks the
+  result and rolls back with `ExclusiveSuperAdminException`. Pass the acting
+  user: a write that makes someone an effective super-admin is refused
+  unless that actor may manage super-admins. Pass `null` only for trusted
+  system writes, such as OIDC sync or your commands.
+- With teams on, a custom `GroupRoleSource` must implement
+  `Contracts\ListsAllGroupRoles`. Without it the package cannot see other
+  organisations' groups, so it withholds every super-admin bypass.
+
 
 - Use `EffectivePermissionResolver::isActorSuperAdmin($actor)` for super-admin
   authority in policies. Replace acting-user role checks, including in policy
