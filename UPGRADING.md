@@ -63,6 +63,16 @@ See [docs/public-api.md](docs/public-api.md#deprecation-policy).
   the product's soft-delete transaction. The tombstone retains the user link
   and keeps the original deactivation time if the principal was already
   inactive. Use the separate erasure flow for permanent user deletion.
+- A published `config/access.php` that lacks a nested key now gets the
+  package default for it, at every depth; a list the product sets (guards,
+  principal types, exempt routes) still replaces the default whole. Boot now
+  fails on a present but invalid value, naming the key: guard, type and
+  route lists must be lists of strings, `principals.types` non-empty, the
+  migration switches, `trust_api_guard_in_console` and
+  `principals.organisation_required` real booleans (`"1"` in `.env` is a
+  string), `users_table`, `group_member_model` and `gate_shadow_log_channel`
+  null or a non-empty string, `permission_enum` null, empty or a backed enum
+  class, and `principals.model` a `Principal` subclass.
 
 ## 0.1.0-beta.2
 

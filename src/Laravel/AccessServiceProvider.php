@@ -61,7 +61,7 @@ final class AccessServiceProvider extends ServiceProvider
 {
     public function register(): void
     {
-        $this->mergeConfigFrom(__DIR__.'/../../config/access.php', 'access');
+        $this->mergeConfigDefaults();
 
         $this->app->scoped(AccessContext::class, AccessContext::class);
         $this->app->singleton(ActorPayloadStamper::class, ActorPayloadStamper::class);
@@ -211,6 +211,27 @@ final class AccessServiceProvider extends ServiceProvider
                 AccessSchema::ensureConstraints();
             }
         });
+    }
+
+    /**
+     * mergeConfigFrom() at every depth (F1). Unlike mergeConfigFrom() it also
+     * runs on a cached configuration: a cache built before an upgrade, with
+     * the old shallow merge, can lack a new nested key, and a boot error
+     * there would keep Artisan from reaching config:clear. Merging again
+     * changes nothing the product set.
+     *
+     * @throws RuntimeException when config/access.php or one of its sections is not a map
+     */
+    private function mergeConfigDefaults(): void
+    {
+        $config = $this->app->make(ConfigRepository::class);
+        $defaults = require __DIR__.'/../../config/access.php';
+
+        if (! is_array($defaults)) {
+            throw new RuntimeException('The shipped config/access.php must return an array.');
+        }
+
+        $config->set('access', ConfigDefaultsMerger::merge($defaults, $config->get('access', [])));
     }
 
     private function registerGateBefore(): void
