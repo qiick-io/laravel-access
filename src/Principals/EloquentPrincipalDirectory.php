@@ -14,6 +14,8 @@ use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use InvalidArgumentException;
 use LogicException;
+use Qiick\Access\Events\PrincipalCreatedEvent;
+use Qiick\Access\Events\PrincipalDeactivatedEvent;
 use Qiick\Access\Laravel\MigrationSettings;
 
 /**
@@ -158,7 +160,7 @@ final class EloquentPrincipalDirectory implements PrincipalDirectory
             return $this->deactivateOwned($principal->id);
         });
 
-        $this->events->dispatch(new PrincipalDeactivated($principal->refresh(), $reason, $ownedIds));
+        $this->events->dispatch(new PrincipalDeactivatedEvent($principal->refresh(), $reason, $ownedIds));
     }
 
     public function eraseUser(Authenticatable $user, Closure $deleteUser): void
@@ -197,7 +199,7 @@ final class EloquentPrincipalDirectory implements PrincipalDirectory
         });
 
         foreach ($erased as [$principal, $ownedIds]) {
-            $this->events->dispatch(new PrincipalDeactivated($principal, DeactivationReason::Erased, $ownedIds));
+            $this->events->dispatch(new PrincipalDeactivatedEvent($principal, DeactivationReason::Erased, $ownedIds));
         }
     }
 
@@ -446,7 +448,7 @@ final class EloquentPrincipalDirectory implements PrincipalDirectory
     private function announceIfCreated(Principal $principal): Principal
     {
         if ($principal->wasRecentlyCreated) {
-            $this->events->dispatch(new PrincipalCreated($principal));
+            $this->events->dispatch(new PrincipalCreatedEvent($principal));
         }
 
         return $principal;

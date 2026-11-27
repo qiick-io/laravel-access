@@ -25,6 +25,13 @@ events, and the migrations (see `docs/reference-contracts.md`). Code tagged
 
 ## Unreleased
 
+- Rename the principal event listeners' types:
+  `Qiick\Access\Principals\PrincipalCreated` →
+  `Qiick\Access\Events\PrincipalCreatedEvent` and
+  `Qiick\Access\Principals\PrincipalDeactivated` →
+  `Qiick\Access\Events\PrincipalDeactivatedEvent` (listeners,
+  `Event::listen()`, `Event::fake()` and `$listen` maps).
+
 - API keys of a super-admin owner: `EnsureUserHasPermission`,
   `AuthorizesWithPermission` and `PrincipalCeiling::allows()` now allow
   every permission of the vocabulary that the key's scopes cover (decision
