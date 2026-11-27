@@ -149,7 +149,9 @@ final class AccessServiceProvider extends ServiceProvider
         });
 
         // ActiveUsers is product-bound; resolving SuperAdminGuard fails closed until then.
-        $this->app->singleton(SuperAdminGuard::class, function (Application $app): SuperAdminGuard {
+        // Scoped like the resolver it holds: a singleton would keep the first
+        // scope's resolver and its cached verdicts in a long-lived worker (#66).
+        $this->app->scoped(SuperAdminGuard::class, function (Application $app): SuperAdminGuard {
             return new SuperAdminGuard(
                 $app->make(EffectivePermissionResolver::class),
                 $app->make(ActiveUsers::class),

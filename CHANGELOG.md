@@ -23,6 +23,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- `SuperAdminGuard` is bound scoped, like the resolver it holds. As a
+  singleton it kept the first scope's resolver in an Octane worker or a
+  queue worker, so a cached super-admin verdict could outlive a demotion in
+  `isProtectedFrom()` and `canManageSuperAdmins()`.
 - Product policies can use `EffectivePermissionResolver::isActorSuperAdmin()`
   to deny super-admin authority to API actors. `SuperAdminGuard` now applies
   this check when protecting super-admin accounts. See `UPGRADING.md`.
