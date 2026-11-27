@@ -8,6 +8,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### CI
+
+- The shared app-ui package matrix (PHP 8.3–8.5 × Laravel 12/13 ×
+  lowest/stable; PostgreSQL 17, MySQL 8.4, MariaDB 11.4) replaces the local
+  one; MariaDB 10.11 leaves the matrix. Mutation covers every class in
+  `src/` at ≥ 95% per class, the erasure suite has its own job, and a
+  nightly run audits dependencies and opens an issue when it fails.
+
 ### Added
 
 - `EffectivePermissionResolver::isWithinOwnerCeiling()`: the owner ceiling

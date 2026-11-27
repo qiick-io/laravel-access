@@ -80,7 +80,7 @@ final class AssertsGroupTablesSchema
     private function requireGroupNameUniqueness(): void
     {
         $uniqueColumnLists = array_column(array_filter(
-            $this->indexColumnLists('user_groups'),
+            $this->connection->getSchemaBuilder()->getIndexes('user_groups'),
             static fn (array $index): bool => $index['unique'],
         ), 'columns');
 
@@ -93,16 +93,11 @@ final class AssertsGroupTablesSchema
         $this->connection->beginTransaction();
 
         try {
-            foreach ([1, 2] as $attempt) {
-                $this->connection->table('user_groups')->insert([
-                    'public_id' => (string) Str::uuid(),
-                    'name' => '__ac_a_duplicate_name__',
-                    'organisation_id' => null,
-                    'is_instance' => false,
-                    'created_at' => now(),
-                    'updated_at' => now(),
-                ]);
-            }
+            // One statement: either both rows are saved or neither is.
+            $this->connection->table('user_groups')->insert([
+                $this->probeGroupRow('__ac_a_duplicate_name__', null, false),
+                $this->probeGroupRow('__ac_a_duplicate_name__', null, false),
+            ]);
         } catch (QueryException) {
             $this->connection->rollBack();
 
@@ -123,16 +118,7 @@ final class AssertsGroupTablesSchema
         $this->connection->beginTransaction();
 
         try {
-            $this->connection->table('user_groups')->insert([
-                'public_id' => (string) Str::uuid(),
-                'name' => '__ac17_instance_org_xor__',
-                'description' => null,
-                'metadata' => null,
-                'organisation_id' => (string) Str::uuid(),
-                'is_instance' => true,
-                'created_at' => now(),
-                'updated_at' => now(),
-            ]);
+            $this->connection->table('user_groups')->insert($this->probeGroupRow('__ac17_instance_org_xor__', (string) Str::uuid(), true));
             $this->connection->rollBack();
 
             throw new RuntimeException(
@@ -141,6 +127,25 @@ final class AssertsGroupTablesSchema
         } catch (QueryException) {
             $this->connection->rollBack();
         }
+    }
+
+    /**
+     * A user_groups row for the rolled-back probes, with every column a
+     * product table may declare NOT NULL set, so the insert fails only on the
+     * rule it probes.
+     *
+     * @return array<string, mixed>
+     */
+    private function probeGroupRow(string $name, ?string $organisationId, bool $isInstance): array
+    {
+        return [
+            'public_id' => (string) Str::uuid(),
+            'name' => $name,
+            'organisation_id' => $organisationId,
+            'is_instance' => $isInstance,
+            'created_at' => now(), // @pest-mutate-ignore RemoveArrayItem: equivalent on the package tables, whose timestamps are nullable; kept for product tables that are not
+            'updated_at' => now(), // @pest-mutate-ignore RemoveArrayItem: same as created_at
+        ];
     }
 
     private function assertUserGroupUser(): void
@@ -254,8 +259,8 @@ final class AssertsGroupTablesSchema
     private function isNullable(string $table, string $column): bool
     {
         foreach ($this->connection->getSchemaBuilder()->getColumns($table) as $definition) {
-            if (($definition['name'] ?? null) === $column) {
-                return (bool) ($definition['nullable'] ?? false);
+            if ($definition['name'] === $column) {
+                return $definition['nullable'];
             }
         }
 
@@ -266,74 +271,33 @@ final class AssertsGroupTablesSchema
 
     private function requireUniqueCovering(string $table, string ...$columns): void
     {
-        $wanted = array_values($columns);
-
-        foreach ($this->indexColumnLists($table) as $index) {
-            if (! $index['unique']) {
-                continue;
-            }
-
-            if ($index['columns'] === $wanted) {
+        foreach ($this->connection->getSchemaBuilder()->getIndexes($table) as $index) {
+            if ($index['unique'] && $index['columns'] === $columns) {
                 return;
             }
         }
 
         throw new RuntimeException(
-            'AC17: expected unique index on ['.$table.'.'.implode(',', $wanted).'] (§2.4–2.6).',
+            'AC17: expected unique index on ['.$table.'.'.implode(',', $columns).'] (§2.4–2.6).',
         );
     }
 
     private function requireIndexCovering(string $table, string ...$columns): void
     {
-        $wanted = array_values($columns);
-
-        foreach ($this->indexColumnLists($table) as $index) {
-            if ($index['columns'] === $wanted) {
+        foreach ($this->connection->getSchemaBuilder()->getIndexes($table) as $index) {
+            if ($index['columns'] === $columns) {
                 return;
             }
         }
 
         throw new RuntimeException(
-            'AC17: expected index on ['.$table.'.'.implode(',', $wanted).'] (§2.4–2.6).',
+            'AC17: expected index on ['.$table.'.'.implode(',', $columns).'] (§2.4–2.6).',
         );
-    }
-
-    /**
-     * @return list<array{unique: bool, columns: list<string>}>
-     */
-    private function indexColumnLists(string $table): array
-    {
-        $normalized = [];
-
-        foreach ($this->connection->getSchemaBuilder()->getIndexes($table) as $index) {
-            if (! is_array($index)) {
-                continue;
-            }
-
-            $columns = $index['columns'] ?? null;
-            if (! is_array($columns)) {
-                continue;
-            }
-
-            $columnNames = [];
-            foreach ($columns as $columnName) {
-                if (is_string($columnName)) {
-                    $columnNames[] = $columnName;
-                }
-            }
-
-            $normalized[] = [
-                'unique' => (bool) ($index['unique'] ?? false),
-                'columns' => $columnNames,
-            ];
-        }
-
-        return $normalized;
     }
 
     private function requireForeignKeyCascade(string $table, string $column, string $foreignTable): void
     {
-        foreach ($this->foreignKeyDescriptors($table) as $foreignKey) {
+        foreach ($this->connection->getSchemaBuilder()->getForeignKeys($table) as $foreignKey) {
             if ($foreignKey['columns'] !== [$column]) {
                 continue;
             }
@@ -344,9 +308,12 @@ final class AssertsGroupTablesSchema
                 );
             }
 
-            if ($foreignKey['on_delete'] !== 'cascade') {
+            // MySQL and MariaDB report CASCADE in upper case, SQLite and PostgreSQL in lower case.
+            $onDelete = strtolower((string) $foreignKey['on_delete']); // @pest-mutate-ignore UnwrapStrtolower: equivalent on SQLite, where mutation runs; the engines job covers upper case
+
+            if ($onDelete !== 'cascade') {
                 throw new RuntimeException(
-                    "AC17: [{$table}.{$column}] FK onDelete must be cascade, got [{$foreignKey['on_delete']}].",
+                    "AC17: [{$table}.{$column}] FK onDelete must be cascade, got [{$onDelete}].",
                 );
             }
 
@@ -356,46 +323,5 @@ final class AssertsGroupTablesSchema
         throw new RuntimeException(
             "AC17: expected cascade FK [{$table}.{$column}] → [{$foreignTable}] (§2.5–2.6).",
         );
-    }
-
-    /**
-     * @return list<array{columns: list<string>, foreign_table: string, on_delete: string}>
-     */
-    private function foreignKeyDescriptors(string $table): array
-    {
-        $normalized = [];
-
-        foreach ($this->connection->getSchemaBuilder()->getForeignKeys($table) as $foreignKey) {
-            if (! is_array($foreignKey)) {
-                continue;
-            }
-
-            $columns = $foreignKey['columns'] ?? null;
-            if (! is_array($columns)) {
-                continue;
-            }
-
-            $columnNames = [];
-            foreach ($columns as $columnName) {
-                if (is_string($columnName)) {
-                    $columnNames[] = $columnName;
-                }
-            }
-
-            $referenced = $foreignKey['foreign_table'] ?? null;
-            $onDelete = $foreignKey['on_delete'] ?? null;
-
-            if (! is_string($referenced) || ! is_string($onDelete)) {
-                continue;
-            }
-
-            $normalized[] = [
-                'columns' => $columnNames,
-                'foreign_table' => $referenced,
-                'on_delete' => strtolower($onDelete),
-            ];
-        }
-
-        return $normalized;
     }
 }
