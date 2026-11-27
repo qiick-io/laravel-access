@@ -20,7 +20,7 @@ it('is a no-op when Spatie teams are off', function (): void {
     expect(true)->toBeTrue();
 });
 
-it('fails when teams are on and team_foreign_key is not organisation_id (A3)', function (): void {
+it('fails when teams are on and team_foreign_key is not organisation_id (A3 / AC14)', function (): void {
     config()->set('permission.teams', true);
     config()->set('permission.column_names.team_foreign_key', 'team_id');
 
@@ -382,7 +382,7 @@ it('passes when teams are on with organisation_id and uuid columns on pgsql-comp
     }
 });
 
-it('fails on PostgreSQL when organisation_id is not uuid (A3)', function (): void {
+it('fails on PostgreSQL when organisation_id is not uuid (A3 / AC14)', function (): void {
     if (app('db')->connection()->getDriverName() !== 'pgsql') {
         $this->markTestSkipped('PostgreSQL-only uuid type check');
     }

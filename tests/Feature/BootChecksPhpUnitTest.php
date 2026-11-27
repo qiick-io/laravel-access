@@ -53,7 +53,7 @@ it('fails when register_permission_check_method is anything but boolean false (R
     $config->set('permission.register_permission_check_method', false);
 })->with('non_false_permission_check_method_values');
 
-it('fails when permission.events_enabled is not true (A1 / N3)', function (): void {
+it('fails when permission.events_enabled is not true (A1 / N3 / AC13)', function (): void {
     $checks = app(AccessBootChecks::class);
     $config = app(ConfigRepository::class);
     $config->set('permission.events_enabled', false);

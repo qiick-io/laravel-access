@@ -7,6 +7,7 @@ use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Http\Exceptions\HttpResponseException;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\Schema;
 use Qiick\Access\Contracts\ActorContext;
 use Qiick\Access\Contracts\ActorKind;
@@ -206,7 +207,7 @@ it('denies an API actor as soon as its owner stops being super-admin', function 
         ->toBe('forbidden:can-show-users');
 });
 
-it('denies an API actor as soon as its owner loses the permission', function (): void {
+it('denies an API actor as soon as its owner loses the permission (AC6)', function (): void {
     $owner = userWithPermissions(FakePermissionEnum::CanShowUsers->value);
     enterApiActor($owner);
     $this->app->instance(ApiActorScopeCheck::class, new ListedScopeCheck([FakePermissionEnum::CanShowUsers->value]));
@@ -334,4 +335,58 @@ it('never counts the super-admin role\'s own permissions beyond the vocabulary f
         ->toBe('forbidden:can-delete-users')
         ->and(passThroughPermissionMiddleware(requestAs(null), 'can-purge-everything')->getContent())
         ->toBe('forbidden:can-purge-everything');
+});
+
+/**
+ * A user who holds can-show-users only through a group role.
+ */
+function userWithGroupOnlyPermission(): SpatieUser
+{
+    $groupRole = Role::create(['name' => 'group-viewers', 'guard_name' => 'web']);
+    $groupRole->givePermissionTo(FakePermissionEnum::CanShowUsers->value);
+    $user = SpatieUser::query()->create(['email' => 'group-member@example.com']);
+
+    $groupRoles = Mockery::mock(GroupRoleSource::class);
+    $groupRoles->shouldReceive('instanceRoleIdsFor')->andReturn([]);
+    $groupRoles->shouldReceive('roleIdsFor')->andReturn([$groupRole->id]);
+    app()->instance(GroupRoleSource::class, $groupRoles);
+    app()->forgetInstance(EffectivePermissionResolver::class);
+
+    return $user;
+}
+
+it('shows a group-only permission through can() in a web session (AC7)', function (): void {
+    $user = userWithGroupOnlyPermission();
+    AccessContext::enter(new ActorContext(ActorKind::WebSession, $user));
+
+    expect(Gate::forUser($user)->allows(FakePermissionEnum::CanShowUsers->value))->toBeTrue()
+        ->and(Gate::forUser($user)->allows(FakePermissionEnum::CanEditUsers->value))->toBeFalse();
+});
+
+it('lets a group-only permission of the owner through on an API path, within the scopes (AC8)', function (): void {
+    $owner = userWithGroupOnlyPermission();
+    enterApiActor($owner);
+    $this->app->instance(ApiActorScopeCheck::class, new ListedScopeCheck([FakePermissionEnum::CanShowUsers->value]));
+
+    expect(passThroughPermissionMiddleware(requestAs(null), FakePermissionEnum::CanShowUsers->value)->getContent())->toBe('next')
+        ->and(app(EffectivePermissionResolver::class)->isWithinOwnerCeiling($owner, FakePermissionEnum::CanShowUsers->value))->toBeTrue();
+
+    // The same group grant outside the credential's scopes stays refused.
+    $this->app->instance(ApiActorScopeCheck::class, new ListedScopeCheck([]));
+
+    expect(passThroughPermissionMiddleware(requestAs(null), FakePermissionEnum::CanShowUsers->value)->getContent())->toBe('forbidden:can-show-users');
+});
+
+it('clears the cached permission of a user whose role is detached in the same request (AC13)', function (): void {
+    $viewers = Role::create(['name' => 'viewers', 'guard_name' => 'web']);
+    $viewers->givePermissionTo(FakePermissionEnum::CanShowUsers->value);
+    $user = SpatieUser::query()->create(['email' => 'viewer@example.com']);
+    $user->assignRole($viewers);
+    $resolver = app(EffectivePermissionResolver::class);
+
+    expect($resolver->hasPermission($user, FakePermissionEnum::CanShowUsers->value))->toBeTrue();
+
+    $user->removeRole($viewers);
+
+    expect($resolver->hasPermission($user, FakePermissionEnum::CanShowUsers->value))->toBeFalse();
 });

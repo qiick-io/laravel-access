@@ -41,7 +41,7 @@ afterEach(function (): void {
     Schema::dropIfExists('users');
 });
 
-it('creates the package group tables with expires_at public_id and metadata', function (): void {
+it('creates the package group tables with expires_at public_id and metadata, leaving Spatie tables alone (AC17)', function (): void {
     $rolesColumnsBefore = collect(app('db')->connection()->getSchemaBuilder()->getColumns('roles'))
         ->pluck('name')
         ->sort()
