@@ -36,6 +36,8 @@ See [docs/public-api.md](docs/public-api.md#deprecation-policy).
   first (their payloads name the old classes), then run `event:cache` again
   if the product caches events, and restart queue workers and Octane, so
   the API-key revocation listener is never skipped.
+- Add `php artisan access:check` to the deploy pipeline and to the
+  product's `<app>:upgrade`, after the migrations.
 
 - API keys of a super-admin owner: `EnsureUserHasPermission`,
   `AuthorizesWithPermission` and `PrincipalCeiling::allows()` now allow

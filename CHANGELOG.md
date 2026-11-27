@@ -22,6 +22,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   default for it (F1); lists stay the product's own. A present but invalid
   `access.*` value stops the boot with the key in the message
   (`AccessBootChecks::assertConfigValues()`).
+- `php artisan access:check` (F2) for the deploy pipeline and the product's
+  `<app>:upgrade`: runs the boot checks, builds the permission resolver and
+  checks that the default database answers and has the Spatie and package
+  tables; one line per problem, exit 1 on any.
 
 - `EffectivePermissionResolver::isWithinOwnerCeiling()`: the owner ceiling
   behind an API key. A super-admin alone can now issue working keys: their
