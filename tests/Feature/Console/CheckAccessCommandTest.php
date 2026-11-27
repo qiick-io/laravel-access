@@ -312,3 +312,18 @@ it('lists direct holders through the users model when the group member model is 
         ->expectsOutputToContain("User [{$mixed->id}] holds super-admin together with other roles")
         ->assertFailed();
 });
+
+it('lists an STI holder with a direct super-admin and another role from a group (C31)', function (): void {
+    // Codex last check of #74: the inverse of the case above.
+    config()->set('auth.providers.users.model', SpatieUser::class);
+    config()->set('access.group_member_model', StiAdminUser::class);
+    $member = SpatieUser::query()->create();
+    $member->roles()->attach(Role::create(['name' => 'super-admin', 'guard_name' => 'web']));
+    $groupId = DB::table('user_groups')->insertGetId(['public_id' => (string) Str::uuid(), 'name' => 'readers', 'is_instance' => true]);
+    DB::table('user_group_role')->insert(['user_group_id' => $groupId, 'role_id' => Role::create(['name' => 'reader', 'guard_name' => 'web'])->id]);
+    DB::table('user_group_user')->insert(['user_group_id' => $groupId, 'user_id' => $member->id]);
+
+    $this->artisan('access:check')
+        ->expectsOutputToContain("User [{$member->id}] holds super-admin together with other roles")
+        ->assertFailed();
+});

@@ -65,7 +65,8 @@ final class ExclusiveSuperAdmin
         }
 
         $user = $roles->getParent();
-        // The exact class the package group source admits (an STI subclass).
+        // The exact class the package group source admits (an STI subclass
+        // on the users table, sharing its morph class).
         $memberClass = $this->config->get('access.group_member_model') ?? $user::class;
         $member = is_string($memberClass) && is_a($memberClass, Model::class, true) ? new $memberClass : $user;
 
@@ -92,8 +93,9 @@ final class ExclusiveSuperAdmin
                 ->pluck('user_group_user.user_id')
                 ->all();
 
-            return $user->newQueryWithoutScopes()->whereKey($direct)->get()
-                ->merge($member->newQueryWithoutScopes()->whereKey($throughGroups)->get())
+            // Every candidate as the member class: the group source counts
+            // that class only, also for a holder whose super-admin is direct.
+            return $member->newQueryWithoutScopes()->whereKey([...$direct, ...$throughGroups])->get()
                 ->filter(fn (Model $holder): bool => $holder instanceof Authenticatable && $this->resolver->holdsMixedSuperAdmin($holder))
                 // JSON keeps an int and a string key apart in the listing.
                 ->map(fn (Model $holder): string => json_encode($holder->getKey(), JSON_THROW_ON_ERROR))
