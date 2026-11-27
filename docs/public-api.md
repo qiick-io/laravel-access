@@ -1,5 +1,8 @@
 # Public API
 
+This page describes `develop` once the 1.0 pull requests #59, #60, #62 and
+#67 have merged; each statement that depends on one names it.
+
 Everything listed here is the public API frozen at `1.0.0`: it changes only as
 the [deprecation policy](#deprecation-policy) allows. Everything else in `src/`
 is tagged `@internal` and may change in any release; products never call or
@@ -10,8 +13,13 @@ table shapes in [reference-schema.md](reference-schema.md).
 
 ## Classes, interfaces, enums and traits
 
-Public means the class name, its public methods and constructor, and for enums
-the case names and backing values (backing values are stored and compared).
+Public means the class name, its public methods, constructor, public
+properties and constants (`ActorPayloadStamper::PAYLOAD_KEY`,
+`AccessEraser::DELETE` / `ANONYMISE`, `ProbeAbility::NAME`, the readonly
+properties of the events), and for enums the case names and backing values
+(backing values are stored and compared). A method tagged `@internal` on a
+public class (`EffectivePermissionResolver::cachedVerdictCount()`, the
+erasure hooks of `EloquentPrincipalDirectory`) is not public.
 
 ### `Qiick\Access`
 
@@ -97,31 +105,47 @@ the case names and backing values (backing values are stored and compared).
 These rules are part of the contract, not implementation details; each has a
 test named in [security-checklist.md](security-checklist.md).
 
-- **`Gate::before` order** (design §3.1): no user → abstain; a bound actor
-  that is not the Gate user → abstain; an API actor → abstain (AC2); a
-  Policy-backed ability → abstain (AC3); super-admin → grant; a vocabulary
-  permission the resolver grants → grant; otherwise abstain. It never returns
-  `false`.
-- **Owner ceiling of an API actor:** the credential's scopes ∩ the owner's
-  assigned permissions (direct and group), read fresh on every use
-  (`isWithinOwnerCeiling()`); for a super-admin owner the whole vocabulary,
-  never the Gate bypass and never a permission outside the vocabulary
-  (decision [2026-11-26](decisions/2026-11-26-super-admin-key-ceiling.md)).
+- **`Gate::before` order** (design §3.1), with the default switches:
+  no user → abstain; a bound actor that is not the Gate user → abstain; an
+  API actor → abstain (AC2); a Policy-backed ability → abstain (AC3);
+  super-admin → grant; a vocabulary permission with **no arguments** that
+  the resolver grants → grant; otherwise abstain. It never returns `false`.
+  With `access.use_package_gate = false` (externa, until v2) the product's
+  `LegacyGateBefore` is the one registered callback instead; with
+  `access.gate_shadow` the other one also runs and only logs.
+- **Owner ceiling of an API actor** (`isWithinOwnerCeiling()`): the owner's
+  assigned permissions (direct and group); for a super-admin owner the whole
+  vocabulary, never the Gate bypass and never a permission outside the
+  vocabulary (decision
+  [2026-11-26](decisions/2026-11-26-super-admin-key-ceiling.md)). It is
+  cached for the scope unless called with `fresh: true`; the package's use
+  sites (`EnsureUserHasPermission`, `AuthorizesWithPermission`,
+  `PrincipalCeiling::allows()`) always read it fresh and intersect it with
+  the credential's scopes.
+- **`PrincipalCeiling::allows()`**: the ceiling of the user behind the
+  nearest `user` principal of an active owner chain in one organisation,
+  read in that organisation; an unowned service, a chain that leaves the
+  organisation or reaches an instance type first, and a missing user give an
+  empty ceiling.
 - **Group memberships** count only for exactly the member model class on the
   default connection, skip soft-deleted groups (C7) and memberships whose
   `expires_at` has passed (AC15); super-admin through a group counts only
   `is_instance` groups (C30).
 - **Principals:** `principals.user_id` is `ON DELETE RESTRICT`, so a user
-  with principals is deleted only through erasure; `markErased()` writes a
-  permanent `erased` tombstone that keeps the user link, and an erased
-  tombstone is never rewritten; `isActive()` walks at most eight owners.
+  with principals is deleted only through erasure. `deactivate()` and
+  `markErased()` never rewrite an inactive principal's reason or cutoff, and
+  `markErased()` keeps the user link (a soft-delete tombstone); erasure
+  itself anonymises the row and clears that link. `isActive()` follows at
+  most eight principals, the subject included.
 - **`PrincipalDirectory::eraseUser()`** is deprecated and stays until 2.0:
   products erase users through their erasure orchestrator, which calls
   `Erasure\AccessEraser`.
 - **Boot fails closed** on a missing required binding (AC12), Spatie's
   permission check method on or its events off (R4, A1), an unclassified
-  guard, a connection that reports another name, a group member model on
-  another connection, and any invalid `access.*` value.
+  guard, a connection that reports another name, an Eloquent group member
+  model on another connection while the package `GroupRoleSource` is bound
+  (#59), and an invalid `access.*` value (#60). Group roles of a member on
+  another connection are refused at lookup time as well.
 
 ## Config keys
 
@@ -142,7 +166,7 @@ their meaning are public; renaming or removing one is a breaking change.
 | `access.principals.instance_types` | empty | Singleton instance-level types; read when the migration runs |
 | `access.users_table` | null (the users model's table) | Users table for the foreign keys of `user_group_user.user_id`, `principals.user_id` and `principals.created_by`, and for the erasure check |
 | `access.group_member_model` | null (`auth.providers.users.model`) | The only model that gets group roles |
-| `access.two_factor.exempt_route_names` | logout, security, two-factor, passkey, password confirmation | Routes `EnsureTwoFactorIsEnabled` skips |
+| `access.two_factor.exempt_route_names` | `logout`, `security.*`, `two-factor.*`, `passkey.*`, `password.confirm*` | Routes `EnsureTwoFactorIsEnabled` skips |
 | `access.use_package_gate` | `ACCESS_USE_PACKAGE_GATE`, `true` | Externa only, removed in v2: `false` lets `LegacyGateBefore` decide |
 | `access.gate_shadow` | `ACCESS_GATE_SHADOW`, `false` | Externa only, removed in v2: also run the other callback and log disagreements |
 | `access.gate_shadow_log_channel` | `ACCESS_GATE_SHADOW_LOG_CHANNEL`, null (default channel) | Externa only, removed in v2: the shadow log channel |
@@ -156,7 +180,15 @@ comma-separated), `ACCESS_PERMISSION_ENUM`, and, for externa until v2,
 
 | Command | What it does |
 | --- | --- |
-| `access:check` | Deploy check (F2): the boot checks, the permission resolver, and the default connection with the Spatie, group and principal tables; one line per problem, exit 1 on any. Read-only |
+| `access:check` | Deploy check (F2, #62): the boot checks, the permission resolver, and the default connection (write PDO) with the Spatie tables, the group tables and `principals` when its migration is on; one line per problem, exit 1 on any. Read-only. A boot check that fails stops every Artisan command first, this one included, with the same message |
+
+## Other names products depend on
+
+| Name | What |
+| --- | --- |
+| Queue payload key `qiick_access` | `{kind, credential_uuid}` of the API actor, stamped by `ActorPayloadStamper` and read back in the worker |
+| `qiick-standards.json` `access.direct_checks` | Listed direct `hasPermission()` sites for `Testing\DirectPermissionCheckScanner` (AC9): `site`, `reason`, `decision`, `review_by` |
+| Probe ability `qiick-access-probe` | `ProbeAbility::NAME`, for AC2 tests |
 
 ## Middleware and validation rules
 

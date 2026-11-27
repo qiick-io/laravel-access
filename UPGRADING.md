@@ -10,6 +10,12 @@ See [docs/public-api.md](docs/public-api.md#deprecation-policy).
 
 ## Unreleased
 
+- `PrincipalDirectory::eraseUser()` is deprecated (removed in 2.0.0). Delete
+  users only through the product's erasure orchestrator: it writes the
+  resumable `erasure_requests` row, runs `Erasure\AccessEraser` with the
+  other erasers, deletes the user row itself and revokes the user's
+  credentials in its `PrincipalDeactivatedEvent` listener, as before.
+
 - Rename the principal event listeners' types:
   `Qiick\Access\Principals\PrincipalCreated` →
   `Qiick\Access\Events\PrincipalCreatedEvent` and

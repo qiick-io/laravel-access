@@ -155,6 +155,25 @@ it('ignores memberships whose expires_at is in the past (A2 / AC15)', function (
         ->and($roleIds)->not->toContain(2);
 })->group('engines');
 
+it('gives no instance role, so no super-admin, through an expired instance membership (AC15)', function (): void {
+    $this->travelTo(now()->parse('2026-11-22 12:00:00'));
+    config()->set('auth.providers.users.model', SpatieUser::class);
+
+    $connection = app('db')->connection();
+    $connection->table('user_groups')->insert(['id' => 1, 'public_id' => '11111111-1111-7111-8111-111111111111', 'name' => 'instance-admins', 'organisation_id' => null, 'is_instance' => true, 'deleted_at' => null]);
+    $connection->table('user_group_user')->insert(['user_id' => 10, 'user_group_id' => 1, 'expires_at' => '2026-11-22 11:59:59']);
+    $connection->table('user_group_role')->insert(['user_group_id' => 1, 'role_id' => 1]);
+    $member = (new SpatieUser)->forceFill(['id' => 10]);
+    $source = app(GroupRoleSource::class);
+
+    expect($source->instanceRoleIdsFor($member))->toBe([])
+        ->and($source->roleIdsFor($member))->toBe([]);
+
+    $connection->table('user_group_user')->update(['expires_at' => '2026-11-22 12:00:01']);
+
+    expect($source->instanceRoleIdsFor($member))->toBe([1]);
+})->group('engines');
+
 it('returns an empty list when the user has no group memberships', function (): void {
     expect(app(GroupRoleSource::class)->roleIdsFor((new SpatieUser)->forceFill(['id' => 1])))->toBe([]);
 })->group('engines');

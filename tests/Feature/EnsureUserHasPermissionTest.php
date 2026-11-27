@@ -357,6 +357,7 @@ function userWithGroupOnlyPermission(): SpatieUser
 
 it('shows a group-only permission through can() in a web session (AC7)', function (): void {
     $user = userWithGroupOnlyPermission();
+    AccessContext::enter(new ActorContext(ActorKind::WebSession, $user));
 
     expect(Gate::forUser($user)->allows(FakePermissionEnum::CanShowUsers->value))->toBeTrue()
         ->and(Gate::forUser($user)->allows(FakePermissionEnum::CanEditUsers->value))->toBeFalse();
@@ -369,6 +370,11 @@ it('lets a group-only permission of the owner through on an API path, within the
 
     expect(passThroughPermissionMiddleware(requestAs(null), FakePermissionEnum::CanShowUsers->value)->getContent())->toBe('next')
         ->and(app(EffectivePermissionResolver::class)->isWithinOwnerCeiling($owner, FakePermissionEnum::CanShowUsers->value))->toBeTrue();
+
+    // The same group grant outside the credential's scopes stays refused.
+    $this->app->instance(ApiActorScopeCheck::class, new ListedScopeCheck([]));
+
+    expect(passThroughPermissionMiddleware(requestAs(null), FakePermissionEnum::CanShowUsers->value)->getContent())->toBe('forbidden:can-show-users');
 });
 
 it('clears the cached permission of a user whose role is detached in the same request (AC13)', function (): void {
