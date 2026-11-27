@@ -66,7 +66,7 @@ final class ExclusiveSuperAdmin
 
         $user = $roles->getParent();
         // The exact class the package group source admits (an STI subclass).
-        $memberClass = $this->config->get('access.group_member_model');
+        $memberClass = $this->config->get('access.group_member_model') ?? $user::class;
         $member = is_string($memberClass) && is_a($memberClass, Model::class, true) ? new $memberClass : $user;
 
         // Inside a transaction every read goes to the primary.
@@ -184,6 +184,8 @@ final class ExclusiveSuperAdmin
 
                 foreach ($users as $index => $user) {
                     $this->assertHeldAlone($user);
+                    // The write may have skipped Spatie's events (a raw pivot).
+                    $this->resolver->forget($user);
 
                     if (! $actorMayManage && ! $wasEffective[$index] && $this->resolver->isSuperAdmin($user)) {
                         throw ExclusiveSuperAdminException::promotionBy($user);

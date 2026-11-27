@@ -301,3 +301,14 @@ it('lists a mixed holder through the groups of an STI member model (C31)', funct
         ->expectsOutputToContain("User [{$member->id}] holds super-admin together with other roles")
         ->assertFailed();
 });
+
+it('lists direct holders through the users model when the group member model is not Eloquent (C31)', function (): void {
+    config()->set('auth.providers.users.model', SpatieUser::class);
+    config()->set('access.group_member_model', stdClass::class);
+    $mixed = SpatieUser::query()->create();
+    $mixed->roles()->attach([Role::create(['name' => 'super-admin', 'guard_name' => 'web'])->id, Role::create(['name' => 'reader', 'guard_name' => 'web'])->id]);
+
+    $this->artisan('access:check')
+        ->expectsOutputToContain("User [{$mixed->id}] holds super-admin together with other roles")
+        ->assertFailed();
+});

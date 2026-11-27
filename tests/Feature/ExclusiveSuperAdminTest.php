@@ -437,3 +437,13 @@ it('serialises two overlapping writes so the second sees the first (InnoDB, Post
         ->and($refused)->toBeTrue()
         ->and(directRoles($user))->toBe(['super-admin']);
 })->group('engines');
+
+it('refuses a promotion written without Spatie events, such as a raw pivot change', function (): void {
+    bindActiveUsers();
+    $mixed = exclusiveUser('super-admin', 'reader');
+    $admin = exclusiveUser('admin');
+
+    expect(fn () => app(ExclusiveSuperAdmin::class)->write($mixed, fn () => $mixed->roles()->detach(Role::findByName('reader')), $admin))
+        ->toThrow(ExclusiveSuperAdminException::class, 'may not manage super-admins')
+        ->and(directRoles($mixed))->toBe(['reader', 'super-admin']);
+});
