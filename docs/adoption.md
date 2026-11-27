@@ -108,17 +108,17 @@ by writing rows directly; the `Principal` model is fully guarded.
   `erased` tombstone even for an inactive principal, preserves the original
   deactivation time and keeps the user link so `forMember()` refuses to
   reactivate it after a restore. It deactivates owned principals and emits
-  `PrincipalDeactivated` after commit so listeners can revoke credentials.
+  `PrincipalDeactivatedEvent` after commit so listeners can revoke credentials.
   Products with a custom `PrincipalDirectory` implement the same transition;
 - `deactivate($principal, DeactivationReason)`: deactivates the principal,
   unless it already is (an erased tombstone is never rewritten), and every
-  active principal it owns, in one transaction. `PrincipalDeactivated` (with
+  active principal it owns, in one transaction. `PrincipalDeactivatedEvent` (with
   the owned ids) is dispatched after the surrounding transaction commits.
   **Revoke their API keys in a listener** (qiick/laravel-api-keys reason
   `owner`);
 - `eraseUser($user, $deleteUser)`: the existing directory entry point for
   products that use its hard-delete callback. It shares the principal
-  scrub with the fleet eraser and keeps the `PrincipalDeactivated` events.
+  scrub with the fleet eraser and keeps the `PrincipalDeactivatedEvent` events.
   If the callback leaves the user row in place, the transaction rolls back;
 - `isActive($principalId)`: the use-time check behind a key: not deactivated,
   not expired, a `user` principal still has its user, an instance-level row

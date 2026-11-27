@@ -21,6 +21,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   permanent membership tombstone for a principal of type `user`. Custom
   directory implementations must add the new interface method.
 
+### Changed
+
+- **Breaking:** `Principals\PrincipalCreated` and
+  `Principals\PrincipalDeactivated` are now `Events\PrincipalCreatedEvent`
+  and `Events\PrincipalDeactivatedEvent` (fleet convention F5). Same
+  properties and dispatch rules.
+
 ### Security
 
 - Product policies can use `EffectivePermissionResolver::isActorSuperAdmin()`

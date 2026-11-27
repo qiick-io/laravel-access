@@ -2,9 +2,11 @@
 
 declare(strict_types=1);
 
-namespace Qiick\Access\Principals;
+namespace Qiick\Access\Events;
 
 use Illuminate\Contracts\Events\ShouldDispatchAfterCommit;
+use Qiick\Access\Principals\DeactivationReason;
+use Qiick\Access\Principals\Principal;
 
 /**
  * Dispatched after PrincipalDirectory::deactivate(), markErased() or eraseUser() commits,
@@ -15,7 +17,7 @@ use Illuminate\Contracts\Events\ShouldDispatchAfterCommit;
  *
  * @api
  */
-final class PrincipalDeactivated implements ShouldDispatchAfterCommit
+final class PrincipalDeactivatedEvent implements ShouldDispatchAfterCommit
 {
     /**
      * @param  list<string>  $ownedIds  every principal owned directly or transitively

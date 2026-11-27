@@ -94,8 +94,8 @@ SIBLING_FILES=(
   'src/Laravel/AccessServiceProvider.php'
   'src/Principals/PrincipalDirectory.php'
   'src/Principals/DeactivationReason.php'
-  'src/Principals/PrincipalCreated.php'
-  'src/Principals/PrincipalDeactivated.php'
+  'src/Events/PrincipalCreatedEvent.php'
+  'src/Events/PrincipalDeactivatedEvent.php'
   'src/Principals/UserHasPrincipalsException.php'
 )
 
