@@ -223,7 +223,7 @@ function createGroupTablesBreaking(string $break): void
         if ($isBroken($tableName, 'nullable', $columnName)) {
             $definition->nullable();
         } elseif ($isBroken($tableName, 'notnull', $columnName)) {
-            $definition->nullable(false)->default('x');
+            $definition->nullable(false);
         } elseif ($isNullable) {
             $definition->nullable();
         }
@@ -247,6 +247,10 @@ function createGroupTablesBreaking(string $break): void
         $column($table, 'user_groups', 'created_at', fn (Blueprint $table) => $table->timestamp('created_at'), true);
         $column($table, 'user_groups', 'updated_at', fn (Blueprint $table) => $table->timestamp('updated_at'), true);
         $column($table, 'user_groups', 'deleted_at', fn (Blueprint $table) => $table->timestamp('deleted_at'), true);
+
+        if ($isBroken('user_groups', 'extra', 'required')) {
+            $table->string('required_extra');
+        }
 
         if ($isBroken('user_groups', 'plain', 'public_id')) {
             $table->index('public_id');
@@ -343,6 +347,23 @@ it('accepts the valid shape built by the breakage helper, leaving no probe row b
     (new AssertsGroupTablesSchema(app('db')->connection()))->assertShape();
 
     expect(DB::table('user_groups')->count())->toBe(0)
+        ->and(DB::transactionLevel())->toBe(0);
+});
+
+it('accepts NOT NULL timestamps, which the probe rows fill (AC17)', function (string $column): void {
+    createGroupTablesBreaking("user_groups.notnull:{$column}");
+
+    (new AssertsGroupTablesSchema(app('db')->connection()))->assertShape();
+
+    expect(DB::table('user_groups')->count())->toBe(0);
+})->with(['created_at', 'updated_at']);
+
+it('never takes an unrelated refusal of the probe row for the rule (AC17)', function (): void {
+    createGroupTablesBreaking('user_groups.extra:required');
+
+    expect(fn () => (new AssertsGroupTablesSchema(app('db')->connection()))->assertShape())
+        ->toThrow(RuntimeException::class, 'AC17: user_groups refused a valid probe row, so the probe proves nothing')
+        ->and(DB::table('user_groups')->count())->toBe(0)
         ->and(DB::transactionLevel())->toBe(0);
 });
 

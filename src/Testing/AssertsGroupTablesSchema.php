@@ -90,23 +90,11 @@ final class AssertsGroupTablesSchema
             );
         }
 
-        $this->connection->beginTransaction();
-
-        try {
-            // One statement: either both rows are saved or neither is.
-            $this->connection->table('user_groups')->insert([
-                $this->probeGroupRow('__ac_a_duplicate_name__', null, false),
-                $this->probeGroupRow('__ac_a_duplicate_name__', null, false),
-            ]);
-        } catch (QueryException) {
-            $this->connection->rollBack();
-
-            return;
-        }
-
-        $this->connection->rollBack();
-
-        throw new RuntimeException('AC-a: two groups without an organisation were saved with the same name.');
+        $this->probeRefusal(
+            $this->probeGroupRow('__ac_a_duplicate_name__', null, false),
+            $this->probeGroupRow('__ac_a_duplicate_name__', null, false),
+            'AC-a: two groups without an organisation were saved with the same name.',
+        );
     }
 
     /**
@@ -115,24 +103,49 @@ final class AssertsGroupTablesSchema
      */
     private function requireInstanceOrganisationXorConstraint(): void
     {
+        $this->probeRefusal(
+            $this->probeGroupRow('__ac17_instance_group__', null, true),
+            $this->probeGroupRow('__ac17_instance_org_xor__', (string) Str::uuid(), true),
+            'AC17/C75: expected CHECK that is_instance=true only when organisation_id IS NULL on user_groups.',
+        );
+    }
+
+    /**
+     * Inside a transaction that is always rolled back: the valid control row
+     * must be saved, so a failure of the probe row is the rule's refusal and
+     * not an unrelated constraint of the product's table.
+     *
+     * @param  array<string, mixed>  $controlRow  a row the schema must accept
+     * @param  array<string, mixed>  $probeRow  a row the rule must refuse
+     *
+     * @throws RuntimeException with $failure when the probe row is saved, or when the control row is refused
+     */
+    private function probeRefusal(array $controlRow, array $probeRow, string $failure): void
+    {
         $this->connection->beginTransaction();
 
         try {
-            $this->connection->table('user_groups')->insert($this->probeGroupRow('__ac17_instance_org_xor__', (string) Str::uuid(), true));
-            $this->connection->rollBack();
+            try {
+                $this->connection->table('user_groups')->insert($controlRow);
+            } catch (QueryException $exception) {
+                throw new RuntimeException("AC17: user_groups refused a valid probe row, so the probe proves nothing: {$exception->getMessage()}", previous: $exception);
+            }
 
-            throw new RuntimeException(
-                'AC17/C75: expected CHECK that is_instance=true only when organisation_id IS NULL on user_groups.',
-            );
-        } catch (QueryException) {
+            try {
+                $this->connection->table('user_groups')->insert($probeRow);
+            } catch (QueryException) {
+                return;
+            }
+
+            throw new RuntimeException($failure);
+        } finally {
             $this->connection->rollBack();
         }
     }
 
     /**
-     * A user_groups row for the rolled-back probes, with every column a
-     * product table may declare NOT NULL set, so the insert fails only on the
-     * rule it probes.
+     * A user_groups row for the rolled-back probes, every column set that a
+     * product table may declare NOT NULL.
      *
      * @return array<string, mixed>
      */
@@ -141,10 +154,12 @@ final class AssertsGroupTablesSchema
         return [
             'public_id' => (string) Str::uuid(),
             'name' => $name,
+            'description' => null,
+            'metadata' => null,
             'organisation_id' => $organisationId,
             'is_instance' => $isInstance,
-            'created_at' => now(), // @pest-mutate-ignore RemoveArrayItem: equivalent on the package tables, whose timestamps are nullable; kept for product tables that are not
-            'updated_at' => now(), // @pest-mutate-ignore RemoveArrayItem: same as created_at
+            'created_at' => now(),
+            'updated_at' => now(),
         ];
     }
 
@@ -308,8 +323,8 @@ final class AssertsGroupTablesSchema
                 );
             }
 
-            // MySQL and MariaDB report CASCADE in upper case, SQLite and PostgreSQL in lower case.
-            $onDelete = strtolower((string) $foreignKey['on_delete']); // @pest-mutate-ignore UnwrapStrtolower: equivalent on SQLite, where mutation runs; the engines job covers upper case
+            // Laravel's schema processors report the action in lower case on every engine.
+            $onDelete = $foreignKey['on_delete'] ?? 'no action';
 
             if ($onDelete !== 'cascade') {
                 throw new RuntimeException(

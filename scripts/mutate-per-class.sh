@@ -9,9 +9,11 @@
 # the JSON list the shared package matrix exports. MUTATE_SHARD of
 # MUTATE_SHARDS splits the files across parallel jobs.
 #
-# A file with no executable code (an interface, a plain enum) yields no
-# mutation and passes through --ignore-min-score-on-zero-mutations; every
-# other file must reach the minimum.
+# Only the files listed in DECLARATION_ONLY_FILES (interfaces, plain enums,
+# data-only events and exceptions) may yield no mutation; any other file
+# with no mutation fails, so a class cannot escape the gate by accident.
+# On a pull request the shared plan leaves src/Testing/ out; MUTATE_DIFF_BASE
+# (the base commit) adds the test helpers the pull request changed.
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
@@ -30,6 +32,9 @@ case "${MUTATE_SCOPE:-all}" in
         console.log(file);
       }
     ')
+    if [[ -n "${MUTATE_DIFF_BASE:-}" ]]; then
+      files="$(printf '%s\n%s\n' "${files}" "$(git diff --name-only --diff-filter=ACMR "${MUTATE_DIFF_BASE}...HEAD" -- 'src/Testing/*.php')" | sed '/^$/d' | LC_ALL=C sort -u)"
+    fi
     ;;
   *)
     echo "::error::MUTATE_SCOPE must be all or changed."
@@ -37,9 +42,38 @@ case "${MUTATE_SCOPE:-all}" in
     ;;
 esac
 
+DECLARATION_ONLY_FILES=(
+  src/Contracts/ActiveUsers.php
+  src/Contracts/ActorKind.php
+  src/Contracts/ActorResolver.php
+  src/Contracts/ApiActorScopeCheck.php
+  src/Contracts/AuthorizationResponder.php
+  src/Contracts/GroupRoleSource.php
+  src/Contracts/LegacyGateBefore.php
+  src/Contracts/PermissionVocabulary.php
+  src/Contracts/RoleCatalog.php
+  src/Contracts/TeamContext.php
+  src/Contracts/TwoFactorPolicy.php
+  src/Contracts/TwoFactorResponder.php
+  src/Events/PrincipalCreatedEvent.php
+  src/Events/PrincipalDeactivatedEvent.php
+  src/Events/SubjectErasedEvent.php
+  src/Laravel/NoTeamContext.php
+  src/Principals/DeactivationReason.php
+  src/Principals/PrincipalCreated.php
+  src/Principals/PrincipalDeactivated.php
+  src/Principals/PrincipalDirectory.php
+  src/Principals/UserHasPrincipalsException.php
+)
+
 minimum="${MUTATE_MIN:-95}"
 shard="${MUTATE_SHARD:-1}"
 shards="${MUTATE_SHARDS:-1}"
+
+if ! [[ "${shard}" =~ ^[0-9]+$ && "${shards}" =~ ^[0-9]+$ ]] || (( shards < 1 || shard < 1 || shard > shards )); then
+  echo "::error::MUTATE_SHARD must be between 1 and MUTATE_SHARDS."
+  exit 1
+fi
 position=0
 failed=0
 summary_rows=()
@@ -58,7 +92,14 @@ while IFS= read -r file; do
   echo "::group::Mutate ${file}"
   output="$(mktemp)"
   set +e
-  vendor/bin/pest --mutate --min="${minimum}" --path="${file}" --ignore-min-score-on-zero-mutations --parallel | tee "${output}"
+  zero_mutations_flag=()
+  for declaration_only_file in "${DECLARATION_ONLY_FILES[@]}"; do
+    if [[ "${file}" == "${declaration_only_file}" ]]; then
+      zero_mutations_flag=(--ignore-min-score-on-zero-mutations)
+    fi
+  done
+
+  vendor/bin/pest --mutate --min="${minimum}" --path="${file}" "${zero_mutations_flag[@]+"${zero_mutations_flag[@]}"}" --parallel | tee "${output}"
   status=${PIPESTATUS[0]}
   set -e
   echo "::endgroup::"
