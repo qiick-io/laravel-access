@@ -8,6 +8,7 @@ use Illuminate\Contracts\Config\Repository as ConfigRepository;
 use Illuminate\Contracts\Foundation\Application;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\ConfigurationUrlParser;
+use InvalidArgumentException;
 use Qiick\Access\Contracts\ActorResolver;
 use Qiick\Access\Contracts\AuthorizationResponder;
 use Qiick\Access\Contracts\GroupRoleSource;
@@ -15,6 +16,7 @@ use Qiick\Access\Contracts\LegacyGateBefore;
 use Qiick\Access\Contracts\RoleCatalog;
 use Qiick\Access\Contracts\TwoFactorPolicy;
 use Qiick\Access\Contracts\TwoFactorResponder;
+use Qiick\Access\Principals\Principal;
 use RuntimeException;
 use Stringable;
 
@@ -36,10 +38,12 @@ final class AccessBootChecks
         $config = $this->app->make(ConfigRepository::class);
 
         $this->assertRequiredBindings();
+        // Before the value checks: a legacy published config is named as such.
+        $this->assertNoLegacyMigrationsSwitch($config);
+        $this->assertConfigValues($config);
         $this->assertSpatiePermissionCheckMethodDisabled($config);
         $this->assertSpatieEventsEnabled($config);
         $this->assertEveryGuardClassified($config);
-        $this->assertNoLegacyMigrationsSwitch($config);
         $this->assertGateSelection($config);
         $this->assertConnectionNamesMatchTheirKeys($config);
     }
@@ -93,6 +97,76 @@ final class AccessBootChecks
             throw new RuntimeException(
                 "{$key} [{$memberModel}] uses the table [{$memberTable}], but user_group_user.user_id points at [".MigrationSettings::usersTable().']; set access.users_table or the member model to the same table (see docs/adoption.md).',
             );
+        }
+    }
+
+    /**
+     * A present but invalid access.* value stops the boot with its full key
+     * (F1): a typo such as "1" for a migration switch or a string for a guard
+     * list would otherwise read as a different setting than the product meant.
+     * Missing keys never reach here; the provider fills them with the shipped
+     * defaults. The gate switches are checked by assertGateSelection().
+     *
+     * @throws RuntimeException naming the first invalid key
+     * @throws InvalidArgumentException from the instance type and permission enum rules the migration and the vocabulary apply
+     */
+    public function assertConfigValues(ConfigRepository $config): void
+    {
+        foreach (['api_guards', 'web_guards', 'two_factor.exempt_route_names', 'principals.types'] as $key) {
+            $value = $config->get("access.{$key}");
+            $isListOfStrings = is_array($value) && array_is_list($value)
+                && array_filter($value, is_string(...)) === $value;
+
+            if ($key === 'principals.types' && ($value === [] || ! $isListOfStrings)) {
+                throw new RuntimeException("access.{$key} must be a non-empty list of strings.");
+            }
+
+            if (! $isListOfStrings) {
+                throw new RuntimeException("access.{$key} must be a list of strings.");
+            }
+        }
+
+        foreach (['trust_api_guard_in_console', 'migrations.groups', 'migrations.principals', 'principals.organisation_required'] as $key) {
+            if (! is_bool($config->get("access.{$key}"))) {
+                throw new RuntimeException("access.{$key} must be a boolean.");
+            }
+        }
+
+        // A non-Eloquent member class is allowed (it gets no group roles); a
+        // name that is no class would silently empty every group.
+        $memberModel = $config->get('access.group_member_model');
+
+        if (is_string($memberModel) && $memberModel !== '' && ! class_exists($memberModel)) {
+            throw new RuntimeException("access.group_member_model must be null or an existing class, got [{$memberModel}].");
+        }
+
+        foreach (['users_table', 'group_member_model', 'gate_shadow_log_channel'] as $key) {
+            $value = $config->get("access.{$key}");
+
+            if ($value !== null && (! is_string($value) || $value === '')) {
+                throw new RuntimeException("access.{$key} must be null or a non-empty string.");
+            }
+        }
+
+        // The same rules the principals migration applies, before a migration needs them.
+        MigrationSettings::instanceTypes();
+
+        // An empty ACCESS_PERMISSION_ENUM reads as '': unset, like null.
+        $permissionEnum = $config->get('access.permission_enum');
+
+        if ($permissionEnum !== null && ! is_string($permissionEnum)) {
+            throw new RuntimeException('access.permission_enum must be null or a backed enum class name.');
+        }
+
+        if (is_string($permissionEnum) && $permissionEnum !== '') {
+            // The vocabulary's own check, so boot and the first request agree.
+            new SpatiePermissionVocabulary($permissionEnum);
+        }
+
+        $principalModel = $config->get('access.principals.model');
+
+        if (! is_string($principalModel) || ! is_a($principalModel, Principal::class, true)) {
+            throw new RuntimeException('access.principals.model must be '.Principal::class.' or a subclass.');
         }
     }
 
