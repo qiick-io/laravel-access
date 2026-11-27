@@ -18,6 +18,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- A published `config/access.php` missing a nested key takes the package
+  default for it (F1); lists stay the product's own. A present but invalid
+  `access.*` value stops the boot with the key in the message
+  (`AccessBootChecks::assertConfigValues()`).
+
 - `EffectivePermissionResolver::isWithinOwnerCeiling()`: the owner ceiling
   behind an API key. A super-admin alone can now issue working keys: their
   ceiling is every permission of the vocabulary, never the Gate bypass
