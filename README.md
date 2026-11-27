@@ -8,6 +8,10 @@
 
 # qiick/laravel-access
 
+[![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/qiick-io/laravel-access/badge)](https://scorecard.dev/viewer/?uri=github.com/qiick-io/laravel-access)
+
+PHPStan at `max` and the existing CI checks cover PHP. CodeQL covers GitHub Actions and JavaScript/TypeScript.
+
 > **Pre-1.0 (`0.x`): public APIs may change in any minor. Not on Packagist yet.**
 
 Shared authorization core for qiick Laravel products: one `Gate::before`, the
