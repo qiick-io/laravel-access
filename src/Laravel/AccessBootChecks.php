@@ -132,6 +132,14 @@ final class AccessBootChecks
             }
         }
 
+        // A non-Eloquent member class is allowed (it gets no group roles); a
+        // name that is no class would silently empty every group.
+        $memberModel = $config->get('access.group_member_model');
+
+        if (is_string($memberModel) && $memberModel !== '' && ! class_exists($memberModel)) {
+            throw new RuntimeException("access.group_member_model must be null or an existing class, got [{$memberModel}].");
+        }
+
         foreach (['users_table', 'group_member_model', 'gate_shadow_log_channel'] as $key) {
             $value = $config->get("access.{$key}");
 

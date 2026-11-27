@@ -68,4 +68,39 @@ final class PublishedConfigBootPhpUnitTest extends PackageTestCase
             $this->assertSame('access.migrations.groups must be a boolean.', $exception->getMessage());
         }
     }
+
+    public function test_an_explicitly_null_section_stops_the_boot_with_its_key(): void
+    {
+        // Codex review of #60: null is a value, not an omitted key.
+        $this->publishedConfig['migrations'] = null;
+
+        try {
+            parent::setUp();
+            $this->fail('Boot accepted access.migrations = null.');
+        } catch (RuntimeException $exception) {
+            HandleExceptions::flushState($this);
+            $this->assertSame('access.migrations must be a map of settings, got null.', $exception->getMessage());
+        }
+    }
+
+    public function test_an_omitted_section_gets_its_defaults(): void
+    {
+        unset($this->publishedConfig['migrations']);
+        parent::setUp();
+
+        $this->assertSame(['groups' => true, 'principals' => true], config('access.migrations'));
+    }
+
+    public function test_a_group_member_model_that_is_not_a_class_stops_the_boot(): void
+    {
+        $this->publishedConfig['group_member_model'] = 'App\\Models\\Missing';
+
+        try {
+            parent::setUp();
+            $this->fail('Boot accepted a group member model that does not exist.');
+        } catch (RuntimeException $exception) {
+            HandleExceptions::flushState($this);
+            $this->assertSame('access.group_member_model must be null or an existing class, got [App\\Models\\Missing].', $exception->getMessage());
+        }
+    }
 }

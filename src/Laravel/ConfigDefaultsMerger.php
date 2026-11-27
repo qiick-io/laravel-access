@@ -25,7 +25,7 @@ final class ConfigDefaultsMerger
 {
     /**
      * @param  array<array-key, mixed>  $defaults  the shipped config
-     * @param  mixed  $published  the product's config, which wins on every key it sets; null when not published
+     * @param  mixed  $published  the product's config, which wins on every key it sets; [] when not published
      * @param  string  $key  the config key of this level, for the error message
      * @return array<array-key, mixed>
      *
@@ -33,13 +33,12 @@ final class ConfigDefaultsMerger
      */
     public static function merge(array $defaults, mixed $published, string $key = 'access'): array
     {
-        $published ??= [];
-
         if (! is_array($published) || ($published !== [] && array_is_list($published))) {
             throw new RuntimeException("{$key} must be a map of settings, got ".get_debug_type($published).'.');
         }
 
         foreach ($defaults as $name => $default) {
+            // Only an omitted key takes the default: an explicit null is a value (F1).
             if (! array_key_exists($name, $published)) {
                 $published[$name] = $default;
 

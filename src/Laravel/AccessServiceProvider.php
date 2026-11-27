@@ -228,7 +228,7 @@ final class AccessServiceProvider extends ServiceProvider
             throw new RuntimeException('The shipped config/access.php must return an array.');
         }
 
-        $config->set('access', ConfigDefaultsMerger::merge($defaults, $config->get('access')));
+        $config->set('access', ConfigDefaultsMerger::merge($defaults, $config->get('access', [])));
     }
 
     private function registerGateBefore(): void
