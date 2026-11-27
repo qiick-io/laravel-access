@@ -12,6 +12,8 @@ use Qiick\Access\Contracts\RoleCatalog;
 use Qiick\Access\Contracts\TwoFactorPolicy;
 use Qiick\Access\Contracts\TwoFactorResponder;
 use Qiick\Access\Laravel\AccessBootChecks;
+use Qiick\Access\Tests\Support\ArchiveConnectionUser;
+use Qiick\Access\Tests\Support\DefaultConnectionNameUser;
 use Qiick\Access\Tests\Support\SpatieUser;
 
 it('fails when register_permission_check_method is true (R4)', function (): void {
@@ -286,36 +288,25 @@ it('fails when a connection key or a connection nested in another can stand for 
 it('fails when the group member model uses another connection than the group tables (#27)', function (): void {
     $checks = app(AccessBootChecks::class);
     $config = app(ConfigRepository::class);
-    $defaultConnection = (string) $config->get('database.default');
     $config->set('database.connections.archive', ['driver' => 'sqlite', 'database' => ':memory:']);
-    $archiveUser = new class extends SpatieUser
-    {
-        protected $connection = 'archive';
-    };
-    $defaultUser = new class extends SpatieUser
-    {
-        protected $connection = null;
-    };
 
     // The configured member model, then the auth provider model as fallback.
-    $config->set('access.group_member_model', $archiveUser::class);
+    $config->set('access.group_member_model', ArchiveConnectionUser::class);
 
     expect(fn () => $checks->assertGroupMemberModelOnTheGroupConnection($config))
-        ->toThrow(RuntimeException::class, 'access.group_member_model ['.$archiveUser::class.'] uses the connection [archive]')
-        ->and(fn () => $checks->assert())->toThrow(RuntimeException::class, 'uses the connection [archive]');
+        ->toThrow(RuntimeException::class, 'access.group_member_model ['.ArchiveConnectionUser::class.'] uses the connection [archive]');
 
     $config->set('access.group_member_model', null);
-    $config->set('auth.providers.users.model', $archiveUser::class);
+    $config->set('auth.providers.users.model', ArchiveConnectionUser::class);
 
     expect(fn () => $checks->assertGroupMemberModelOnTheGroupConnection($config))
-        ->toThrow(RuntimeException::class, 'auth.providers.users.model ['.$archiveUser::class.'] uses the connection [archive]');
+        ->toThrow(RuntimeException::class, 'auth.providers.users.model ['.ArchiveConnectionUser::class.'] uses the connection [archive]');
 
-    // The default connection, by null or by its own name, boots.
-    $config->set('auth.providers.users.model', $defaultUser::class);
+    // The default connection, left null or named on every instance, boots.
+    $config->set('auth.providers.users.model', SpatieUser::class);
     $checks->assertGroupMemberModelOnTheGroupConnection($config);
 
-    $config->set('auth.providers.users.model', SpatieUser::class);
-    $config->set('access.group_member_model', (new class extends SpatieUser {})->setConnection($defaultConnection)::class);
+    $config->set('access.group_member_model', DefaultConnectionNameUser::class);
     $checks->assertGroupMemberModelOnTheGroupConnection($config);
 
     // No Eloquent member model (a database auth provider, or none) leaves

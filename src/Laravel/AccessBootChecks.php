@@ -10,6 +10,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\ConfigurationUrlParser;
 use Qiick\Access\Contracts\ActorResolver;
 use Qiick\Access\Contracts\AuthorizationResponder;
+use Qiick\Access\Contracts\GroupRoleSource;
 use Qiick\Access\Contracts\LegacyGateBefore;
 use Qiick\Access\Contracts\RoleCatalog;
 use Qiick\Access\Contracts\TwoFactorPolicy;
@@ -41,7 +42,6 @@ final class AccessBootChecks
         $this->assertNoLegacyMigrationsSwitch($config);
         $this->assertGateSelection($config);
         $this->assertConnectionNamesMatchTheirKeys($config);
-        $this->assertGroupMemberModelOnTheGroupConnection($config);
     }
 
     /**
@@ -51,7 +51,12 @@ final class AccessBootChecks
      * fails closed), so the misconfiguration is refused at boot instead of
      * silently emptying every group (issue #27). A member model that is not
      * an Eloquent model gets no group roles either and has no connection to
-     * compare.
+     * compare, and a product that binds its own GroupRoleSource keeps its
+     * own membership store, so neither is checked.
+     *
+     * It builds the member model, whose boot hooks may need services the
+     * product sets up in its own providers, so the package provider runs it
+     * once the application has booted, not from assert().
      *
      * @throws RuntimeException naming the key, the model and its connection
      */
@@ -61,6 +66,10 @@ final class AccessBootChecks
         $memberModel = $config->get($key);
 
         if (! is_string($memberModel) || ! is_subclass_of($memberModel, Model::class)) {
+            return;
+        }
+
+        if (! $this->app->make(GroupRoleSource::class) instanceof EloquentGroupRoleSource) {
             return;
         }
 

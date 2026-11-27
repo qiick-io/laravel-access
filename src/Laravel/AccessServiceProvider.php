@@ -167,6 +167,9 @@ final class AccessServiceProvider extends ServiceProvider
         $config = $this->app->make(ConfigRepository::class);
 
         $this->app->make(AccessBootChecks::class)->assert();
+        $this->app->booted(function (): void {
+            $this->app->make(AccessBootChecks::class)->assertGroupMemberModelOnTheGroupConnection($this->app->make(ConfigRepository::class));
+        });
 
         foreach (['groups', 'principals'] as $migrationSet) {
             if ($config->get("access.migrations.{$migrationSet}", true) === true) {
