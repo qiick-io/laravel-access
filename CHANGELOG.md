@@ -53,6 +53,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   singleton it kept the first scope's resolver in an Octane worker or a
   queue worker, so a cached super-admin verdict could outlive a demotion in
   `isProtectedFrom()` and `canManageSuperAdmins()`.
+- Boot fails when the group member model (`access.group_member_model`, else
+  `auth.providers.users.model`) uses a connection other than the default
+  one, where the group tables are read. Before, every group silently
+  granted nothing to its members.
 - Product policies can use `EffectivePermissionResolver::isActorSuperAdmin()`
   to deny super-admin authority to API actors. `SuperAdminGuard` now applies
   this check when protecting super-admin accounts. See `UPGRADING.md`.
