@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Qiick\Access\Laravel;
 
 use Closure;
+use Illuminate\Container\Container;
 use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Contracts\Config\Repository as ConfigRepository;
 use Illuminate\Contracts\Foundation\Application;
@@ -46,8 +47,8 @@ final class GateBeforeSelector
         $config = $this->app->make(ConfigRepository::class);
         $isPackageGate = $config->get('access.use_package_gate', true) === true;
         $packageGate = $this->app->make(GateBefore::class)(...);
-        // Resolved per call, as GateBefore resolves its scoped dependencies.
-        $legacyGate = fn (?Authenticatable $user, string $ability, array $arguments = []): ?bool => $this->app
+        // Resolved per call from the current container, as GateBefore does (#69).
+        $legacyGate = fn (?Authenticatable $user, string $ability, array $arguments = []): ?bool => Container::getInstance()
             ->make(LegacyGateBefore::class)
             ->decide($user, $ability, $arguments);
 
@@ -113,7 +114,7 @@ final class GateBeforeSelector
      */
     private function logContext(string $ability, array $arguments): array
     {
-        $actor = $this->app->make(ActorResolver::class)->current();
+        $actor = Container::getInstance()->make(ActorResolver::class)->current();
 
         return [
             'ability' => $ability,
@@ -125,8 +126,8 @@ final class GateBeforeSelector
 
     private function logger(): LoggerInterface
     {
-        $channel = $this->app->make(ConfigRepository::class)->get('access.gate_shadow_log_channel');
-        $logs = $this->app->make(LogManager::class);
+        $channel = Container::getInstance()->make(ConfigRepository::class)->get('access.gate_shadow_log_channel');
+        $logs = Container::getInstance()->make(LogManager::class);
 
         return is_string($channel) && $channel !== '' ? $logs->channel($channel) : $logs;
     }

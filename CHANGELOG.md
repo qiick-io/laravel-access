@@ -66,6 +66,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `auth.providers.users.model`) uses a connection other than the default
   one, where the group tables are read. Before, every group silently
   granted nothing to its members.
+- Under Octane, `GateBefore` and the package's listeners use the container
+  of the current request, so a role change or `forget()` reaches the
+  resolver the request reads (#69). `GateBefore` takes no constructor
+  argument any more.
 - Product policies can use `EffectivePermissionResolver::isActorSuperAdmin()`
   to deny super-admin authority to API actors. `SuperAdminGuard` now applies
   this check when protecting super-admin accounts. See `UPGRADING.md`.
