@@ -30,7 +30,11 @@ events, and the migrations (see `docs/reference-contracts.md`). Code tagged
   `Qiick\Access\Events\PrincipalCreatedEvent` and
   `Qiick\Access\Principals\PrincipalDeactivated` →
   `Qiick\Access\Events\PrincipalDeactivatedEvent` (listeners,
-  `Event::listen()`, `Event::fake()` and `$listen` maps).
+  `Event::listen()`, `Event::fake()` and `$listen` maps). Deploy it as a
+  cutover: drain queued listeners of the old events under the old code
+  first (their payloads name the old classes), then run `event:cache` again
+  if the product caches events, and restart queue workers and Octane, so
+  the API-key revocation listener is never skipped.
 
 - API keys of a super-admin owner: `EnsureUserHasPermission`,
   `AuthorizesWithPermission` and `PrincipalCeiling::allows()` now allow
